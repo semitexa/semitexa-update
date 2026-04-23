@@ -51,8 +51,7 @@ Phase ordering is global. Dependency ordering is applied within the same phase.
 
 The package exposes three commands:
 
-- `update` — apply pending update steps in phase and DAG order
-- `update --dry-run` — print the execution plan without changing state
+- `update` — apply pending update steps in phase and DAG order; use `--dry-run` to print the execution plan without changing state
 - `update:plan` — compute and display pending steps only
 - `update:status` — show applied, pending, and failed counts by phase
 
