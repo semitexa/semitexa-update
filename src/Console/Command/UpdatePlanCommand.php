@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Semitexa\Update\Console;
+namespace Semitexa\Update\Console\Command;
 
 use Semitexa\Core\Attribute\AsCommand;
 use Semitexa\Core\Console\Command\BaseCommand;
@@ -17,8 +17,8 @@ use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
-#[AsCommand(name: 'update', description: 'Apply pending update steps in phase + DAG order.')]
-final class UpdateCommand extends BaseCommand
+#[AsCommand(name: 'update:plan', description: 'Compute the update plan without executing anything.')]
+final class UpdatePlanCommand extends BaseCommand
 {
     public function __construct(
         private readonly UpdateRunnerFactory $runnerFactory,
@@ -28,61 +28,35 @@ final class UpdateCommand extends BaseCommand
 
     protected function configure(): void
     {
-        $this
-            ->addOption('connection', 'c', InputOption::VALUE_REQUIRED, 'Connection name for the journal', 'default')
-            ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Compute and print the plan without executing.');
+        $this->addOption('connection', 'c', InputOption::VALUE_REQUIRED, 'Connection name for the journal', 'default');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $io = new SymfonyStyle($input, $output);
         $connection = (string) ($input->getOption('connection') ?: 'default');
-        $dryRun = (bool) $input->getOption('dry-run');
 
         try {
-            $runner = $this->runnerFactory->create($connection);
-            $plan = $runner->plan();
+            $plan = $this->runnerFactory->create($connection)->plan();
         } catch (UpdateException $e) {
             $io->error($e->getMessage());
             return Command::FAILURE;
         }
 
-        if ($plan->isEmpty()) {
-            $io->success('Nothing to update.');
-            return Command::SUCCESS;
-        }
+        $this->render($io, $plan);
 
-        $this->renderPlan($io, $plan);
-
-        if ($dryRun) {
-            $io->note('Dry-run: no steps were executed.');
-            return Command::SUCCESS;
-        }
-
-        $report = $runner->run($plan);
-
-        $io->newLine();
-        if ($report->isSuccess()) {
-            $io->success(sprintf(
-                'Update completed: %d step(s) applied in %dms.',
-                count($report->applied),
-                $report->durationMs,
-            ));
-            return Command::SUCCESS;
-        }
-
-        $io->error(sprintf(
-            "Update failed at step %s after %d successful step(s).\nError: %s",
-            (string) $report->failedFqcn,
-            count($report->applied),
-            (string) $report->failedError,
-        ));
-        return Command::FAILURE;
+        return Command::SUCCESS;
     }
 
-    private function renderPlan(SymfonyStyle $io, Plan $plan): void
+    private function render(SymfonyStyle $io, Plan $plan): void
     {
         $io->title('Semitexa Update Plan');
+
+        if ($plan->isEmpty()) {
+            $io->success('Nothing to update. All discovered steps are applied.');
+            $io->writeln(sprintf('Applied: %d step(s).', $plan->appliedCount()));
+            return;
+        }
 
         foreach (UpdatePhase::order() as $phase) {
             $pending = $plan->pendingByPhase[$phase->value] ?? [];
@@ -91,8 +65,7 @@ final class UpdateCommand extends BaseCommand
             }
             $io->section(sprintf('%s  (pending: %d)', strtoupper($phase->value), count($pending)));
             $io->listing(array_map(
-                static fn (DiscoveredStep $s): string =>
-                    $s->fqcn . ($s->description !== null && $s->description !== '' ? ' — ' . $s->description : ''),
+                static fn (DiscoveredStep $s): string => self::describe($s),
                 $pending,
             ));
         }
@@ -102,5 +75,14 @@ final class UpdateCommand extends BaseCommand
             $plan->pendingCount(),
             $plan->appliedCount(),
         ));
+    }
+
+    private static function describe(DiscoveredStep $step): string
+    {
+        $line = $step->fqcn;
+        if ($step->description !== null && $step->description !== '') {
+            $line .= ' — ' . $step->description;
+        }
+        return $line;
     }
 }
