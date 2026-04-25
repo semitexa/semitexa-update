@@ -1,0 +1,11 @@
+services:
+  remote-target:
+    build:
+      context: .
+    environment:
+      AUTHORIZED_KEY: ${AUTHORIZED_KEY:?AUTHORIZED_KEY is required}
+    ports:
+      - "${REMOTE_SMOKE_SSH_PORT:-22220}:22"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${REMOTE_SMOKE_SHARED_ROOT:?REMOTE_SMOKE_SHARED_ROOT is required}:${REMOTE_SMOKE_SHARED_ROOT:?REMOTE_SMOKE_SHARED_ROOT is required}

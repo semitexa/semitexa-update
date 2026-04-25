@@ -1,6 +1,6 @@
 {
   "name": "semitexa/update",
-  "description": "Semitexa Update — attribute-driven update step pipeline with journal, DAG, and phased execution",
+  "description": "Semitexa Update — update lifecycle: package version detection, framework auto-deploy, remote bootstrap, and post-schema data patches",
   "type": "semitexa-module",
   "license": "MIT",
   "authors": [
@@ -33,8 +33,8 @@
   "keywords": [
     "semitexa",
     "update",
-    "migrations",
-    "upgrade",
+    "data-patches",
+    "framework-update",
     "platform"
   ]
 }

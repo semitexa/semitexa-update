@@ -5,61 +5,95 @@ declare(strict_types=1);
 namespace Semitexa\Update\Runner;
 
 use Semitexa\Orm\Adapter\DatabaseAdapterInterface;
-use Semitexa\Update\Context\UpdateContext;
-use Semitexa\Update\Contract\UpdateStepInterface;
-use Semitexa\Update\Discovery\DiscoveredStep;
-use Semitexa\Update\Discovery\UpdateStepDiscovery;
-use Semitexa\Update\Exception\StepExecutionException;
+use Semitexa\Update\Context\DataPatchContext;
+use Semitexa\Update\Contract\DataPatchInterface;
+use Semitexa\Update\Discovery\DataPatchDiscovery;
+use Semitexa\Update\Discovery\DiscoveredPatch;
+use Semitexa\Update\Enum\UpdatePhase;
+use Semitexa\Update\Exception\PatchExecutionException;
 use Semitexa\Update\Exception\UpdateException;
 use Semitexa\Update\Journal\JournalRepository;
 use Semitexa\Update\Planner\DagBuilder;
 use Semitexa\Update\Planner\Plan;
+use Semitexa\Update\Schema\SchemaCompatibilityChecker;
 use Throwable;
 
 /**
- * Top-level orchestrator. Composes discovery + DAG + journal + execution.
+ * Orchestrates the data-patch half of the update lifecycle.
  *
- * V1 contract:
+ * Contract:
  *   - plan() returns a Plan; no side effects except ensuring the journal table exists.
- *   - run() applies pending steps in phase/topological order; stops on first failure.
+ *   - run() applies pending patches in phase/topological order; stops on first failure.
+ *   - Each patch is gated by SchemaCompatibilityChecker; a gated patch is skipped (not failed).
  *   - The journal row transitions pending -> applied on success, pending -> failed on error.
- *   - Step bodies are responsible for their own transactions and idempotency.
+ *   - Patch bodies are responsible for their own transactions and idempotency.
+ *   - Schema migrations are NOT this runner's job: ORM is the only owner of structural
+ *     database changes (`orm:diff` / `orm:sync`). The DDL keyword guard in
+ *     DataPatchContext rejects patches that try to issue DDL.
  */
 final class UpdateRunner
 {
     public function __construct(
-        private readonly UpdateStepDiscovery $discovery,
+        private readonly DataPatchDiscovery $discovery,
         private readonly DagBuilder $dagBuilder,
         private readonly JournalRepository $journal,
         private readonly DatabaseAdapterInterface $adapter,
+        private readonly SchemaCompatibilityChecker $compatibilityChecker,
+        private readonly ?string $semitexaVersion = null,
     ) {
     }
 
     public function plan(): Plan
     {
         $this->journal->ensureSchema();
-        $steps = $this->discovery->discover();
-        $entries = $this->journal->findAllByFqcn();
-        return $this->dagBuilder->build($steps, $entries);
+        $patches = $this->discovery->discover();
+        $entries = $this->journal->findAllByIdentity();
+        return $this->dagBuilder->build($patches, $entries);
     }
 
     public function run(?Plan $plan = null): RunReport
     {
+        return $this->runPhases($plan, UpdatePhase::order());
+    }
+
+    /**
+     * Run only the patches whose phase is in $phases. Used by the orchestrator
+     * to interleave Pre/Apply/Post around the ORM schema-sync step.
+     *
+     * @param list<UpdatePhase> $phases
+     */
+    public function runPhases(?Plan $plan, array $phases): RunReport
+    {
         $plan ??= $this->plan();
+        $allowed = [];
+        foreach ($phases as $phase) {
+            $allowed[$phase->value] = true;
+        }
 
         $startedAt = $this->now();
         $startMicro = microtime(true);
 
         $applied = [];
-        $failedFqcn = null;
+        $skipped = [];
+        $failedIdentity = null;
         $failedError = null;
 
-        foreach ($plan->pendingOrdered() as $step) {
+        foreach ($plan->pendingOrdered() as $patch) {
+            if (!isset($allowed[$patch->phase->value])) {
+                continue;
+            }
+
+            $compat = $this->compatibilityChecker->check($patch, $this->semitexaVersion);
+            if (!$compat->compatible) {
+                $skipped[] = new SkippedPatch($patch->identity, $compat->reasons);
+                continue;
+            }
+
             try {
-                $this->executeStep($step);
-                $applied[] = $step->fqcn;
-            } catch (StepExecutionException $e) {
-                $failedFqcn = $step->fqcn;
+                $this->executePatch($patch);
+                $applied[] = $patch->identity;
+            } catch (PatchExecutionException $e) {
+                $failedIdentity = $patch->identity;
                 $failedError = $e->getPrevious()?->getMessage() ?? $e->getMessage();
                 break;
             }
@@ -70,7 +104,8 @@ final class UpdateRunner
 
         return new RunReport(
             applied: $applied,
-            failedFqcn: $failedFqcn,
+            skipped: $skipped,
+            failedIdentity: $failedIdentity,
             failedError: $failedError,
             startedAt: $startedAt,
             completedAt: $completedAt,
@@ -78,47 +113,59 @@ final class UpdateRunner
         );
     }
 
-    private function executeStep(DiscoveredStep $step): void
+    private function executePatch(DiscoveredPatch $patch): void
     {
-        $this->journal->markPending($step->fqcn, $step->phase, $step->checksum);
+        $this->journal->markPending(
+            module: $patch->module,
+            patchId: $patch->id,
+            patchFqcn: $patch->fqcn,
+            phase: $patch->phase,
+            checksum: $patch->checksum,
+            semitexaVersion: $this->semitexaVersion,
+        );
 
         $startMicro = microtime(true);
         try {
-            $instance = $this->instantiate($step->fqcn);
+            $instance = $this->instantiate($patch->fqcn);
             $instance->apply($this->makeContext());
         } catch (Throwable $e) {
             $durationMs = (int) round((microtime(true) - $startMicro) * 1000);
-            $this->journal->markFailed($step->fqcn, $this->formatError($e), $durationMs);
-            throw new StepExecutionException($step->fqcn, $e);
+            $this->journal->markFailed($patch->module, $patch->id, $this->formatError($e), $durationMs);
+            throw new PatchExecutionException($patch->identity, $patch->fqcn, $e);
         }
 
         $durationMs = (int) round((microtime(true) - $startMicro) * 1000);
-        $this->journal->markApplied($step->fqcn, $durationMs);
+        $this->journal->markApplied(
+            module: $patch->module,
+            patchId: $patch->id,
+            durationMs: $durationMs,
+            appliedDbStateHash: null,
+        );
     }
 
     /**
      * @param class-string $fqcn
      */
-    private function instantiate(string $fqcn): UpdateStepInterface
+    private function instantiate(string $fqcn): DataPatchInterface
     {
         if (!class_exists($fqcn)) {
-            throw new UpdateException("Step class {$fqcn} cannot be loaded.");
+            throw new UpdateException("Patch class {$fqcn} cannot be loaded.");
         }
         /** @var object $instance */
         $instance = new $fqcn();
-        if (!$instance instanceof UpdateStepInterface) {
+        if (!$instance instanceof DataPatchInterface) {
             throw new UpdateException(sprintf(
-                'Step %s must implement %s.',
+                'Patch %s must implement %s.',
                 $fqcn,
-                UpdateStepInterface::class,
+                DataPatchInterface::class,
             ));
         }
         return $instance;
     }
 
-    private function makeContext(): UpdateContext
+    private function makeContext(): DataPatchContext
     {
-        return new UpdateContext($this->adapter);
+        return new DataPatchContext($this->adapter);
     }
 
     private function now(): string

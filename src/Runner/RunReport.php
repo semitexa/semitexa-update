@@ -4,16 +4,24 @@ declare(strict_types=1);
 
 namespace Semitexa\Update\Runner;
 
+/**
+ * Outcome of a single UpdateRunner::run() invocation.
+ *
+ * Patches are reported by identity ("module:id") rather than FQCN — identity is the
+ * stable key tracked in the journal.
+ */
 final readonly class RunReport
 {
     /**
-     * @param list<class-string> $applied    Steps that ran to success this invocation.
-     * @param class-string|null  $failedFqcn First step that failed, or null on success.
-     * @param string|null        $failedError Error message from the failed step.
+     * @param list<string>      $applied        Identities of patches applied this invocation.
+     * @param list<SkippedPatch>$skipped        Patches gated out by the schema-compatibility check.
+     * @param string|null       $failedIdentity First patch that failed, or null on success.
+     * @param string|null       $failedError    Error message from the failed patch.
      */
     public function __construct(
         public array $applied,
-        public ?string $failedFqcn,
+        public array $skipped,
+        public ?string $failedIdentity,
         public ?string $failedError,
         public string $startedAt,
         public string $completedAt,
@@ -23,6 +31,6 @@ final readonly class RunReport
 
     public function isSuccess(): bool
     {
-        return $this->failedFqcn === null;
+        return $this->failedIdentity === null;
     }
 }

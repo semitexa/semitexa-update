@@ -4,37 +4,37 @@ declare(strict_types=1);
 
 namespace Semitexa\Update\Planner;
 
-use Semitexa\Update\Discovery\DiscoveredStep;
+use Semitexa\Update\Discovery\DiscoveredPatch;
 use Semitexa\Update\Enum\UpdatePhase;
 use Semitexa\Update\Journal\JournalEntry;
 
 /**
- * Output of DagBuilder. Holds pending and applied steps partitioned by phase,
+ * Output of DagBuilder. Holds pending and applied patches partitioned by phase,
  * already in a legal execution order within each phase.
  */
 final readonly class Plan
 {
     /**
-     * @param array<string, list<DiscoveredStep>> $pendingByPhase   Keyed by UpdatePhase->value.
-     * @param array<string, list<DiscoveredStep>> $appliedByPhase   Keyed by UpdatePhase->value.
-     * @param array<string, JournalEntry>         $journalByFqcn    For reporting / status.
+     * @param array<string, list<DiscoveredPatch>> $pendingByPhase   Keyed by UpdatePhase->value.
+     * @param array<string, list<DiscoveredPatch>> $appliedByPhase   Keyed by UpdatePhase->value.
+     * @param array<string, JournalEntry>          $journalByIdentity Keyed by "module:patch_id".
      */
     public function __construct(
         public array $pendingByPhase,
         public array $appliedByPhase,
-        public array $journalByFqcn,
+        public array $journalByIdentity,
     ) {
     }
 
     /**
-     * @return list<DiscoveredStep>
+     * @return list<DiscoveredPatch>
      */
     public function pendingOrdered(): array
     {
         $ordered = [];
         foreach (UpdatePhase::order() as $phase) {
-            foreach ($this->pendingByPhase[$phase->value] ?? [] as $step) {
-                $ordered[] = $step;
+            foreach ($this->pendingByPhase[$phase->value] ?? [] as $patch) {
+                $ordered[] = $patch;
             }
         }
         return $ordered;

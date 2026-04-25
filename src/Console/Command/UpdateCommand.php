@@ -6,10 +6,11 @@ namespace Semitexa\Update\Console\Command;
 
 use Semitexa\Core\Attribute\AsCommand;
 use Semitexa\Core\Console\Command\BaseCommand;
-use Semitexa\Update\Discovery\DiscoveredStep;
+use Semitexa\Update\Discovery\DiscoveredPatch;
 use Semitexa\Update\Enum\UpdatePhase;
 use Semitexa\Update\Exception\UpdateException;
-use Semitexa\Update\Planner\Plan;
+use Semitexa\Update\Runner\OrchestratorPlanReport;
+use Semitexa\Update\Runner\OrchestratorStage;
 use Semitexa\Update\Runner\UpdateRunnerFactory;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -17,7 +18,14 @@ use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
-#[AsCommand(name: 'update', description: 'Apply pending update steps in phase + DAG order.')]
+/**
+ * Runs the full update lifecycle: Pre patches → ORM schema sync → Apply patches → Post patches.
+ *
+ * The ORM schema-sync step is delegated to OrmMigrationGateway; this command never
+ * issues DDL itself. If ORM is the only owner of schema migrations, this command is
+ * the only operator-facing entry point that asks ORM to do its job.
+ */
+#[AsCommand(name: 'update', description: 'Run the full update sweep: data patches + ORM schema sync.')]
 final class UpdateCommand extends BaseCommand
 {
     public function __construct(
@@ -30,7 +38,8 @@ final class UpdateCommand extends BaseCommand
     {
         $this
             ->addOption('connection', 'c', InputOption::VALUE_REQUIRED, 'Connection name for the journal', 'default')
-            ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Compute and print the plan without executing.');
+            ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Compute and print the plan without executing.')
+            ->addOption('allow-destructive', null, InputOption::VALUE_NONE, 'Permit destructive ORM operations (DROP / type narrow).');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -38,69 +47,126 @@ final class UpdateCommand extends BaseCommand
         $io = new SymfonyStyle($input, $output);
         $connection = (string) ($input->getOption('connection') ?: 'default');
         $dryRun = (bool) $input->getOption('dry-run');
+        $allowDestructive = (bool) $input->getOption('allow-destructive');
 
         try {
-            $runner = $this->runnerFactory->create($connection);
-            $plan = $runner->plan();
+            $orchestrator = $this->runnerFactory->orchestrator($connection);
+            $planReport = $orchestrator->plan();
         } catch (UpdateException $e) {
             $io->error($e->getMessage());
             return Command::FAILURE;
         }
 
-        if ($plan->isEmpty()) {
-            $io->success('Nothing to update.');
-            return Command::SUCCESS;
-        }
-
-        $this->renderPlan($io, $plan);
+        $this->renderPlan($io, $planReport);
 
         if ($dryRun) {
-            $io->note('Dry-run: no steps were executed.');
+            try {
+                $stages = $orchestrator->run(allowDestructive: $allowDestructive, dryRun: true);
+            } catch (UpdateException $e) {
+                $io->error($e->getMessage());
+                return Command::FAILURE;
+            }
+            $this->renderStages($io, $stages);
+            $io->note('Dry-run: no patches and no DDL were executed.');
             return Command::SUCCESS;
         }
 
-        $report = $runner->run($plan);
-
-        $io->newLine();
-        if ($report->isSuccess()) {
-            $io->success(sprintf(
-                'Update completed: %d step(s) applied in %dms.',
-                count($report->applied),
-                $report->durationMs,
-            ));
-            return Command::SUCCESS;
+        try {
+            $stages = $orchestrator->run(allowDestructive: $allowDestructive, dryRun: false);
+        } catch (UpdateException $e) {
+            $io->error($e->getMessage());
+            return Command::FAILURE;
         }
 
-        $io->error(sprintf(
-            "Update failed at step %s after %d successful step(s).\nError: %s",
-            (string) $report->failedFqcn,
-            count($report->applied),
-            (string) $report->failedError,
-        ));
-        return Command::FAILURE;
+        $this->renderStages($io, $stages);
+
+        foreach ($stages as $stage) {
+            if (!$stage->isSuccess()) {
+                $io->error(sprintf('Update aborted at stage "%s".', $stage->name));
+                return Command::FAILURE;
+            }
+        }
+
+        $io->success('Update completed.');
+        return Command::SUCCESS;
     }
 
-    private function renderPlan(SymfonyStyle $io, Plan $plan): void
+    private function renderPlan(SymfonyStyle $io, OrchestratorPlanReport $planReport): void
     {
         $io->title('Semitexa Update Plan');
 
+        $io->section('ORM schema');
+        $io->writeln('  ' . $planReport->schemaStatus->summary);
+        if (!$planReport->schemaStatus->inSync) {
+            $io->writeln(sprintf(
+                '  Pending: %d operation(s)%s.',
+                $planReport->schemaStatus->pendingOperations,
+                $planReport->schemaStatus->destructiveOperations > 0
+                    ? sprintf(' (%d destructive)', $planReport->schemaStatus->destructiveOperations)
+                    : '',
+            ));
+        }
+
         foreach (UpdatePhase::order() as $phase) {
-            $pending = $plan->pendingByPhase[$phase->value] ?? [];
+            $pending = $planReport->patchPlan->pendingByPhase[$phase->value] ?? [];
             if ($pending === []) {
                 continue;
             }
-            $io->section(sprintf('%s  (pending: %d)', strtoupper($phase->value), count($pending)));
+            $io->section(sprintf('Patches: %s (pending: %d)', strtoupper($phase->value), count($pending)));
             $io->listing(array_map(
-                static fn (DiscoveredStep $s): string =>
-                    $s->fqcn . ($s->description !== null && $s->description !== '' ? ' — ' . $s->description : ''),
+                static fn (DiscoveredPatch $p): string =>
+                    $p->identity . ($p->description !== null && $p->description !== '' ? ' — ' . $p->description : ''),
                 $pending,
             ));
         }
 
         $io->writeln(sprintf(
-            'Summary: %d pending, %d already applied.',
-            $plan->pendingCount(),
-            $plan->appliedCount(),
+            'Summary: %d patches pending, %d already applied.',
+            $planReport->patchPlan->pendingCount(),
+            $planReport->patchPlan->appliedCount(),
         ));
+    }
+
+    /**
+     * @param list<OrchestratorStage> $stages
+     */
+    private function renderStages(SymfonyStyle $io, array $stages): void
+    {
+        $io->newLine();
+        $io->title('Stages');
+
+        foreach ($stages as $stage) {
+            $io->section($stage->name);
+            if ($stage->syncResult !== null) {
+                $io->writeln('  ' . $stage->syncResult->summary);
+                continue;
+            }
+            $report = $stage->report;
+            if ($report === null) {
+                continue;
+            }
+
+            $io->writeln(sprintf(
+                '  applied: %d  ·  skipped: %d  ·  duration: %dms',
+                count($report->applied),
+                count($report->skipped),
+                $report->durationMs,
+            ));
+
+            foreach ($report->skipped as $skipped) {
+                $io->writeln('    skipped ' . $skipped->identity . ':');
+                foreach ($skipped->reasons as $reason) {
+                    $io->writeln('      · ' . $reason);
+                }
+            }
+
+            if (!$report->isSuccess()) {
+                $io->writeln(sprintf(
+                    '    <error>FAILED at %s: %s</error>',
+                    (string) $report->failedIdentity,
+                    (string) $report->failedError,
+                ));
+            }
+        }
     }
 }
