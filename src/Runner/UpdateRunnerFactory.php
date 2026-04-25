@@ -19,8 +19,8 @@ use Semitexa\Update\Schema\SchemaCompatibilityChecker;
  * Builds the data-patch runner and the full update orchestrator for a given
  * connection. Console commands use this factory so wiring lives in one place.
  *
- * The framework version (used for the patch min/max-Semitexa gate) is derived
- * from the project's installed.json when available; null disables the gate.
+ * The framework version gate is opt-in for now: callers may pass the current
+ * Semitexa version explicitly, and `null` disables min/max-Semitexa checks.
  */
 #[AsService]
 final class UpdateRunnerFactory

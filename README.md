@@ -78,7 +78,7 @@ ordering is applied within the same phase.
 | `dependencies` | `list<string>` | Other patch identities (`module:id`) that must apply first. |
 | `requires` | `list<class-string>` | `[FromTable]`-attributed entities the patch reads/writes. Runner verifies their tables and columns are live in DB. |
 | `requiresColumns` | `array<string, list<string>>` | Explicit `table => columns` map for ad-hoc column gating. |
-| `minSemitexa` / `maxSemitexa` | `?string` | Optional framework version range. |
+| `minSemitexa` / `maxSemitexa` | `?string` | Optional framework version range. Enforced when the caller provides the current Semitexa version to the runner/orchestrator. |
 | `description` | `?string` | Operator-facing summary. |
 | `reversible` | `bool` | Whether the patch class defines a `revert()` method. |
 

@@ -60,7 +60,7 @@ final class RunAutoDeploySystemdScriptTest extends TestCase
      */
     private function runWrapper(string $projectRoot): array
     {
-        $script = dirname(__DIR__, 3) . '/tools/run-auto-deploy-systemd.sh';
+        $script = dirname(__DIR__, 4) . '/tools/run-auto-deploy-systemd.sh';
         $command = sprintf(
             'bash %s %s 2>&1',
             escapeshellarg($script),

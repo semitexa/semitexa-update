@@ -13,7 +13,7 @@ final class RemoteScenarioResolverTest extends TestCase
     public function testResolvesUbuntuScenarioDirectory(): void
     {
         $resolver = new RemoteScenarioResolver();
-        $packageRoot = dirname(__DIR__, 3);
+        $packageRoot = dirname(__DIR__, 4);
         $path = $resolver->resolve(
             new RemoteOsInfo('ubuntu', '22.04', 'Ubuntu 22.04 LTS'),
             $packageRoot,

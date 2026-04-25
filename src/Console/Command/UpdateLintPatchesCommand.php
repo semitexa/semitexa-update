@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Update\Console\Command;
 
+use JsonException;
 use ReflectionClass;
 use Semitexa\Core\Attribute\AsCommand;
 use Semitexa\Core\Attribute\InjectAsReadonly;
@@ -71,7 +72,12 @@ final class UpdateLintPatchesCommand extends BaseCommand
                 'issues'        => $issues,
                 'status'        => $issues === [] ? 'ok' : 'fail',
             ];
-            $output->writeln(json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT));
+            try {
+                $output->writeln(json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR));
+            } catch (JsonException $e) {
+                $output->writeln('<error>Failed to encode lint result as JSON: ' . $e->getMessage() . '</error>');
+                return Command::FAILURE;
+            }
             return $issues === [] ? Command::SUCCESS : Command::FAILURE;
         }
 

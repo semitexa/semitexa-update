@@ -139,22 +139,33 @@ final class SchemaCompatibilityChecker
 
     private function extractTableName(FromTable $fromTable): ?string
     {
-        // Tolerate either a public `name` property or a `name()` accessor — ORM
-        // attribute shape may evolve; this read is best-effort.
-        if (property_exists($fromTable, 'name')) {
-            return (string) $fromTable->name;
-        }
         if (method_exists($fromTable, 'name')) {
             return (string) $fromTable->name();
         }
-        return null;
+        return $this->readPublicProperty($fromTable, 'name');
     }
 
     private function extractColumnName(Column $column, string $propertyDefault): ?string
     {
-        if (property_exists($column, 'name') && $column->name !== null && $column->name !== '') {
-            return (string) $column->name;
+        $name = $this->readPublicProperty($column, 'name');
+        if ($name !== null && $name !== '') {
+            return $name;
         }
         return $propertyDefault;
+    }
+
+    private function readPublicProperty(object $attribute, string $property): ?string
+    {
+        if (!property_exists($attribute, $property)) {
+            return null;
+        }
+
+        $reflection = new \ReflectionProperty($attribute, $property);
+        if (!$reflection->isPublic()) {
+            return null;
+        }
+
+        $value = $reflection->getValue($attribute);
+        return is_string($value) ? $value : null;
     }
 }

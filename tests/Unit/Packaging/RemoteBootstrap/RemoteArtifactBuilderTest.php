@@ -53,6 +53,10 @@ final class RemoteArtifactBuilderTest extends TestCase
 
     public function testBuildsReleaseArtifactWithoutPackagesAndWithVendorContents(): void
     {
+        if (shell_exec('command -v composer') === null) {
+            self::markTestSkipped('composer binary is required for the release-artifact path');
+        }
+
         mkdir($this->projectRoot . '/packages/semitexa-site/src', 0777, true);
 
         file_put_contents($this->projectRoot . '/packages/semitexa-site/src/Site.php', "<?php\n");
