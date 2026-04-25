@@ -6,7 +6,7 @@ namespace Semitexa\Update\Console\Command;
 
 use Semitexa\Core\Attribute\AsCommand;
 use Semitexa\Core\Console\Command\BaseCommand;
-use Semitexa\Update\Enum\StepStatus;
+use Semitexa\Update\Enum\PatchStatus;
 use Semitexa\Update\Enum\UpdatePhase;
 use Semitexa\Update\Exception\UpdateException;
 use Semitexa\Update\Runner\UpdateRunnerFactory;
@@ -54,11 +54,11 @@ final class UpdateStatusCommand extends BaseCommand
 
         $failed = [];
         $lastApplied = null;
-        foreach ($plan->journalByFqcn as $entry) {
-            if ($entry->status === StepStatus::Failed) {
+        foreach ($plan->journalByIdentity as $entry) {
+            if ($entry->status === PatchStatus::Failed) {
                 $failed[] = $entry;
             }
-            if ($entry->status === StepStatus::Applied) {
+            if ($entry->status === PatchStatus::Applied) {
                 if ($lastApplied === null || $entry->completedAt > $lastApplied->completedAt) {
                     $lastApplied = $entry;
                 }
@@ -68,18 +68,18 @@ final class UpdateStatusCommand extends BaseCommand
         if ($lastApplied !== null) {
             $io->writeln(sprintf(
                 'Last applied: %s at %s (%dms).',
-                $lastApplied->stepFqcn,
+                $lastApplied->identity(),
                 (string) $lastApplied->completedAt,
                 (int) $lastApplied->durationMs,
             ));
         } else {
-            $io->writeln('No steps have been applied yet.');
+            $io->writeln('No patches have been applied yet.');
         }
 
         if ($failed !== []) {
-            $io->warning(sprintf('%d step(s) in failed state — operator intervention required:', count($failed)));
+            $io->warning(sprintf('%d patch(es) in failed state — operator intervention required:', count($failed)));
             foreach ($failed as $entry) {
-                $io->writeln(sprintf('  - %s : %s', $entry->stepFqcn, (string) $entry->error));
+                $io->writeln(sprintf('  - %s : %s', $entry->identity(), (string) $entry->error));
             }
             return Command::FAILURE;
         }

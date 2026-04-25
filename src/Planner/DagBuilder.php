@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Semitexa\Update\Planner;
 
-use Semitexa\Update\Discovery\DiscoveredStep;
-use Semitexa\Update\Enum\StepStatus;
+use Semitexa\Update\Discovery\DiscoveredPatch;
+use Semitexa\Update\Enum\PatchStatus;
 use Semitexa\Update\Enum\UpdatePhase;
 use Semitexa\Update\Exception\DagCycleException;
 use Semitexa\Update\Exception\UpdateException;
@@ -13,44 +13,44 @@ use Semitexa\Update\Journal\JournalEntry;
 
 /**
  * Validates dependencies, detects cycles, and emits a Plan with per-phase
- * topologically-sorted lists of pending and applied steps.
+ * topologically-sorted lists of pending and applied patches.
  *
- * Cross-phase dependencies are permitted only forward (PreDeploy -> Deploy
- * -> Finalize); backward cross-phase deps are a phase-ordering violation,
- * not a DAG error, and are rejected up front.
+ * Patches identify each other by `(module, id)` rendered as "module:id". Cross-phase
+ * dependencies are permitted only forward (Pre -> Apply -> Post); backward cross-phase
+ * deps are a phase-ordering violation, not a DAG error, and are rejected up front.
  */
 final class DagBuilder
 {
     /**
-     * @param list<DiscoveredStep>        $steps
-     * @param array<string, JournalEntry> $journalByFqcn
+     * @param list<DiscoveredPatch>       $patches
+     * @param array<string, JournalEntry> $journalByIdentity
      */
-    public function build(array $steps, array $journalByFqcn): Plan
+    public function build(array $patches, array $journalByIdentity): Plan
     {
-        $byFqcn = [];
-        foreach ($steps as $step) {
-            $byFqcn[$step->fqcn] = $step;
+        $byIdentity = [];
+        foreach ($patches as $patch) {
+            $byIdentity[$patch->identity] = $patch;
         }
 
-        $this->validateDependencies($byFqcn);
+        $this->validateDependencies($byIdentity);
 
         $pendingByPhase = [];
         $appliedByPhase = [];
         foreach (UpdatePhase::order() as $phase) {
-            $phaseSteps = array_values(array_filter(
-                $steps,
-                static fn (DiscoveredStep $s): bool => $s->phase === $phase,
+            $phasePatches = array_values(array_filter(
+                $patches,
+                static fn (DiscoveredPatch $p): bool => $p->phase === $phase,
             ));
-            $ordered = $this->topoSortPhase($phaseSteps);
+            $ordered = $this->topoSortPhase($phasePatches);
 
             $pending = [];
             $applied = [];
-            foreach ($ordered as $step) {
-                $entry = $journalByFqcn[$step->fqcn] ?? null;
-                if ($entry !== null && $entry->status === StepStatus::Applied) {
-                    $applied[] = $step;
+            foreach ($ordered as $patch) {
+                $entry = $journalByIdentity[$patch->identity] ?? null;
+                if ($entry !== null && $entry->status === PatchStatus::Applied) {
+                    $applied[] = $patch;
                 } else {
-                    $pending[] = $step;
+                    $pending[] = $patch;
                 }
             }
 
@@ -58,35 +58,35 @@ final class DagBuilder
             $appliedByPhase[$phase->value] = $applied;
         }
 
-        return new Plan($pendingByPhase, $appliedByPhase, $journalByFqcn);
+        return new Plan($pendingByPhase, $appliedByPhase, $journalByIdentity);
     }
 
     /**
-     * @param array<class-string, DiscoveredStep> $byFqcn
+     * @param array<string, DiscoveredPatch> $byIdentity
      */
-    private function validateDependencies(array $byFqcn): void
+    private function validateDependencies(array $byIdentity): void
     {
         $phaseOrder = [];
         foreach (UpdatePhase::order() as $i => $phase) {
             $phaseOrder[$phase->value] = $i;
         }
 
-        foreach ($byFqcn as $step) {
-            foreach ($step->dependencies as $dep) {
-                if (!isset($byFqcn[$dep])) {
+        foreach ($byIdentity as $patch) {
+            foreach ($patch->dependencies as $dep) {
+                if (!isset($byIdentity[$dep])) {
                     throw new UpdateException(sprintf(
-                        'Step %s depends on unknown step %s. Either the dependency is missing #[AsUpdateStep], or the package is not installed.',
-                        $step->fqcn,
+                        'Patch %s depends on unknown patch %s. Either the dependency is missing #[AsDataPatch], or the package is not installed.',
+                        $patch->identity,
                         $dep,
                     ));
                 }
 
-                $depPhase = $byFqcn[$dep]->phase;
-                if ($phaseOrder[$depPhase->value] > $phaseOrder[$step->phase->value]) {
+                $depPhase = $byIdentity[$dep]->phase;
+                if ($phaseOrder[$depPhase->value] > $phaseOrder[$patch->phase->value]) {
                     throw new UpdateException(sprintf(
-                        'Step %s (phase=%s) depends on %s (phase=%s), which is a later phase. Dependencies must flow forward in phase order.',
-                        $step->fqcn,
-                        $step->phase->value,
+                        'Patch %s (phase=%s) depends on %s (phase=%s), which is a later phase. Dependencies must flow forward in phase order.',
+                        $patch->identity,
+                        $patch->phase->value,
                         $dep,
                         $depPhase->value,
                     ));
@@ -96,59 +96,59 @@ final class DagBuilder
     }
 
     /**
-     * Kahn's algorithm using only intra-phase edges. Ties broken by FQCN for
+     * Kahn's algorithm using only intra-phase edges. Ties broken by identity for
      * deterministic output. A cycle is detected when the queue empties before
      * all nodes are processed; cycle membership is surfaced via DFS for a
      * readable error message.
      *
-     * @param  list<DiscoveredStep> $phaseSteps
-     * @return list<DiscoveredStep>
+     * @param  list<DiscoveredPatch> $phasePatches
+     * @return list<DiscoveredPatch>
      */
-    private function topoSortPhase(array $phaseSteps): array
+    private function topoSortPhase(array $phasePatches): array
     {
-        if ($phaseSteps === []) {
+        if ($phasePatches === []) {
             return [];
         }
 
         $inPhase = [];
-        foreach ($phaseSteps as $step) {
-            $inPhase[$step->fqcn] = $step;
+        foreach ($phasePatches as $patch) {
+            $inPhase[$patch->identity] = $patch;
         }
 
         /** @var array<string, array<string, true>> $edges dep -> set of dependents */
         $edges = [];
         /** @var array<string, int> $inDegree */
         $inDegree = [];
-        foreach ($inPhase as $fqcn => $step) {
-            $inDegree[$fqcn] = 0;
-            $edges[$fqcn] = [];
+        foreach ($inPhase as $identity => $patch) {
+            $inDegree[$identity] = 0;
+            $edges[$identity] = [];
         }
-        foreach ($inPhase as $step) {
-            foreach ($step->dependencies as $dep) {
+        foreach ($inPhase as $patch) {
+            foreach ($patch->dependencies as $dep) {
                 if (!isset($inPhase[$dep])) {
                     // Cross-phase dep; already enforced by phase order.
                     continue;
                 }
-                $edges[$dep][$step->fqcn] = true;
-                $inDegree[$step->fqcn]++;
+                $edges[$dep][$patch->identity] = true;
+                $inDegree[$patch->identity]++;
             }
         }
 
         $ready = [];
-        foreach ($inDegree as $fqcn => $deg) {
+        foreach ($inDegree as $identity => $deg) {
             if ($deg === 0) {
-                $ready[] = $fqcn;
+                $ready[] = $identity;
             }
         }
         sort($ready);
 
         $ordered = [];
         while ($ready !== []) {
-            $fqcn = array_shift($ready);
-            $ordered[] = $inPhase[$fqcn];
+            $identity = array_shift($ready);
+            $ordered[] = $inPhase[$identity];
 
             $newlyReady = [];
-            foreach (array_keys($edges[$fqcn]) as $dependent) {
+            foreach (array_keys($edges[$identity]) as $dependent) {
                 $inDegree[$dependent]--;
                 if ($inDegree[$dependent] === 0) {
                     $newlyReady[] = $dependent;
@@ -171,8 +171,8 @@ final class DagBuilder
     /**
      * DFS-based cycle extraction — only runs when a cycle has already been proven to exist.
      *
-     * @param array<class-string, DiscoveredStep> $inPhase
-     * @return list<class-string>
+     * @param array<string, DiscoveredPatch> $inPhase
+     * @return list<string>
      */
     private function findCycle(array $inPhase): array
     {

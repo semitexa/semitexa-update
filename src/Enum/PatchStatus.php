@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Update\Enum;
 
-enum StepStatus: string
+enum PatchStatus: string
 {
     case Pending = 'pending';
     case Applied = 'applied';

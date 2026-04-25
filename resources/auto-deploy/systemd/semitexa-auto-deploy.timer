@@ -1,0 +1,13 @@
+[Unit]
+Description=Run Semitexa automatic framework deployment poller
+
+[Timer]
+OnBootSec=2m
+OnUnitActiveSec=@@INTERVAL@@
+AccuracySec=1m
+Persistent=true
+Unit=@@UNIT_PREFIX@@.service
+
+[Install]
+WantedBy=timers.target
+

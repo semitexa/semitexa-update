@@ -6,7 +6,7 @@ namespace Semitexa\Update\Console\Command;
 
 use Semitexa\Core\Attribute\AsCommand;
 use Semitexa\Core\Console\Command\BaseCommand;
-use Semitexa\Update\Discovery\DiscoveredStep;
+use Semitexa\Update\Discovery\DiscoveredPatch;
 use Semitexa\Update\Enum\UpdatePhase;
 use Semitexa\Update\Exception\UpdateException;
 use Semitexa\Update\Planner\Plan;
@@ -53,8 +53,8 @@ final class UpdatePlanCommand extends BaseCommand
         $io->title('Semitexa Update Plan');
 
         if ($plan->isEmpty()) {
-            $io->success('Nothing to update. All discovered steps are applied.');
-            $io->writeln(sprintf('Applied: %d step(s).', $plan->appliedCount()));
+            $io->success('Nothing to update. All discovered patches are applied.');
+            $io->writeln(sprintf('Applied: %d patch(es).', $plan->appliedCount()));
             return;
         }
 
@@ -65,7 +65,7 @@ final class UpdatePlanCommand extends BaseCommand
             }
             $io->section(sprintf('%s  (pending: %d)', strtoupper($phase->value), count($pending)));
             $io->listing(array_map(
-                static fn (DiscoveredStep $s): string => self::describe($s),
+                static fn (DiscoveredPatch $p): string => self::describe($p),
                 $pending,
             ));
         }
@@ -77,11 +77,11 @@ final class UpdatePlanCommand extends BaseCommand
         ));
     }
 
-    private static function describe(DiscoveredStep $step): string
+    private static function describe(DiscoveredPatch $patch): string
     {
-        $line = $step->fqcn;
-        if ($step->description !== null && $step->description !== '') {
-            $line .= ' — ' . $step->description;
+        $line = $patch->identity;
+        if ($patch->description !== null && $patch->description !== '') {
+            $line .= ' — ' . $patch->description;
         }
         return $line;
     }

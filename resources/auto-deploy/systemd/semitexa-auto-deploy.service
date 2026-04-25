@@ -1,0 +1,13 @@
+[Unit]
+Description=Semitexa automatic framework deployment for @@PROJECT_ROOT@@
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=@@RUN_AS_USER@@
+WorkingDirectory=@@PROJECT_ROOT@@
+Environment=HOME=@@HOME_DIR@@
+ExecStart=@@RUN_SCRIPT@@ "@@PROJECT_ROOT@@"
+NoNewPrivileges=true
+PrivateTmp=true
