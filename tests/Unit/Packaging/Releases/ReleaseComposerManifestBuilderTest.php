@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Update\Tests\Unit\Packaging\Releases;
 
 use PHPUnit\Framework\TestCase;
-use Semitexa\Update\Packaging\Releases\Support\ReleaseComposerManifestBuilder;
+use Semitexa\Update\Application\Service\Packaging\Releases\Support\ReleaseComposerManifestBuilder;
 
 final class ReleaseComposerManifestBuilderTest extends TestCase
 {

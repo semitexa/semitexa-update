@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Update\Tests\Unit\Packaging\Releases;
 
 use PHPUnit\Framework\TestCase;
-use Semitexa\Update\Packaging\Releases\Source\ComposerVcsTagReleaseSource;
+use Semitexa\Update\Application\Service\Packaging\Releases\Source\ComposerVcsTagReleaseSource;
 
 final class ComposerVcsTagReleaseSourceTest extends TestCase
 {

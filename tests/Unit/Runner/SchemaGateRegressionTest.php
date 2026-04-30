@@ -11,16 +11,16 @@ use Semitexa\Orm\Adapter\SqliteAdapter;
 use Semitexa\Orm\Attribute\Column;
 use Semitexa\Orm\Attribute\FromTable;
 use Semitexa\Update\Context\DataPatchContext;
-use Semitexa\Update\Contract\DataPatchInterface;
+use Semitexa\Update\Domain\Contract\DataPatchInterface;
 use Semitexa\Update\Discovery\DataPatchDiscovery;
 use Semitexa\Update\Discovery\DiscoveredPatch;
-use Semitexa\Update\Enum\UpdatePhase;
-use Semitexa\Update\Journal\JournalRepository;
-use Semitexa\Update\Planner\DagBuilder;
-use Semitexa\Update\Planner\Plan;
-use Semitexa\Update\Runner\UpdateRunner;
-use Semitexa\Update\Schema\LiveSchemaInspector;
-use Semitexa\Update\Schema\SchemaCompatibilityChecker;
+use Semitexa\Update\Domain\Enum\UpdatePhase;
+use Semitexa\Update\Application\Service\JournalRepository;
+use Semitexa\Update\Application\Service\DagBuilder;
+use Semitexa\Update\Domain\Model\Plan;
+use Semitexa\Update\Application\Service\UpdateRunner;
+use Semitexa\Update\Application\Service\LiveSchemaInspector;
+use Semitexa\Update\Application\Service\SchemaCompatibilityChecker;
 
 final class SchemaGateRegressionTest extends TestCase
 {

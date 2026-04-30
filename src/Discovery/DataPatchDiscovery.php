@@ -7,7 +7,7 @@ namespace Semitexa\Update\Discovery;
 use ReflectionClass;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Update\Attribute\AsDataPatch;
-use Semitexa\Update\Contract\DataPatchInterface;
+use Semitexa\Update\Domain\Contract\DataPatchInterface;
 use Semitexa\Update\Exception\UpdateException;
 
 /**

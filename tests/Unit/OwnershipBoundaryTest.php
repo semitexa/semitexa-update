@@ -46,7 +46,7 @@ final class OwnershipBoundaryTest extends TestCase
 
             // The journal table CREATE is the one place where DDL is legitimate
             // (the journal is per-database bookkeeping that the runner owns).
-            if ($relative === '/Journal/JournalRepository.php') {
+            if ($relative === '/Application/Service/JournalRepository.php') {
                 continue;
             }
 
@@ -66,7 +66,7 @@ final class OwnershipBoundaryTest extends TestCase
         self::assertSame(
             [],
             $offending,
-            "Only Journal/JournalRepository.php may issue DDL inside semitexa-update.\n"
+            "Only Application/Service/JournalRepository.php may issue DDL inside semitexa-update.\n"
             . 'Schema migrations belong to semitexa-orm. Offending: ' . implode('; ', $offending),
         );
     }

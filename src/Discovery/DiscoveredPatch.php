@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Update\Discovery;
 
-use Semitexa\Update\Enum\UpdatePhase;
+use Semitexa\Update\Domain\Enum\UpdatePhase;
 
 /**
  * Immutable snapshot of a data patch as discovered from attributes.
