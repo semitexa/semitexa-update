@@ -39,8 +39,8 @@ namespace App\Update;
 use App\Domain\Article;
 use Semitexa\Update\Attribute\AsDataPatch;
 use Semitexa\Update\Context\DataPatchContext;
-use Semitexa\Update\Contract\DataPatchInterface;
-use Semitexa\Update\Enum\UpdatePhase;
+use Semitexa\Update\Domain\Contract\DataPatchInterface;
+use Semitexa\Update\Domain\Enum\UpdatePhase;
 
 #[AsDataPatch(
     id: 'backfill-article-slugs',
