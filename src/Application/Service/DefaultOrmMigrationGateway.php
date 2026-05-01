@@ -13,7 +13,7 @@ use Semitexa\Update\Domain\Model\SchemaSyncResult;
 use Semitexa\Core\Attribute\AsService;
 use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Attribute\SatisfiesServiceContract;
-use Semitexa\Orm\Connection\ConnectionRegistry;
+use Semitexa\Orm\Application\Service\Connection\ConnectionRegistry;
 use Semitexa\Update\Exception\UpdateException;
 use Throwable;
 

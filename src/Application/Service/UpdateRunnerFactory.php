@@ -7,7 +7,7 @@ namespace Semitexa\Update\Application\Service;
 use Semitexa\Core\Attribute\AsService;
 use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Discovery\ClassDiscovery;
-use Semitexa\Orm\Connection\ConnectionRegistry;
+use Semitexa\Orm\Application\Service\Connection\ConnectionRegistry;
 use Semitexa\Update\Discovery\DataPatchDiscovery;
 use Semitexa\Update\Application\Service\JournalRepository;
 use Semitexa\Update\Domain\Contract\OrmMigrationGatewayInterface;
