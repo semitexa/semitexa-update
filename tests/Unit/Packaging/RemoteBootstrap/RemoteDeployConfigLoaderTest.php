@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Update\Tests\Unit\Packaging\RemoteBootstrap;
 
 use PHPUnit\Framework\TestCase;
-use Semitexa\Update\Packaging\RemoteBootstrap\Support\RemoteDeployConfigLoader;
+use Semitexa\Update\Application\Service\Packaging\RemoteBootstrap\Support\RemoteDeployConfigLoader;
 
 final class RemoteDeployConfigLoaderTest extends TestCase
 {

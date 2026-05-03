@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 use Semitexa\Core\Support\ProjectRoot;
-use Semitexa\Dev\Console\Command\DeployBootstrapRemoteCommand;
+use Semitexa\Dev\Application\Console\Command\DeployBootstrapRemoteCommand;
 use Symfony\Component\Console\Tester\CommandTester;
 
 require dirname(__DIR__, 3) . '/vendor/autoload.php';

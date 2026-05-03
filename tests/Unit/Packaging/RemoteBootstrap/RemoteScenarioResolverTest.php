@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Semitexa\Update\Tests\Unit\Packaging\RemoteBootstrap;
 
 use PHPUnit\Framework\TestCase;
-use Semitexa\Update\Packaging\RemoteBootstrap\Data\RemoteOsInfo;
-use Semitexa\Update\Packaging\RemoteBootstrap\Support\RemoteScenarioResolver;
+use Semitexa\Update\Domain\Model\RemoteOsInfo;
+use Semitexa\Update\Application\Service\Packaging\RemoteBootstrap\Support\RemoteScenarioResolver;
 
 final class RemoteScenarioResolverTest extends TestCase
 {

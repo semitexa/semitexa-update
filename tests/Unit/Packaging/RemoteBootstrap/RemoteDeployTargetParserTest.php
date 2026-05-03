@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Update\Tests\Unit\Packaging\RemoteBootstrap;
 
 use PHPUnit\Framework\TestCase;
-use Semitexa\Update\Packaging\RemoteBootstrap\Support\RemoteDeployTargetParser;
+use Semitexa\Update\Application\Service\Packaging\RemoteBootstrap\Support\RemoteDeployTargetParser;
 
 final class RemoteDeployTargetParserTest extends TestCase
 {

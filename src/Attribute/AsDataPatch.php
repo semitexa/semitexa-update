@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Update\Attribute;
 
 use Attribute;
-use Semitexa\Update\Enum\UpdatePhase;
+use Semitexa\Update\Domain\Enum\UpdatePhase;
 
 /**
  * Marks a class as a post-schema data patch.

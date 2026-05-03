@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Update\Tests\Unit\Packaging\RemoteBootstrap;
 
 use PHPUnit\Framework\TestCase;
-use Semitexa\Update\Packaging\RemoteBootstrap\Support\RemoteOsReleaseParser;
+use Semitexa\Update\Application\Service\Packaging\RemoteBootstrap\Support\RemoteOsReleaseParser;
 
 final class RemoteOsReleaseParserTest extends TestCase
 {
