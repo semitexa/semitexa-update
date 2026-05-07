@@ -1,40 +1,41 @@
 {
-  "name": "semitexa/update",
-  "description": "Semitexa Update — update lifecycle: package version detection, framework auto-deploy, remote bootstrap, and post-schema data patches",
-  "type": "semitexa-module",
-  "license": "MIT",
-  "authors": [
-    {
-      "name": "Semitexa",
-      "email": "support@semitexa.com"
-    }
-  ],
-  "require": {
-    "php": "^8.4",
-    "semitexa/core": "*",
-    "semitexa/orm": "*",
-    "symfony/console": "^6.0 || ^7.0"
-  },
-  "autoload": {
-    "psr-4": {
-      "Semitexa\\Update\\": "src/"
-    }
-  },
-  "autoload-dev": {
-    "psr-4": {
-      "Semitexa\\Update\\Tests\\": "tests/"
-    }
-  },
-  "extra": {
-    "semitexa-module": {
-      "extends": null
-    }
-  },
-  "keywords": [
-    "semitexa",
-    "update",
-    "data-patches",
-    "framework-update",
-    "platform"
-  ]
+    "name": "semitexa/update",
+    "description": "Semitexa Update — update lifecycle: package version detection, framework auto-deploy, remote bootstrap, and post-schema data patches",
+    "type": "semitexa-module",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Semitexa",
+            "email": "support@semitexa.com"
+        }
+    ],
+    "require": {
+        "php": "^8.4",
+        "semitexa/core": "*",
+        "semitexa/orm": "*",
+        "symfony/console": "^6.0 || ^7.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Semitexa\\Update\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Semitexa\\Update\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "semitexa-module": {
+            "extends": null
+        }
+    },
+    "keywords": [
+        "semitexa",
+        "update",
+        "data-patches",
+        "framework-update",
+        "platform"
+    ],
+    "version": "v0.0.1"
 }
