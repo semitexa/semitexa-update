@@ -1,6 +1,6 @@
 {
     "name": "semitexa/update",
-    "description": "Semitexa Update — update lifecycle: package version detection, framework auto-deploy, remote bootstrap, and post-schema data patches",
+    "description": "Semitexa Update \u2014 update lifecycle: package version detection, framework auto-deploy, remote bootstrap, and post-schema data patches",
     "type": "semitexa-module",
     "license": "MIT",
     "authors": [
@@ -36,6 +36,5 @@
         "data-patches",
         "framework-update",
         "platform"
-    ],
-    "version": "v0.0.1"
+    ]
 }
