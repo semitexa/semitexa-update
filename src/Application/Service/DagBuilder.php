@@ -10,6 +10,7 @@ use Semitexa\Update\Domain\Enum\UpdatePhase;
 use Semitexa\Update\Exception\DagCycleException;
 use Semitexa\Update\Exception\UpdateException;
 use Semitexa\Update\Domain\Model\JournalEntry;
+use Semitexa\Update\Domain\Model\Plan;
 
 /**
  * Validates dependencies, detects cycles, and emits a Plan with per-phase

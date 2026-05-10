@@ -26,7 +26,9 @@ final class FrameworkDeploymentPlanner
     public function plan(string $projectRoot): DeploymentPlan
     {
         $config = $this->configLoader->load();
-        $installedPackages = $this->packageReader->read($projectRoot);
+        $classified = $this->packageReader->classify($projectRoot);
+        $installedPackages = $classified->vendor;
+        $localWorkspacePackages = $classified->localWorkspace;
         $packageUpdates = [];
         $privateLatestVersion = null;
 
@@ -60,6 +62,7 @@ final class FrameworkDeploymentPlanner
             selectedVersion: $selectedVersion,
             updateAvailable: $updateAvailable,
             reason: $reason,
+            localWorkspacePackages: $localWorkspacePackages,
         );
     }
 
