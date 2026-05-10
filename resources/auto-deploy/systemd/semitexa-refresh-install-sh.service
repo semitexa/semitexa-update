@@ -1,0 +1,13 @@
+[Unit]
+Description=Refresh public install.sh from semitexa-ultimate master for @@PROJECT_ROOT@@
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=@@RUN_AS_USER@@
+WorkingDirectory=@@PROJECT_ROOT@@
+Environment=HOME=@@HOME_DIR@@
+ExecStart=@@REFRESH_SCRIPT@@ "@@PROJECT_ROOT@@"
+NoNewPrivileges=true
+PrivateTmp=true

@@ -73,8 +73,12 @@ final class FrameworkDeploymentExecutor
 
     private function composerUpdateCommand(string $projectRoot): string
     {
+        // --prefer-dist: vendor/semitexa/* is shipped as dist (no .git/), but composer.json
+        // declares vcs repositories, so without this flag composer will choose source mode
+        // for some packages and fail with "GitDownloader.php line 155: The .git directory
+        // is missing" the next time those packages upgrade.
         return sprintf(
-            '%s update %s --with-all-dependencies --no-dev --no-interaction --optimize-autoloader --working-dir=%s',
+            '%s update %s --with-all-dependencies --prefer-dist --no-dev --no-interaction --optimize-autoloader --working-dir=%s',
             $this->composerBinary($projectRoot),
             escapeshellarg('semitexa/*'),
             escapeshellarg($projectRoot),

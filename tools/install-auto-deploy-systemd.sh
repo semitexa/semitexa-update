@@ -6,6 +6,9 @@ PACKAGE_ROOT="$(CDPATH= cd -- "${SCRIPT_DIR}/.." && pwd)"
 SERVICE_TEMPLATE="${PACKAGE_ROOT}/resources/auto-deploy/systemd/semitexa-auto-deploy.service"
 TIMER_TEMPLATE="${PACKAGE_ROOT}/resources/auto-deploy/systemd/semitexa-auto-deploy.timer"
 RUN_SCRIPT_TEMPLATE="${PACKAGE_ROOT}/tools/run-auto-deploy-systemd.sh"
+REFRESH_SERVICE_TEMPLATE="${PACKAGE_ROOT}/resources/auto-deploy/systemd/semitexa-refresh-install-sh.service"
+REFRESH_TIMER_TEMPLATE="${PACKAGE_ROOT}/resources/auto-deploy/systemd/semitexa-refresh-install-sh.timer"
+REFRESH_SCRIPT_TEMPLATE="${PACKAGE_ROOT}/tools/refresh-install-sh.sh"
 
 usage() {
     cat <<'EOF'
@@ -13,11 +16,13 @@ Usage:
   install-auto-deploy-systemd.sh <project-root>
 
 Environment:
-  SEMITEXA_AUTO_DEPLOY_UNIT_PREFIX      Systemd unit prefix. Default: semitexa-auto-deploy
-  SEMITEXA_AUTO_DEPLOY_TIMER_INTERVAL   Timer interval. Default: 15m
-  SEMITEXA_AUTO_DEPLOY_SYSTEMD_DIR      Destination dir. Default: /etc/systemd/system
-  SEMITEXA_AUTO_DEPLOY_RUN_AS_USER      Service user. Default: root
-  SEMITEXA_AUTO_DEPLOY_ENABLE           Enable and start timer when set to 1. Default: 0
+  SEMITEXA_AUTO_DEPLOY_UNIT_PREFIX        Systemd unit prefix. Default: semitexa-auto-deploy
+  SEMITEXA_AUTO_DEPLOY_TIMER_INTERVAL     Timer interval. Default: 15m
+  SEMITEXA_AUTO_DEPLOY_SYSTEMD_DIR        Destination dir. Default: /etc/systemd/system
+  SEMITEXA_AUTO_DEPLOY_RUN_AS_USER        Service user. Default: root
+  SEMITEXA_AUTO_DEPLOY_ENABLE             Enable and start timer when set to 1. Default: 0
+  SEMITEXA_REFRESH_INSTALL_SH_UNIT_PREFIX Refresh unit prefix. Default: semitexa-refresh-install-sh
+  SEMITEXA_REFRESH_INSTALL_SH_INTERVAL    Refresh interval. Default: 10m
 EOF
 }
 
@@ -40,6 +45,11 @@ ENABLE="${SEMITEXA_AUTO_DEPLOY_ENABLE:-0}"
 SERVICE_PATH="${SYSTEMD_DIR}/${UNIT_PREFIX}.service"
 TIMER_PATH="${SYSTEMD_DIR}/${UNIT_PREFIX}.timer"
 RUN_SCRIPT_PATH="${PROJECT_ROOT}/tools/run-auto-deploy-systemd.sh"
+REFRESH_UNIT_PREFIX="${SEMITEXA_REFRESH_INSTALL_SH_UNIT_PREFIX:-semitexa-refresh-install-sh}"
+REFRESH_INTERVAL="${SEMITEXA_REFRESH_INSTALL_SH_INTERVAL:-10m}"
+REFRESH_SERVICE_PATH="${SYSTEMD_DIR}/${REFRESH_UNIT_PREFIX}.service"
+REFRESH_TIMER_PATH="${SYSTEMD_DIR}/${REFRESH_UNIT_PREFIX}.timer"
+REFRESH_SCRIPT_PATH="${PROJECT_ROOT}/tools/refresh-install-sh.sh"
 
 if [ ! -d "${PROJECT_ROOT}" ]; then
     echo "Project root does not exist: ${PROJECT_ROOT}" >&2
@@ -55,6 +65,13 @@ if [ ! -f "${RUN_SCRIPT_TEMPLATE}" ]; then
     echo "Run script template not found at ${RUN_SCRIPT_TEMPLATE}" >&2
     exit 1
 fi
+
+for path in "${REFRESH_SERVICE_TEMPLATE}" "${REFRESH_TIMER_TEMPLATE}" "${REFRESH_SCRIPT_TEMPLATE}"; do
+    if [ ! -f "${path}" ]; then
+        echo "Required template not found: ${path}" >&2
+        exit 1
+    fi
+done
 
 if ! getent passwd "${RUN_AS_USER}" >/dev/null 2>&1; then
     echo "Service user does not exist: ${RUN_AS_USER}" >&2
@@ -75,6 +92,9 @@ run_as_user_escaped="$(escape_sed "${RUN_AS_USER}")"
 home_dir="$(getent passwd "${RUN_AS_USER}" | cut -d: -f6)"
 home_dir_escaped="$(escape_sed "${home_dir}")"
 run_script_escaped="$(escape_sed "${RUN_SCRIPT_PATH}")"
+refresh_unit_prefix_escaped="$(escape_sed "${REFRESH_UNIT_PREFIX}")"
+refresh_interval_escaped="$(escape_sed "${REFRESH_INTERVAL}")"
+refresh_script_escaped="$(escape_sed "${REFRESH_SCRIPT_PATH}")"
 
 sed \
     -e "s|@@PROJECT_ROOT@@|${project_root_escaped}|g" \
@@ -88,20 +108,38 @@ sed \
     -e "s|@@UNIT_PREFIX@@|${unit_prefix_escaped}|g" \
     "${TIMER_TEMPLATE}" > "${TIMER_PATH}"
 
-chmod 0644 "${SERVICE_PATH}" "${TIMER_PATH}"
+sed \
+    -e "s|@@PROJECT_ROOT@@|${project_root_escaped}|g" \
+    -e "s|@@RUN_AS_USER@@|${run_as_user_escaped}|g" \
+    -e "s|@@HOME_DIR@@|${home_dir_escaped}|g" \
+    -e "s|@@REFRESH_SCRIPT@@|${refresh_script_escaped}|g" \
+    "${REFRESH_SERVICE_TEMPLATE}" > "${REFRESH_SERVICE_PATH}"
+
+sed \
+    -e "s|@@REFRESH_INTERVAL@@|${refresh_interval_escaped}|g" \
+    -e "s|@@REFRESH_UNIT_PREFIX@@|${refresh_unit_prefix_escaped}|g" \
+    "${REFRESH_TIMER_TEMPLATE}" > "${REFRESH_TIMER_PATH}"
+
+chmod 0644 "${SERVICE_PATH}" "${TIMER_PATH}" "${REFRESH_SERVICE_PATH}" "${REFRESH_TIMER_PATH}"
 install -m 0755 "${RUN_SCRIPT_TEMPLATE}" "${RUN_SCRIPT_PATH}"
+install -m 0755 "${REFRESH_SCRIPT_TEMPLATE}" "${REFRESH_SCRIPT_PATH}"
 systemctl daemon-reload
 
 if [ "${ENABLE}" = "1" ]; then
     systemctl enable --now "${UNIT_PREFIX}.timer"
+    systemctl enable --now "${REFRESH_UNIT_PREFIX}.timer"
 fi
 
 printf 'Installed: %s\n' "${SERVICE_PATH}"
 printf 'Installed: %s\n' "${TIMER_PATH}"
 printf 'Installed: %s\n' "${RUN_SCRIPT_PATH}"
+printf 'Installed: %s\n' "${REFRESH_SERVICE_PATH}"
+printf 'Installed: %s\n' "${REFRESH_TIMER_PATH}"
+printf 'Installed: %s\n' "${REFRESH_SCRIPT_PATH}"
 
 if [ "${ENABLE}" = "1" ]; then
     printf 'Enabled timer: %s.timer\n' "${UNIT_PREFIX}"
+    printf 'Enabled timer: %s.timer\n' "${REFRESH_UNIT_PREFIX}"
 else
-    printf 'Timer installed but not enabled. Set SEMITEXA_AUTO_DEPLOY_ENABLE=1 to enable it.\n'
+    printf 'Timers installed but not enabled. Set SEMITEXA_AUTO_DEPLOY_ENABLE=1 to enable both.\n'
 fi
