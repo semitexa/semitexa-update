@@ -1,0 +1,13 @@
+[Unit]
+Description=Periodically refresh public install.sh from upstream master
+
+[Timer]
+OnBootSec=2m
+OnUnitActiveSec=@@REFRESH_INTERVAL@@
+RandomizedDelaySec=1m
+AccuracySec=30s
+Persistent=true
+Unit=@@REFRESH_UNIT_PREFIX@@.service
+
+[Install]
+WantedBy=timers.target

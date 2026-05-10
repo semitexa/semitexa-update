@@ -160,3 +160,71 @@ sudo SEMITEXA_AUTO_DEPLOY_ENABLE=1 packages/semitexa-update/tools/install-auto-d
 ```
 
 The systemd wrapper (`packages/semitexa-update/tools/run-auto-deploy-systemd.sh`) calls `update:packages:auto` and reruns `bin/semitexa server:start` when `restart_required=true`, then performs the configured HTTP healthcheck.
+
+### Production deploy systemd units
+
+The installer above provisions **two independent unit pairs**, decoupled on purpose:
+
+| Unit | Purpose |
+|---|---|
+| `semitexa-auto-deploy.service` | Composer-updates `semitexa/*` and restarts the runtime when needed. |
+| `semitexa-auto-deploy.timer` | Periodic poll (default `15m`, `RandomizedDelaySec=1m`). `update:packages:auto` short-circuits when nothing's new, so polling is cheap. |
+| `semitexa-refresh-install-sh.service` | Atomically refreshes `packages/semitexa-ultimate/install.sh` from upstream `master`. |
+| `semitexa-refresh-install-sh.timer` | Periodic refresh (default `10m`). **Independent of the deploy** — install.sh stays current even when the application deploy is failing. |
+
+`semitexa-auto-deploy.service` runs `composer update 'semitexa/*' --with-all-dependencies --prefer-dist --no-dev --no-interaction --optimize-autoloader`. The `--prefer-dist` flag is mandatory: production `vendor/semitexa/*` is shipped as dist (no `.git/`), so without it composer may pick source mode for some packages and fail with `GitDownloader.php line 155: The .git directory is missing`.
+
+#### Install / update on production
+
+```bash
+# Repo files come from packages/semitexa-update/{tools,resources}
+sudo SEMITEXA_AUTO_DEPLOY_ENABLE=1 \
+     packages/semitexa-update/tools/install-auto-deploy-systemd.sh /srv/semitexa/my-project
+
+# After unit changes:
+sudo systemctl daemon-reload
+sudo systemctl enable --now semitexa-auto-deploy.timer
+sudo systemctl enable --now semitexa-refresh-install-sh.timer
+```
+
+#### Verify
+
+```bash
+systemctl list-timers --all | grep semitexa
+systemctl status semitexa-auto-deploy.timer --no-pager
+systemctl status semitexa-refresh-install-sh.timer --no-pager
+```
+
+#### Manually trigger
+
+```bash
+# Run a deploy now (will no-op if nothing's new):
+sudo systemctl start semitexa-auto-deploy.service
+
+# Refresh install.sh now:
+sudo systemctl start semitexa-refresh-install-sh.service
+```
+
+#### Inspect logs
+
+```bash
+journalctl -u semitexa-auto-deploy.service        -n 100 --no-pager
+journalctl -u semitexa-refresh-install-sh.service -n 100 --no-pager
+
+# Per-deploy structured logs (one JSON file per attempt):
+ls -lt /srv/semitexa/my-project/var/log/deployments/ | head
+```
+
+#### Removing the legacy ExecStartPost drop-in
+
+Hosts provisioned before the refresh-install-sh units existed may still carry
+`/etc/systemd/system/semitexa-auto-deploy.service.d/10-refresh-install-sh.conf`,
+which refreshed install.sh from inside `ExecStartPost`. Once the new
+`semitexa-refresh-install-sh.timer` is enabled, that drop-in is redundant —
+remove it so install.sh refresh stops being parasitic on a successful deploy:
+
+```bash
+sudo rm /etc/systemd/system/semitexa-auto-deploy.service.d/10-refresh-install-sh.conf
+sudo rmdir --ignore-fail-on-non-empty /etc/systemd/system/semitexa-auto-deploy.service.d
+sudo systemctl daemon-reload
+```
