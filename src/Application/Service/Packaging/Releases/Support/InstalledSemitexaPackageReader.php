@@ -61,11 +61,16 @@ final class InstalledSemitexaPackageReader
             }
 
             if ($this->isPathRepositoryEntry($package)) {
+                unset($vendor[$name]);
                 $local[$name] = new LocalWorkspacePackage(
                     name: $name,
                     version: $version,
                     sourceUrl: $this->extractSourceUrl($package),
                 );
+                continue;
+            }
+
+            if (isset($local[$name])) {
                 continue;
             }
 
@@ -104,7 +109,11 @@ final class InstalledSemitexaPackageReader
 
         $entries = [];
         foreach (['packages', 'packages-dev'] as $bucket) {
-            foreach ($data[$bucket] ?? [] as $package) {
+            $bucketEntries = $data[$bucket] ?? [];
+            if (!is_array($bucketEntries)) {
+                continue;
+            }
+            foreach ($bucketEntries as $package) {
                 if (is_array($package)) {
                     $entries[] = $package;
                 }
