@@ -7,8 +7,9 @@ namespace Semitexa\Update\Domain\Model;
 final readonly class DeploymentPlan
 {
     /**
-     * @param array<string, string> $installedPackages
-     * @param list<PackageUpdate> $packageUpdates
+     * @param array<string, string>             $installedPackages       Vendor-installed Semitexa packages: name => version.
+     * @param list<PackageUpdate>               $packageUpdates          Discovered upgrades for vendor packages only.
+     * @param array<string, LocalWorkspacePackage> $localWorkspacePackages Path-repository checkouts excluded from update candidates.
      */
     public function __construct(
         public DeploymentConfig $config,
@@ -18,5 +19,6 @@ final readonly class DeploymentPlan
         public ?string $selectedVersion,
         public bool $updateAvailable,
         public string $reason,
+        public array $localWorkspacePackages = [],
     ) {}
 }

@@ -48,6 +48,14 @@ final class UpdatePackagesCheckCommand extends BaseCommand
                         ],
                         $plan->packageUpdates,
                     ),
+                    'local_workspace_packages' => array_map(
+                        static fn($pkg) => [
+                            'package' => $pkg->name,
+                            'version' => $pkg->version,
+                            'source_url' => $pkg->sourceUrl,
+                        ],
+                        array_values($plan->localWorkspacePackages),
+                    ),
                 ];
 
                 $compactJson = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
@@ -78,6 +86,15 @@ final class UpdatePackagesCheckCommand extends BaseCommand
             }
             $io->section('Package updates');
             $io->table(['Package', 'Installed', 'Latest', 'Source'], $rows);
+        }
+
+        if ($plan->localWorkspacePackages !== []) {
+            $rows = [];
+            foreach ($plan->localWorkspacePackages as $pkg) {
+                $rows[] = [$pkg->name, $pkg->version, $pkg->sourceUrl];
+            }
+            $io->section('Local workspace packages (skipped — not Composer-updateable)');
+            $io->table(['Package', 'Version', 'Source path'], $rows);
         }
 
         if ($plan->privateLatestVersion !== null) {
