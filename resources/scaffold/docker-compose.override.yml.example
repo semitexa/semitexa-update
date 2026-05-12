@@ -1,0 +1,17 @@
+# Copy to docker-compose.override.yml to customize your local environment.
+# Docker Compose automatically merges this file with docker-compose.yml.
+#
+# Example customizations:
+#
+# services:
+#   app:
+#     environment:
+#       APP_DEBUG: "1"
+#
+#   db:
+#     ports:
+#       - "3306:3306"   # expose MySQL to host for local DB clients
+#
+#   redis:
+#     ports:
+#       - "6379:6379"   # expose Redis to host
