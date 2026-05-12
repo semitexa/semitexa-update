@@ -90,6 +90,7 @@ final class ComposerUpdateRunner
         bool $dryRun = false,
         bool $skip = false,
         bool $allowPartial = false,
+        bool $force = false,
     ): ComposerUpdateResult {
         if ($skip) {
             return new ComposerUpdateResult(
@@ -143,6 +144,26 @@ final class ComposerUpdateRunner
         $bumps = $plan->entriesToBump();
         $installedBefore = $this->installedVersion($projectRoot, self::ANCHOR_PACKAGE);
 
+        // No bumps, no lock/vendor drift, no explicit force → skip the
+        // composer call entirely. Invoking `composer update` in this state
+        // is a no-op for versions but still rewrites composer.lock's
+        // content-hash field, producing noisy git diffs on every plain
+        // `bin/semitexa update`. The `$force` flag (wired to --composer-only)
+        // is the explicit operator override.
+        $driftReason = $this->lockOrVendorDriftReason($projectRoot);
+        if ($bumps === [] && $driftReason === null && !$force) {
+            return new ComposerUpdateResult(
+                outcome: ComposerUpdateOutcome::Clean,
+                bumpedPackages: [],
+                installedBefore: $installedBefore,
+                installedAfter: $installedBefore,
+                composerExitCode: 0,
+                composerOutput: '',
+                message: 'Composer phase skipped: no pin needs bumping and composer.lock/vendor are coherent. '
+                    . 'Use --composer-only to force a composer invocation anyway.',
+            );
+        }
+
         if ($dryRun) {
             $bumpedSummary = [];
             foreach ($bumps as $b) {
@@ -154,6 +175,9 @@ final class ComposerUpdateRunner
                     implode(', ', array_map(static fn ($e) => $e->name, $unresolved)),
                 )
                 : '';
+            $reasonTail = $driftReason !== null
+                ? ' Reason: ' . $driftReason . '.'
+                : ($force ? ' Reason: --composer-only forces a composer run.' : '');
             return new ComposerUpdateResult(
                 outcome: ComposerUpdateOutcome::WouldRun,
                 bumpedPackages: $bumpedSummary,
@@ -164,6 +188,7 @@ final class ComposerUpdateRunner
                 message: ($bumps === []
                     ? 'No release-pinned semitexa/* package needs a bump.'
                     : sprintf('Would bump %d pin(s) and run: %s', count($bumps), $plan->composerCommand))
+                    . $reasonTail
                     . $degradedTail,
             );
         }
@@ -529,6 +554,58 @@ final class ComposerUpdateRunner
             }
             if (($entry['name'] ?? null) === $package) {
                 return ltrim((string) ($entry['version'] ?? ''), 'v') ?: null;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Returns a short human reason iff there is meaningful drift between
+     * composer.json (declared), composer.lock (locked), and
+     * vendor/composer/installed.json (installed) for any semitexa/*
+     * package — i.e. `composer install` or `composer update` would actually
+     * change something. Returns null when the local Composer state is
+     * coherent and no composer invocation is needed.
+     *
+     * Coverage:
+     *   - declared exact pin != locked version           → "lock_stale"
+     *   - locked version    != installed version          → "vendor_stale"
+     *   - declared but not present in lock                → "missing_from_lock"
+     *   - locked but not present in vendor                → "missing_from_vendor"
+     *
+     * Path-repo / dev / wildcard packages never contribute to drift here:
+     * if they did, ``--no-composer`` would be the only sensible operator
+     * response, and that's the operator's call to make.
+     */
+    private function lockOrVendorDriftReason(string $projectRoot): ?string
+    {
+        $declared = $this->readDeclared($projectRoot);
+        [$locked, $lockPathRepos] = $this->readLocked($projectRoot);
+        [$installed, $installedPathRepos] = $this->readInstalled($projectRoot);
+        $pathRepos = $lockPathRepos + $installedPathRepos;
+
+        $names = $this->collectSemitexaNames($declared, $locked, $installed);
+        foreach ($names as $name) {
+            if (isset($pathRepos[$name])) {
+                continue;
+            }
+            $d = $declared[$name] ?? null;
+            $l = $locked[$name] ?? null;
+            $i = $installed[$name] ?? null;
+            if ($this->isDevConstraint($d) || $this->isWildcardConstraint($d)) {
+                continue;
+            }
+            if ($d !== null && $l === null) {
+                return sprintf('%s declared but missing from composer.lock', $name);
+            }
+            if ($l !== null && $i === null) {
+                return sprintf('%s locked but missing from vendor', $name);
+            }
+            if ($d !== null && $l !== null && $d !== $l) {
+                return sprintf('%s composer.json pin (%s) differs from composer.lock (%s)', $name, $d, $l);
+            }
+            if ($l !== null && $i !== null && $l !== $i) {
+                return sprintf('%s composer.lock (%s) differs from vendor (%s)', $name, $l, $i);
             }
         }
         return null;

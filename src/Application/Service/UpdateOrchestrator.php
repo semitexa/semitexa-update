@@ -75,7 +75,16 @@ final class UpdateOrchestrator
 
         // Composer phase first: changes vendor/, which everything downstream
         // depends on. If it fails or upgrades semitexa/update itself we stop.
-        $composerResult = $this->runComposerUpdate($dryRun, $skipComposer, $allowPartialComposer);
+        // --composer-only also acts as an explicit "force composer to run"
+        // override — the operator chose to spend a composer call here, so
+        // the runner's "skip when no bumps + no drift" optimization yields
+        // to that intent.
+        $composerResult = $this->runComposerUpdate(
+            $dryRun,
+            $skipComposer,
+            $allowPartialComposer,
+            forceComposer: $composerOnly,
+        );
         if ($composerResult !== null) {
             $stages[] = new OrchestratorStage('composer-update', null, null, null, $composerResult);
             if (!$composerResult->isSuccess()) {
@@ -156,12 +165,22 @@ final class UpdateOrchestrator
         return $this->composerRunner->plan($this->projectRoot);
     }
 
-    private function runComposerUpdate(bool $dryRun, bool $skipComposer, bool $allowPartial = false): ?\Semitexa\Update\Domain\Model\Composer\ComposerUpdateResult
-    {
+    private function runComposerUpdate(
+        bool $dryRun,
+        bool $skipComposer,
+        bool $allowPartial = false,
+        bool $forceComposer = false,
+    ): ?\Semitexa\Update\Domain\Model\Composer\ComposerUpdateResult {
         if ($this->composerRunner === null || $this->projectRoot === null) {
             return null;
         }
-        return $this->composerRunner->execute($this->projectRoot, $dryRun, $skipComposer, $allowPartial);
+        return $this->composerRunner->execute(
+            $this->projectRoot,
+            $dryRun,
+            $skipComposer,
+            $allowPartial,
+            force: $forceComposer,
+        );
     }
 
     private function inspectPackageDrift(): ?PackageDriftReport
