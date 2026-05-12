@@ -8,11 +8,14 @@ use Semitexa\Core\Attribute\AsCommand;
 use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Console\BaseCommand;
 use Semitexa\Update\Discovery\DiscoveredPatch;
+use Semitexa\Update\Domain\Enum\ComposerUpdateOutcome;
 use Semitexa\Update\Domain\Enum\PackageDriftStatus;
 use Semitexa\Update\Domain\Enum\ScaffoldSyncAction;
 use Semitexa\Update\Domain\Enum\ScaffoldSyncOutcome;
 use Semitexa\Update\Domain\Enum\ScaffoldSyncStatus;
 use Semitexa\Update\Domain\Enum\UpdatePhase;
+use Semitexa\Update\Domain\Model\Composer\ComposerUpdatePlan;
+use Semitexa\Update\Domain\Model\Composer\ComposerUpdateResult;
 use Semitexa\Update\Domain\Model\PackageDrift\PackageDriftReport;
 use Semitexa\Update\Domain\Model\Scaffold\ScaffoldSyncPlan;
 use Semitexa\Update\Domain\Model\Scaffold\ScaffoldSyncReport;
@@ -51,6 +54,29 @@ final class UpdateCommand extends BaseCommand
                 InputOption::VALUE_NONE,
                 'For locally modified scaffold-managed files, write candidate .new files next to them. '
                 . 'Off by default to avoid recreating files the operator has already reviewed and removed.',
+            )
+            ->addOption(
+                'no-composer',
+                null,
+                InputOption::VALUE_NONE,
+                'Skip the Composer-update phase. Expert escape hatch — leaves vendor at its current state. '
+                . 'The default is Composer-first.',
+            )
+            ->addOption(
+                'composer-only',
+                null,
+                InputOption::VALUE_NONE,
+                'Run only the Composer-update phase and stop, even if no semitexa/update upgrade happened. '
+                . 'Useful for two-pass workflows.',
+            )
+            ->addOption(
+                'allow-partial-composer-update',
+                null,
+                InputOption::VALUE_NONE,
+                'Permit the Composer phase to proceed even when upstream metadata cannot be resolved '
+                . 'for some exact-pinned semitexa/* packages. Without this flag, an unresolved package '
+                . 'is a blocking failure — scaffold-sync and DB-affecting stages will not run. The '
+                . 'phase output is labelled DEGRADED when this flag takes effect.',
             );
     }
 
@@ -61,6 +87,9 @@ final class UpdateCommand extends BaseCommand
         $dryRun = (bool) $input->getOption('dry-run');
         $allowDestructive = (bool) $input->getOption('allow-destructive');
         $writeCandidates = (bool) $input->getOption('write-scaffold-candidates');
+        $skipComposer = (bool) $input->getOption('no-composer');
+        $composerOnly = (bool) $input->getOption('composer-only');
+        $allowPartialComposer = (bool) $input->getOption('allow-partial-composer-update');
 
         try {
             $orchestrator = $this->runnerFactory->orchestrator($connection);
@@ -78,6 +107,9 @@ final class UpdateCommand extends BaseCommand
                     allowDestructive: $allowDestructive,
                     dryRun: true,
                     writeCandidates: $writeCandidates,
+                    skipComposer: $skipComposer,
+                    composerOnly: $composerOnly,
+                    allowPartialComposer: $allowPartialComposer,
                 );
             } catch (UpdateException $e) {
                 $io->error($e->getMessage());
@@ -93,6 +125,9 @@ final class UpdateCommand extends BaseCommand
                 allowDestructive: $allowDestructive,
                 dryRun: false,
                 writeCandidates: $writeCandidates,
+                skipComposer: $skipComposer,
+                composerOnly: $composerOnly,
+                allowPartialComposer: $allowPartialComposer,
             );
         } catch (UpdateException $e) {
             $io->error($e->getMessage());
@@ -115,6 +150,10 @@ final class UpdateCommand extends BaseCommand
     private function renderPlan(SymfonyStyle $io, OrchestratorPlanReport $planReport): void
     {
         $io->title('Semitexa Update Plan');
+
+        if ($planReport->composerPlan !== null) {
+            $this->renderComposerPlan($io, $planReport->composerPlan);
+        }
 
         if ($planReport->packageDrift !== null) {
             $this->renderPackageDrift($io, $planReport->packageDrift);
@@ -166,6 +205,10 @@ final class UpdateCommand extends BaseCommand
 
         foreach ($stages as $stage) {
             $io->section($stage->name);
+            if ($stage->composerResult !== null) {
+                $this->renderComposerStage($io, $stage->composerResult);
+                continue;
+            }
             if ($stage->scaffoldReport !== null) {
                 $this->renderScaffoldStage($io, $stage->scaffoldReport);
                 continue;
@@ -199,6 +242,88 @@ final class UpdateCommand extends BaseCommand
                     (string) $report->failedIdentity,
                     (string) $report->failedError,
                 ));
+            }
+        }
+    }
+
+    private function renderComposerPlan(SymfonyStyle $io, ComposerUpdatePlan $plan): void
+    {
+        $io->section('Composer package update');
+
+        if (!$plan->inContainer) {
+            $io->writeln('  <error>Composer phase cannot run: ' . $plan->containerError . '</error>');
+            return;
+        }
+
+        $io->writeln('  Command: ' . $plan->composerCommand);
+        if ($plan->targetReleaseSet !== null) {
+            $io->writeln('  Target release set anchor: ' . $plan->targetReleaseSet);
+        }
+
+        $bumps = $plan->entriesToBump();
+        if ($bumps === []) {
+            $io->writeln('  No release-pinned semitexa/* package needs a pin bump.');
+        } else {
+            $io->writeln(sprintf('  %d pin(s) will be bumped before composer runs:', count($bumps)));
+            foreach ($bumps as $entry) {
+                $io->writeln(sprintf(
+                    '    %s  %s → %s',
+                    $entry->name,
+                    $entry->declared ?? '(none)',
+                    (string) $entry->targetVersion,
+                ));
+            }
+        }
+
+        $skipped = $plan->skippedEntries();
+        if ($skipped !== []) {
+            $io->writeln(sprintf('  %d package(s) intentionally left alone:', count($skipped)));
+            foreach ($skipped as $entry) {
+                $io->writeln(sprintf('    %s  (%s) — %s', $entry->name, $entry->pinKind, $entry->skipReason));
+            }
+        }
+
+        $unresolved = $plan->unresolvedEntries();
+        if ($unresolved !== []) {
+            $io->writeln(sprintf(
+                '  <error>%d exact-pinned package(s) could NOT be resolved upstream:</error>',
+                count($unresolved),
+            ));
+            foreach ($unresolved as $entry) {
+                $io->writeln(sprintf('    %s  (declared %s) — no Packagist metadata', $entry->name, (string) $entry->declared));
+            }
+            $io->writeln(
+                '  <error>By default this blocks the update. Retry with network access, or pass '
+                . '--allow-partial-composer-update to proceed in DEGRADED mode with only the '
+                . 'packages that could be resolved.</error>',
+            );
+        }
+    }
+
+    private function renderComposerStage(SymfonyStyle $io, ComposerUpdateResult $result): void
+    {
+        $io->writeln(sprintf('  outcome: %s', $result->outcome->value));
+        $io->writeln('  ' . $result->message);
+
+        if ($result->bumpedPackages !== []) {
+            $io->writeln(sprintf('  bumped %d pin(s):', count($result->bumpedPackages)));
+            foreach ($result->bumpedPackages as $name => $change) {
+                $io->writeln(sprintf('    %s  %s → %s', $name, $change['from'] ?? '(none)', $change['to']));
+            }
+        }
+
+        if ($result->outcome === ComposerUpdateOutcome::UpdaterChanged) {
+            $io->writeln(sprintf(
+                '  <comment>semitexa/update upgraded %s → %s. Rerun `bin/semitexa update` to continue with fresh code.</comment>',
+                (string) $result->installedBefore,
+                (string) $result->installedAfter,
+            ));
+        }
+
+        if ($result->outcome === ComposerUpdateOutcome::Failed && $result->composerOutput !== '') {
+            $io->writeln('  composer output:');
+            foreach (explode("\n", $result->composerOutput) as $line) {
+                $io->writeln('    ' . $line);
             }
         }
     }

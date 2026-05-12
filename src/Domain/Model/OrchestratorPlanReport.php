@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Update\Domain\Model;
 
+use Semitexa\Update\Domain\Model\Composer\ComposerUpdatePlan;
 use Semitexa\Update\Domain\Model\PackageDrift\PackageDriftReport;
 use Semitexa\Update\Domain\Model\Scaffold\ScaffoldSyncPlan;
 use Semitexa\Update\Domain\Model\SchemaSyncStatus;
@@ -24,6 +25,7 @@ final readonly class OrchestratorPlanReport
         public SchemaSyncStatus $schemaStatus,
         public ?PackageDriftReport $packageDrift = null,
         public ?ScaffoldSyncPlan $scaffoldPlan = null,
+        public ?ComposerUpdatePlan $composerPlan = null,
     ) {
     }
 }

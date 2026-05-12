@@ -311,6 +311,211 @@ final class UpdateOrchestratorWiringTest extends TestCase
         self::assertSame(\Semitexa\Update\Domain\Enum\ScaffoldSyncAction::Create, $bin->action);
     }
 
+    public function testComposerStageRunsFirstWhenComposerRunnerWired(): void
+    {
+        $this->writeProjectFile('bin/semitexa', "#!/bin/sh\necho old\n");
+        $orchestrator = $this->orchestratorWithComposer(
+            available: true,
+            anchor: '2026.05.12.0744',
+            installedBefore: '2026.05.10.1449',
+            installedAfter: '2026.05.10.1449',
+        );
+
+        $stages = $orchestrator->run(dryRun: false);
+        $names = array_map(static fn (\Semitexa\Update\Domain\Model\OrchestratorStage $s) => $s->name, $stages);
+
+        self::assertSame('composer-update', $names[0], 'composer-update must be the first stage.');
+        self::assertContains('scaffold-sync', $names);
+        self::assertContains('pre-patches', $names);
+    }
+
+    public function testComposerOnlyFlagStopsAfterComposer(): void
+    {
+        $this->writeProjectFile('bin/semitexa', "#!/bin/sh\necho old\n");
+        $orchestrator = $this->orchestratorWithComposer(
+            available: true,
+            anchor: '2026.05.12.0744',
+            installedBefore: '2026.05.10.1449',
+            installedAfter: '2026.05.10.1449',
+        );
+
+        $stages = $orchestrator->run(dryRun: false, composerOnly: true);
+        $names = array_map(static fn (\Semitexa\Update\Domain\Model\OrchestratorStage $s) => $s->name, $stages);
+
+        self::assertSame(['composer-update'], $names, '--composer-only must stop after composer; no scaffold/pre/orm runs.');
+    }
+
+    public function testNoComposerFlagSkipsComposerStageButRunsTheRest(): void
+    {
+        $this->writeProjectFile('bin/semitexa', "#!/bin/sh\necho old\n");
+        $orchestrator = $this->orchestratorWithComposer(
+            available: true,
+            anchor: '2026.05.12.0744',
+            installedBefore: '2026.05.10.1449',
+            installedAfter: '2026.05.10.1449',
+        );
+
+        $stages = $orchestrator->run(dryRun: false, skipComposer: true);
+        $names = array_map(static fn (\Semitexa\Update\Domain\Model\OrchestratorStage $s) => $s->name, $stages);
+
+        self::assertSame('composer-update', $names[0]);
+        self::assertSame(
+            \Semitexa\Update\Domain\Enum\ComposerUpdateOutcome::Skipped,
+            $stages[0]->composerResult->outcome,
+        );
+        self::assertContains('scaffold-sync', $names);
+        self::assertContains('pre-patches', $names);
+    }
+
+    public function testUnresolvedUpstreamBlocksScaffoldAndDbStagesByDefault(): void
+    {
+        $this->writeProjectFile('bin/semitexa', "#!/bin/sh\necho old\n");
+        // Resolver returns null → semitexa/update is unresolved, no allowPartial.
+        $orchestrator = $this->orchestratorWithComposer(
+            available: true,
+            anchor: null,
+            installedBefore: '2026.05.10.1449',
+            installedAfter: '2026.05.10.1449',
+        );
+
+        $stages = $orchestrator->run(dryRun: false);
+        $names = array_map(static fn (\Semitexa\Update\Domain\Model\OrchestratorStage $s) => $s->name, $stages);
+
+        self::assertSame(['composer-update'], $names, 'Unresolved upstream must abort the workflow before scaffold-sync.');
+        self::assertSame(
+            \Semitexa\Update\Domain\Enum\ComposerUpdateOutcome::Failed,
+            $stages[0]->composerResult->outcome,
+        );
+        self::assertStringContainsString('upstream metadata', $stages[0]->composerResult->message);
+    }
+
+    public function testAllowPartialComposerFlagPermitsContinuation(): void
+    {
+        $this->writeProjectFile('bin/semitexa', "#!/bin/sh\necho old\n");
+        $orchestrator = $this->orchestratorWithComposer(
+            available: true,
+            anchor: null,  // resolver returns null
+            installedBefore: '2026.05.10.1449',
+            installedAfter: '2026.05.10.1449',
+        );
+
+        $stages = $orchestrator->run(dryRun: false, allowPartialComposer: true);
+        $names = array_map(static fn (\Semitexa\Update\Domain\Model\OrchestratorStage $s) => $s->name, $stages);
+
+        // With the flag, composer phase produces NoBump/Clean (anchor null → no bumps possible,
+        // but workflow proceeds in DEGRADED mode).
+        self::assertSame('composer-update', $names[0]);
+        self::assertContains('scaffold-sync', $names, 'Under --allow-partial-composer-update the workflow continues.');
+    }
+
+    public function testComposerFailureAbortsBeforeScaffoldAndDb(): void
+    {
+        $this->writeProjectFile('bin/semitexa', "#!/bin/sh\necho old\n");
+        $orchestrator = $this->orchestratorWithComposer(
+            available: false,  // refuses to run → outcome = Failed
+            anchor: null,
+            installedBefore: '2026.05.10.1449',
+            installedAfter: '2026.05.10.1449',
+        );
+
+        $stages = $orchestrator->run(dryRun: false);
+        $names = array_map(static fn (\Semitexa\Update\Domain\Model\OrchestratorStage $s) => $s->name, $stages);
+
+        self::assertSame(['composer-update'], $names, 'No scaffold/pre/orm stages after composer failure.');
+        self::assertFalse($stages[0]->isSuccess());
+    }
+
+    public function testUpdaterChangedStopsBeforeScaffoldStage(): void
+    {
+        $this->writeProjectFile('bin/semitexa', "#!/bin/sh\necho old\n");
+        $orchestrator = $this->orchestratorWithComposer(
+            available: true,
+            anchor: '2026.05.12.0744',
+            installedBefore: '2026.05.10.1449',
+            installedAfter: '2026.05.12.0744',  // simulates semitexa/update upgrade
+        );
+
+        $stages = $orchestrator->run(dryRun: false);
+        $names = array_map(static fn (\Semitexa\Update\Domain\Model\OrchestratorStage $s) => $s->name, $stages);
+
+        self::assertSame(['composer-update'], $names, 'When semitexa/update changes, the orchestrator must stop cleanly.');
+        self::assertSame(
+            \Semitexa\Update\Domain\Enum\ComposerUpdateOutcome::UpdaterChanged,
+            $stages[0]->composerResult->outcome,
+        );
+    }
+
+    private function orchestratorWithComposer(
+        bool $available,
+        ?string $anchor,
+        string $installedBefore,
+        string $installedAfter,
+    ): UpdateOrchestrator {
+        // Seed a composer.json + lock + installed.json so the runner can see versions.
+        file_put_contents(
+            $this->projectRoot . '/composer.json',
+            json_encode(['require' => ['semitexa/update' => $installedBefore]], JSON_PRETTY_PRINT) . "\n",
+        );
+        file_put_contents(
+            $this->projectRoot . '/composer.lock',
+            json_encode(['packages' => [['name' => 'semitexa/update', 'version' => $installedBefore]], 'packages-dev' => []]),
+        );
+
+        // The executor simulates the version transition on the side: when called,
+        // it rewrites installed.json's semitexa/update version to $installedAfter.
+        $executor = new class($available, $this->projectRoot, $installedAfter) implements \Semitexa\Update\Application\Service\Composer\ComposerExecutorInterface {
+            public function __construct(
+                private readonly bool $available,
+                private readonly string $projectRoot,
+                private readonly string $installedAfter,
+            ) {}
+            public function isAvailable(): bool { return $this->available; }
+            public function containerError(): string { return $this->available ? '' : 'fake: not in container'; }
+            public function run(array $args, string $projectRoot): array
+            {
+                $data = json_decode((string) @file_get_contents($projectRoot . '/vendor/composer/installed.json'), true) ?? ['packages' => []];
+                foreach ($data['packages'] as &$p) {
+                    if (($p['name'] ?? null) === 'semitexa/update') {
+                        $p['version'] = $this->installedAfter;
+                    }
+                }
+                file_put_contents($projectRoot . '/vendor/composer/installed.json', json_encode($data));
+                return ['exitCode' => 0, 'output' => ''];
+            }
+        };
+        // installed.json must exist for the runner to read versions; seed it at $installedBefore.
+        if (!is_dir($this->projectRoot . '/vendor/composer')) {
+            mkdir($this->projectRoot . '/vendor/composer', 0777, true);
+        }
+        file_put_contents(
+            $this->projectRoot . '/vendor/composer/installed.json',
+            json_encode(['packages' => [['name' => 'semitexa/update', 'version' => $installedBefore]]]),
+        );
+
+        $resolver = new class($anchor) implements \Semitexa\Update\Application\Service\Composer\UpstreamVersionResolverInterface {
+            public function __construct(private readonly ?string $anchor) {}
+            public function latestStable(string $package): ?string { return $this->anchor; }
+            public function hasVersion(string $package, string $version): bool { return $version === $this->anchor; }
+        };
+
+        $composerRunner = new \Semitexa\Update\Application\Service\Composer\ComposerUpdateRunner($executor, $resolver);
+
+        $hasher = new ScaffoldHasher();
+        return new UpdateOrchestrator(
+            runner: $this->makeRunner(),
+            migrationGateway: $this->makeGateway(),
+            connection: 'default',
+            driftInspector: new PackageDriftInspector(),
+            scaffoldLoader: new ScaffoldManifestLoader(),
+            scaffoldClassifier: new ScaffoldFileClassifier($hasher),
+            scaffoldEngine: new ScaffoldSyncEngine($hasher),
+            projectRoot: $this->projectRoot,
+            scaffoldRoot: $this->scaffoldRoot,
+            manifestPath: $this->manifestPath,
+            composerRunner: $composerRunner,
+        );
+    }
+
     public function testIdempotentSecondRun(): void
     {
         $oldBin = "#!/bin/sh\necho old\n";

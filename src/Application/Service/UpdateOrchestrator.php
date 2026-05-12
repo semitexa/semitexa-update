@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace Semitexa\Update\Application\Service;
 
+use Semitexa\Update\Application\Service\Composer\ComposerUpdateRunner;
 use Semitexa\Update\Application\Service\Scaffold\ScaffoldFileClassifier;
 use Semitexa\Update\Application\Service\Scaffold\ScaffoldManifestLoader;
 use Semitexa\Update\Application\Service\Scaffold\ScaffoldSyncEngine;
+use Semitexa\Update\Domain\Enum\ComposerUpdateOutcome;
+use Semitexa\Update\Domain\Model\Composer\ComposerUpdatePlan;
 use Semitexa\Update\Domain\Model\OrchestratorStage;
 use Semitexa\Update\Domain\Model\OrchestratorPlanReport;
 use Semitexa\Update\Domain\Enum\UpdatePhase;
@@ -53,6 +56,7 @@ final class UpdateOrchestrator
         private readonly ?string $projectRoot = null,
         private readonly ?string $scaffoldRoot = null,
         private readonly ?string $manifestPath = null,
+        private readonly ?ComposerUpdateRunner $composerRunner = null,
     ) {
     }
 
@@ -63,8 +67,29 @@ final class UpdateOrchestrator
         bool $allowDestructive = false,
         bool $dryRun = false,
         bool $writeCandidates = false,
+        bool $skipComposer = false,
+        bool $composerOnly = false,
+        bool $allowPartialComposer = false,
     ): array {
         $stages = [];
+
+        // Composer phase first: changes vendor/, which everything downstream
+        // depends on. If it fails or upgrades semitexa/update itself we stop.
+        $composerResult = $this->runComposerUpdate($dryRun, $skipComposer, $allowPartialComposer);
+        if ($composerResult !== null) {
+            $stages[] = new OrchestratorStage('composer-update', null, null, null, $composerResult);
+            if (!$composerResult->isSuccess()) {
+                return $stages;
+            }
+            if ($composerResult->outcome === ComposerUpdateOutcome::UpdaterChanged) {
+                // Updater package was upgraded — running PHP class definitions
+                // are now stale. Refuse to continue with the in-process code.
+                return $stages;
+            }
+            if ($composerOnly) {
+                return $stages;
+            }
+        }
 
         $scaffoldReport = $this->runScaffoldSync($dryRun, $writeCandidates);
         if ($scaffoldReport !== null) {
@@ -119,7 +144,24 @@ final class UpdateOrchestrator
             schemaStatus: $schemaStatus,
             packageDrift: $this->inspectPackageDrift(),
             scaffoldPlan: $this->planScaffoldSync($writeCandidates),
+            composerPlan: $this->planComposerUpdate(),
         );
+    }
+
+    private function planComposerUpdate(): ?ComposerUpdatePlan
+    {
+        if ($this->composerRunner === null || $this->projectRoot === null) {
+            return null;
+        }
+        return $this->composerRunner->plan($this->projectRoot);
+    }
+
+    private function runComposerUpdate(bool $dryRun, bool $skipComposer, bool $allowPartial = false): ?\Semitexa\Update\Domain\Model\Composer\ComposerUpdateResult
+    {
+        if ($this->composerRunner === null || $this->projectRoot === null) {
+            return null;
+        }
+        return $this->composerRunner->execute($this->projectRoot, $dryRun, $skipComposer, $allowPartial);
     }
 
     private function inspectPackageDrift(): ?PackageDriftReport
