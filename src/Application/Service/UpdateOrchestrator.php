@@ -59,11 +59,14 @@ final class UpdateOrchestrator
     /**
      * @return list<OrchestratorStage> in execution order
      */
-    public function run(bool $allowDestructive = false, bool $dryRun = false): array
-    {
+    public function run(
+        bool $allowDestructive = false,
+        bool $dryRun = false,
+        bool $writeCandidates = false,
+    ): array {
         $stages = [];
 
-        $scaffoldReport = $this->runScaffoldSync($dryRun);
+        $scaffoldReport = $this->runScaffoldSync($dryRun, $writeCandidates);
         if ($scaffoldReport !== null) {
             $stages[] = new OrchestratorStage('scaffold-sync', null, null, $scaffoldReport);
             if (!$scaffoldReport->isSuccess()) {
@@ -106,7 +109,7 @@ final class UpdateOrchestrator
     /**
      * Read-only inspection of the current sweep state.
      */
-    public function plan(): OrchestratorPlanReport
+    public function plan(bool $writeCandidates = false): OrchestratorPlanReport
     {
         $patchPlan = $this->runner->plan();
         $schemaStatus = $this->migrationGateway->inspect($this->connection);
@@ -115,7 +118,7 @@ final class UpdateOrchestrator
             patchPlan: $patchPlan,
             schemaStatus: $schemaStatus,
             packageDrift: $this->inspectPackageDrift(),
-            scaffoldPlan: $this->planScaffoldSync(),
+            scaffoldPlan: $this->planScaffoldSync($writeCandidates),
         );
     }
 
@@ -127,7 +130,7 @@ final class UpdateOrchestrator
         return $this->driftInspector->inspect($this->projectRoot);
     }
 
-    private function planScaffoldSync(): ?ScaffoldSyncPlan
+    private function planScaffoldSync(bool $writeCandidates = false): ?ScaffoldSyncPlan
     {
         if (!$this->scaffoldCollaboratorsConfigured()) {
             return null;
@@ -137,15 +140,16 @@ final class UpdateOrchestrator
             projectRoot: $this->projectRoot,
             scaffoldRoot: $this->scaffoldRoot,
             manifest: $manifest,
+            writeCandidates: $writeCandidates,
         );
     }
 
-    private function runScaffoldSync(bool $dryRun): ?\Semitexa\Update\Domain\Model\Scaffold\ScaffoldSyncReport
+    private function runScaffoldSync(bool $dryRun, bool $writeCandidates = false): ?\Semitexa\Update\Domain\Model\Scaffold\ScaffoldSyncReport
     {
         if (!$this->scaffoldCollaboratorsConfigured()) {
             return null;
         }
-        $plan = $this->planScaffoldSync();
+        $plan = $this->planScaffoldSync($writeCandidates);
         if ($plan === null) {
             return null;
         }

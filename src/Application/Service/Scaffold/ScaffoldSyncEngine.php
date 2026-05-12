@@ -64,10 +64,11 @@ final class ScaffoldSyncEngine
     ): ScaffoldSyncResult {
         try {
             return match ($entry->action) {
-                ScaffoldSyncAction::None     => $this->noOpResult($entry),
-                ScaffoldSyncAction::Replace  => $this->doReplace($entry, $projectRoot, $scaffoldRoot, $dryRun),
-                ScaffoldSyncAction::Create   => $this->doCreate($entry, $projectRoot, $scaffoldRoot, $dryRun),
-                ScaffoldSyncAction::WriteNew => $this->doWriteNew($entry, $projectRoot, $scaffoldRoot, $dryRun, $now),
+                ScaffoldSyncAction::None         => $this->noOpResult($entry),
+                ScaffoldSyncAction::Replace      => $this->doReplace($entry, $projectRoot, $scaffoldRoot, $dryRun),
+                ScaffoldSyncAction::Create       => $this->doCreate($entry, $projectRoot, $scaffoldRoot, $dryRun),
+                ScaffoldSyncAction::WriteNew     => $this->doWriteNew($entry, $projectRoot, $scaffoldRoot, $dryRun, $now),
+                ScaffoldSyncAction::ManualReview => $this->doManualReview($entry),
             };
         } catch (\Throwable $e) {
             return new ScaffoldSyncResult(
@@ -183,12 +184,33 @@ final class ScaffoldSyncEngine
         $newPath = $entry->newFilePath ?? ($entry->path . '.new');
         $newAbsolute = $projectRoot . '/' . $newPath;
 
+        $existingMatchesCurrent = false;
         if (file_exists($newAbsolute)) {
             $existingHash = $this->hasher->hashFile($newAbsolute);
-            if ($existingHash !== $entry->newHash) {
+            if ($existingHash === $entry->newHash) {
+                $existingMatchesCurrent = true;
+            } else {
                 $newPath = $entry->path . '.new.' . $now->format('Ymd\THis\Z');
                 $newAbsolute = $projectRoot . '/' . $newPath;
             }
+        }
+
+        if ($existingMatchesCurrent) {
+            // The candidate file already exists with current scaffold content —
+            // rewriting it would just bump mtime without changing state. Record
+            // a no-op so the operator does not see repeated "applied" entries
+            // for files they have not deleted.
+            return new ScaffoldSyncResult(
+                path: $entry->path,
+                status: $entry->status,
+                action: ScaffoldSyncAction::WriteNew,
+                outcome: ScaffoldSyncOutcome::NoOp,
+                oldHash: $entry->oldHash,
+                newHash: $entry->newHash,
+                backupPath: null,
+                newFilePath: $newPath,
+                message: $newPath . ' already matches current scaffold — no rewrite needed.',
+            );
         }
 
         if ($dryRun) {
@@ -212,6 +234,21 @@ final class ScaffoldSyncEngine
             backupPath: null,
             newFilePath: $newPath,
             message: 'Live file untouched. Current scaffold written to ' . $newPath . ' for manual review.',
+        );
+    }
+
+    private function doManualReview(ScaffoldSyncPlanEntry $entry): ScaffoldSyncResult
+    {
+        return new ScaffoldSyncResult(
+            path: $entry->path,
+            status: $entry->status,
+            action: ScaffoldSyncAction::ManualReview,
+            outcome: ScaffoldSyncOutcome::ManualReview,
+            oldHash: $entry->oldHash,
+            newHash: $entry->newHash,
+            backupPath: null,
+            newFilePath: null,
+            message: $entry->reason,
         );
     }
 

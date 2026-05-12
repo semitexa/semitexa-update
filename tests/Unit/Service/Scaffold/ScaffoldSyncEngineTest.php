@@ -57,7 +57,7 @@ final class ScaffoldSyncEngineTest extends TestCase
         self::assertSame($prior, file_get_contents($backupAbsolute));
     }
 
-    public function testLocallyModifiedFileWritesNewAndLeavesLiveUntouched(): void
+    public function testLocallyModifiedDefaultsToManualReviewAndDoesNotWriteNew(): void
     {
         $current = "current\n";
         $operator = "operator-edited-this\n";
@@ -68,11 +68,50 @@ final class ScaffoldSyncEngineTest extends TestCase
         $report = (new ScaffoldSyncEngine())->execute($plan, $this->project, $this->scaffold, now: $this->now);
 
         self::assertSame($operator, file_get_contents($this->project . '/bin/semitexa'), 'Live file must be untouched.');
+        self::assertFileDoesNotExist(
+            $this->project . '/bin/semitexa.new',
+            'Default real run must NOT write .new files for LocallyModified entries.',
+        );
+
+        $result = $report->resultByPath('bin/semitexa');
+        self::assertSame(ScaffoldSyncOutcome::ManualReview, $result->outcome);
+        self::assertSame(ScaffoldSyncAction::ManualReview, $result->action);
+        self::assertNull($result->newFilePath);
+    }
+
+    public function testLocallyModifiedWritesNewWhenWriteCandidatesFlagSet(): void
+    {
+        $current = "current\n";
+        $operator = "operator-edited-this\n";
+        $this->writeScaffold('bin/semitexa', $current);
+        $this->writeProject('bin/semitexa', $operator);
+
+        $plan = $this->classify($this->binManifest($current), writeCandidates: true);
+        $report = (new ScaffoldSyncEngine())->execute($plan, $this->project, $this->scaffold, now: $this->now);
+
+        self::assertSame($operator, file_get_contents($this->project . '/bin/semitexa'), 'Live file must be untouched.');
         self::assertFileExists($this->project . '/bin/semitexa.new');
         self::assertSame($current, file_get_contents($this->project . '/bin/semitexa.new'));
 
         $result = $report->resultByPath('bin/semitexa');
         self::assertSame(ScaffoldSyncOutcome::Applied, $result->outcome);
+        self::assertSame('bin/semitexa.new', $result->newFilePath);
+    }
+
+    public function testDryRunWithWriteCandidatesReportsWouldApplyWithoutMutating(): void
+    {
+        $current = "current\n";
+        $operator = "operator-edited-this\n";
+        $this->writeScaffold('bin/semitexa', $current);
+        $this->writeProject('bin/semitexa', $operator);
+
+        $beforeSnapshot = $this->fsSnapshot();
+        $plan = $this->classify($this->binManifest($current), writeCandidates: true);
+        $report = (new ScaffoldSyncEngine())->execute($plan, $this->project, $this->scaffold, dryRun: true, now: $this->now);
+
+        self::assertSame($beforeSnapshot, $this->fsSnapshot(), 'Dry-run with the flag must still be non-mutating.');
+        $result = $report->resultByPath('bin/semitexa');
+        self::assertSame(ScaffoldSyncOutcome::WouldApply, $result->outcome);
         self::assertSame('bin/semitexa.new', $result->newFilePath);
     }
 
@@ -117,19 +156,27 @@ final class ScaffoldSyncEngineTest extends TestCase
         self::assertSame(0755, $perms, 'preserve_executable=true must result in +x after Replace.');
     }
 
-    public function testBinSemitexaLocallyModifiedWritesNewInsteadOfOverwrite(): void
+    public function testBinSemitexaLocallyModifiedNeverOverwrites(): void
     {
         $current = "#!/bin/sh\necho new\n";
         $operator = "#!/bin/sh\n# operator-customized\necho mine\n";
         $this->writeScaffold('bin/semitexa', $current);
         $this->writeProject('bin/semitexa', $operator);
 
+        // Default real run: live untouched, NO .new produced.
         $plan = $this->classify($this->binManifest($current));
         $report = (new ScaffoldSyncEngine())->execute($plan, $this->project, $this->scaffold, now: $this->now);
 
         self::assertSame($operator, file_get_contents($this->project . '/bin/semitexa'));
-        self::assertSame($current, file_get_contents($this->project . '/bin/semitexa.new'));
+        self::assertFileDoesNotExist($this->project . '/bin/semitexa.new');
         self::assertSame(ScaffoldSyncStatus::LocallyModified, $report->resultByPath('bin/semitexa')->status);
+        self::assertSame(ScaffoldSyncOutcome::ManualReview, $report->resultByPath('bin/semitexa')->outcome);
+
+        // Same case with the flag: .new written, live still untouched.
+        $planWithFlag = $this->classify($this->binManifest($current), writeCandidates: true);
+        (new ScaffoldSyncEngine())->execute($planWithFlag, $this->project, $this->scaffold, now: $this->now);
+        self::assertSame($operator, file_get_contents($this->project . '/bin/semitexa'));
+        self::assertSame($current, file_get_contents($this->project . '/bin/semitexa.new'));
     }
 
     public function testDotEnvIsNeverWrittenByEngine(): void
@@ -246,19 +293,28 @@ final class ScaffoldSyncEngineTest extends TestCase
         self::assertNotEmpty($r->message);
     }
 
-    public function testWriteNewSkipsRewriteWhenExistingNewMatchesCurrent(): void
+    public function testWriteNewIsNoOpWhenExistingNewMatchesCurrent(): void
     {
         $current = "current\n";
         $this->writeScaffold('bin/semitexa', $current);
         $this->writeProject('bin/semitexa', "operator\n");
-        $this->writeProject('bin/semitexa.new', $current); // already exists, matches current
+        $this->writeProject('bin/semitexa.new', $current); // already current
 
-        $plan = $this->classify($this->binManifest($current));
+        $plan = $this->classify($this->binManifest($current), writeCandidates: true);
+        $beforeMtime = filemtime($this->project . '/bin/semitexa.new');
+        // Sleep 1s so a needless write would be detectable as an mtime bump.
+        sleep(1);
         $report = (new ScaffoldSyncEngine())->execute($plan, $this->project, $this->scaffold, now: $this->now);
         $r = $report->resultByPath('bin/semitexa');
 
-        self::assertSame('bin/semitexa.new', $r->newFilePath, 'No timestamp suffix when .new already matches current.');
+        self::assertSame(
+            ScaffoldSyncOutcome::NoOp,
+            $r->outcome,
+            'When the existing .new already matches current scaffold, the engine must not be Applied — that would lie.',
+        );
+        self::assertSame('bin/semitexa.new', $r->newFilePath);
         self::assertSame($current, file_get_contents($this->project . '/bin/semitexa.new'));
+        self::assertSame($beforeMtime, filemtime($this->project . '/bin/semitexa.new'), 'mtime must not bump.');
     }
 
     public function testWriteNewCreatesTimestampVariantWhenNewDiffersFromCurrent(): void
@@ -268,7 +324,7 @@ final class ScaffoldSyncEngineTest extends TestCase
         $this->writeProject('bin/semitexa', "operator\n");
         $this->writeProject('bin/semitexa.new', "operator-also-tweaked-the-new-file\n");
 
-        $plan = $this->classify($this->binManifest($current));
+        $plan = $this->classify($this->binManifest($current), writeCandidates: true);
         $report = (new ScaffoldSyncEngine())->execute($plan, $this->project, $this->scaffold, now: $this->now);
         $r = $report->resultByPath('bin/semitexa');
 
@@ -276,14 +332,15 @@ final class ScaffoldSyncEngineTest extends TestCase
         self::assertNotSame('bin/semitexa.new', $r->newFilePath);
         self::assertStringStartsWith('bin/semitexa.new.', $r->newFilePath);
         self::assertFileExists($this->project . '/' . $r->newFilePath);
-        // The pre-existing operator-edited .new file must be untouched.
         self::assertSame("operator-also-tweaked-the-new-file\n", file_get_contents($this->project . '/bin/semitexa.new'));
     }
 
-    private function classify(ScaffoldManifest $manifest): \Semitexa\Update\Domain\Model\Scaffold\ScaffoldSyncPlan
-    {
+    private function classify(
+        ScaffoldManifest $manifest,
+        bool $writeCandidates = false,
+    ): \Semitexa\Update\Domain\Model\Scaffold\ScaffoldSyncPlan {
         return (new ScaffoldFileClassifier(new ScaffoldHasher()))
-            ->plan($this->project, $this->scaffold, $manifest, $this->now);
+            ->plan($this->project, $this->scaffold, $manifest, $this->now, $writeCandidates);
     }
 
     /**

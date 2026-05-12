@@ -90,7 +90,7 @@ final class UpdateCommandRenderingTest extends TestCase
         self::assertStringContainsString('Rerun `bin/semitexa update`', $output, 'Must surface the manual-rerun recommendation, not auto re-exec.');
     }
 
-    public function testLocallyModifiedScaffoldFilePrintsManualReviewMessage(): void
+    public function testLocallyModifiedScaffoldFilePrintsManualReviewMessageByDefault(): void
     {
         file_put_contents($this->projectRoot . '/bin/semitexa', "operator-edited\n");
 
@@ -99,8 +99,31 @@ final class UpdateCommandRenderingTest extends TestCase
 
         $output = $tester->getDisplay();
         self::assertStringContainsString('locally_modified', $output);
+        self::assertStringContainsString('Live file left untouched.', $output);
+        self::assertStringContainsString(
+            'Run `bin/semitexa update --write-scaffold-candidates` to generate bin/semitexa.new',
+            $output,
+        );
+        // Crucially: no .new file actually got created on disk by the dry-run.
+        self::assertFileDoesNotExist($this->projectRoot . '/bin/semitexa.new');
+        // And the manual-review tally appears in the per-stage summary.
+        self::assertStringContainsString('manual-review', $output);
+    }
+
+    public function testWriteScaffoldCandidatesFlagSwitchesToWriteNewRendering(): void
+    {
+        file_put_contents($this->projectRoot . '/bin/semitexa', "operator-edited\n");
+
+        $tester = $this->commandTester();
+        $tester->execute(['--dry-run' => true, '--write-scaffold-candidates' => true]);
+
+        $output = $tester->getDisplay();
+        // With the flag, the entry goes back to write_new, dry-run reports would_apply.
+        self::assertStringContainsString('write_new', $output);
+        self::assertStringContainsString('would_apply', $output);
         self::assertStringContainsString('bin/semitexa.new', $output);
-        self::assertStringContainsString('Manual review required', $output);
+        // Still nothing actually written under dry-run.
+        self::assertFileDoesNotExist($this->projectRoot . '/bin/semitexa.new');
     }
 
     public function testIntegrityFailureRendersErrorBanner(): void

@@ -70,7 +70,7 @@ final class ScaffoldFileClassifierTest extends TestCase
         self::assertStringStartsWith('bin/semitexa.bak.', $entry->backupPath);
     }
 
-    public function testKnownPreviousWithAutoUpdateFalseProducesWriteNew(): void
+    public function testKnownPreviousWithAutoUpdateFalseProducesManualReviewByDefault(): void
     {
         $current = "current\n";
         $prior   = "prior\n";
@@ -88,16 +88,63 @@ final class ScaffoldFileClassifierTest extends TestCase
 
         self::assertNotNull($entry);
         self::assertSame(ScaffoldSyncStatus::KnownPrevious, $entry->status);
+        self::assertSame(ScaffoldSyncAction::ManualReview, $entry->action);
+        self::assertNull($entry->newFilePath, 'ManualReview never schedules a .new write.');
+        self::assertStringContainsString('--write-scaffold-candidates', $entry->reason);
+    }
+
+    public function testKnownPreviousWithAutoUpdateFalseSwitchesToWriteNewWhenFlagSet(): void
+    {
+        $current = "current\n";
+        $prior   = "prior\n";
+        $this->writeScaffold('bin/semitexa', $current);
+        $this->writeProject('bin/semitexa', $prior);
+
+        $manifest = $this->manifest([$this->binEntry(
+            currentBytes: $current,
+            previousBytes: [$prior],
+            autoUpdate: false,
+        )]);
+
+        $plan = (new ScaffoldFileClassifier())->plan(
+            $this->project,
+            $this->scaffold,
+            $manifest,
+            writeCandidates: true,
+        );
+        $entry = $plan->entryByPath('bin/semitexa');
+
+        self::assertNotNull($entry);
         self::assertSame(ScaffoldSyncAction::WriteNew, $entry->action);
         self::assertSame('bin/semitexa.new', $entry->newFilePath);
     }
 
-    public function testLocallyModifiedIsClassifiedAsConflict(): void
+    public function testLocallyModifiedDefaultsToManualReview(): void
     {
         $this->writeScaffold('bin/semitexa', "current\n");
         $this->writeProject('bin/semitexa', "operator-edited\n");
 
         $plan = (new ScaffoldFileClassifier())->plan($this->project, $this->scaffold, $this->binManifest());
+        $entry = $plan->entryByPath('bin/semitexa');
+
+        self::assertNotNull($entry);
+        self::assertSame(ScaffoldSyncStatus::LocallyModified, $entry->status);
+        self::assertSame(ScaffoldSyncAction::ManualReview, $entry->action);
+        self::assertNull($entry->newFilePath, 'No .new is scheduled by default.');
+        self::assertStringContainsString('--write-scaffold-candidates', $entry->reason);
+    }
+
+    public function testLocallyModifiedSwitchesToWriteNewWhenFlagSet(): void
+    {
+        $this->writeScaffold('bin/semitexa', "current\n");
+        $this->writeProject('bin/semitexa', "operator-edited\n");
+
+        $plan = (new ScaffoldFileClassifier())->plan(
+            $this->project,
+            $this->scaffold,
+            $this->binManifest(),
+            writeCandidates: true,
+        );
         $entry = $plan->entryByPath('bin/semitexa');
 
         self::assertNotNull($entry);
@@ -119,7 +166,7 @@ final class ScaffoldFileClassifierTest extends TestCase
         self::assertNull($entry->oldHash);
     }
 
-    public function testMissingWithAutoUpdateFalseIsClassifiedAsWriteNew(): void
+    public function testMissingWithAutoUpdateFalseDefaultsToManualReview(): void
     {
         $this->writeScaffold('bin/semitexa', "current\n");
         $manifest = $this->manifest([$this->binEntry(currentBytes: "current\n", autoUpdate: false)]);
@@ -129,7 +176,26 @@ final class ScaffoldFileClassifierTest extends TestCase
 
         self::assertNotNull($entry);
         self::assertSame(ScaffoldSyncStatus::Missing, $entry->status);
+        self::assertSame(ScaffoldSyncAction::ManualReview, $entry->action);
+        self::assertNull($entry->newFilePath);
+    }
+
+    public function testMissingWithAutoUpdateFalseAndFlagSetWritesNew(): void
+    {
+        $this->writeScaffold('bin/semitexa', "current\n");
+        $manifest = $this->manifest([$this->binEntry(currentBytes: "current\n", autoUpdate: false)]);
+
+        $plan = (new ScaffoldFileClassifier())->plan(
+            $this->project,
+            $this->scaffold,
+            $manifest,
+            writeCandidates: true,
+        );
+        $entry = $plan->entryByPath('bin/semitexa');
+
+        self::assertNotNull($entry);
         self::assertSame(ScaffoldSyncAction::WriteNew, $entry->action);
+        self::assertSame('bin/semitexa.new', $entry->newFilePath);
     }
 
     public function testIntegrityFailureWhenScaffoldFileMissing(): void

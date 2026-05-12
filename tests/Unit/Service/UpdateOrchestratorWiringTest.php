@@ -146,7 +146,7 @@ final class UpdateOrchestratorWiringTest extends TestCase
         self::assertSame($oldBin, file_get_contents($this->projectRoot . '/' . $bin->backupPath));
     }
 
-    public function testLocallyModifiedFileWritesNewAndLeavesLiveUntouched(): void
+    public function testLocallyModifiedDefaultsToManualReviewWithoutWritingNew(): void
     {
         $operator = "#!/bin/sh\n# operator-customized\necho mine\n";
         $this->writeProjectFile('bin/semitexa', $operator);
@@ -155,7 +155,24 @@ final class UpdateOrchestratorWiringTest extends TestCase
         $bin = $stages[0]->scaffoldReport->resultByPath('bin/semitexa');
 
         self::assertSame(ScaffoldSyncStatus::LocallyModified, $bin->status);
+        self::assertSame(ScaffoldSyncOutcome::ManualReview, $bin->outcome);
+        self::assertSame($operator, file_get_contents($this->projectRoot . '/bin/semitexa'));
+        self::assertFileDoesNotExist(
+            $this->projectRoot . '/bin/semitexa.new',
+            'Default real update must NOT create .new for LocallyModified entries — that was the UX bug.',
+        );
+    }
+
+    public function testLocallyModifiedWritesNewWhenWriteCandidatesFlagIsSet(): void
+    {
+        $operator = "#!/bin/sh\n# operator-customized\necho mine\n";
+        $this->writeProjectFile('bin/semitexa', $operator);
+
+        $stages = $this->orchestrator()->run(dryRun: false, writeCandidates: true);
+        $bin = $stages[0]->scaffoldReport->resultByPath('bin/semitexa');
+
         self::assertSame(ScaffoldSyncOutcome::Applied, $bin->outcome);
+        self::assertSame('bin/semitexa.new', $bin->newFilePath);
         self::assertSame($operator, file_get_contents($this->projectRoot . '/bin/semitexa'));
         self::assertFileExists($this->projectRoot . '/bin/semitexa.new');
     }
