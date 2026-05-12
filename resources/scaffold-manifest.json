@@ -1,0 +1,121 @@
+{
+    "schema_version": "semitexa.scaffold-manifest/v1",
+    "generated_at": "2026-05-12T06:18:04+00:00",
+    "files": [
+        {
+            "path": ".env.default",
+            "current_sha256": "9fc7be0832e3362c9644c1562b5476668fff77aa3b73850cc735b355f8c3796d",
+            "previous_sha256": [],
+            "category": "env_template",
+            "critical": false,
+            "auto_update": true,
+            "preserve_executable": false,
+            "notes": "Template only. The project .env file is never touched by scaffold sync."
+        },
+        {
+            "path": ".gitignore",
+            "current_sha256": "8431b6a3fbb44e694dba008aa20c7333495c7a2c4ea57acdf5d833f13c522110",
+            "previous_sha256": [
+                "4bd2128231cafcbdb8d1d25e8fb04836691bd11d9285a53067c5730350e7c1b6"
+            ],
+            "category": "vcs",
+            "critical": false,
+            "auto_update": true,
+            "preserve_executable": false,
+            "notes": ""
+        },
+        {
+            "path": "Dockerfile",
+            "current_sha256": "28652cf6f597d2ca0828f81580f12da31fa1845965f6e1ffa83b036df1e263a0",
+            "previous_sha256": [],
+            "category": "infrastructure",
+            "critical": false,
+            "auto_update": true,
+            "preserve_executable": false,
+            "notes": ""
+        },
+        {
+            "path": "bin/semitexa",
+            "current_sha256": "f0227fb9627cc47f995d0600631ef21293d7e8c8d8d590990561d8034b7d2a88",
+            "previous_sha256": [
+                "6023e10c3fde531896bd2693b3ceced7db693ad4b1c681fe9ef0f357cf588a6b",
+                "8b06fad28f3002bf7ac66b19444edb951555b6c6e3ee646daccb04dc63e9dfe7"
+            ],
+            "category": "executable",
+            "critical": true,
+            "auto_update": true,
+            "preserve_executable": true,
+            "notes": "Project CLI entry point. Auto-replace only when the project file matches a recorded prior hash; preserve +x; backup before replace."
+        },
+        {
+            "path": "docker-compose.mysql.yml",
+            "current_sha256": "d01c7bcdc2a4380c723bf48487fa5f21da4023d82d795fe14aea0f3a8e5469d6",
+            "previous_sha256": [],
+            "category": "infrastructure",
+            "critical": false,
+            "auto_update": true,
+            "preserve_executable": false,
+            "notes": ""
+        },
+        {
+            "path": "docker-compose.nats.yml",
+            "current_sha256": "5378fed73e1d192154571f52f35367d4624d19bd093d8e29ecfd7b953a9ee2ff",
+            "previous_sha256": [],
+            "category": "infrastructure",
+            "critical": false,
+            "auto_update": true,
+            "preserve_executable": false,
+            "notes": ""
+        },
+        {
+            "path": "docker-compose.ollama.yml",
+            "current_sha256": "ddee5ce2851a988d636bf4e4a9d38249cd496469e2120e7cd60b8a72669283f8",
+            "previous_sha256": [],
+            "category": "infrastructure",
+            "critical": false,
+            "auto_update": true,
+            "preserve_executable": false,
+            "notes": ""
+        },
+        {
+            "path": "docker-compose.override.yml.example",
+            "current_sha256": "c9a94047d918fcf1ea051d732f1b9d9a7cad4755f3669743bf23c5e6f1329ed6",
+            "previous_sha256": [],
+            "category": "example",
+            "critical": false,
+            "auto_update": true,
+            "preserve_executable": false,
+            "notes": "Template only. The project-managed docker-compose.override.yml is never touched."
+        },
+        {
+            "path": "docker-compose.redis.yml",
+            "current_sha256": "96405fd0222f0b53bd0a64f1603cc0435c5709c184f4e4c766ed24a1ab848f9a",
+            "previous_sha256": [],
+            "category": "infrastructure",
+            "critical": false,
+            "auto_update": true,
+            "preserve_executable": false,
+            "notes": ""
+        },
+        {
+            "path": "docker-compose.test.yml",
+            "current_sha256": "b12d38acfcd5babd238a3dddd84df2a45aa8c5f08aa6542a49be962fda7c0c62",
+            "previous_sha256": [],
+            "category": "infrastructure",
+            "critical": false,
+            "auto_update": true,
+            "preserve_executable": false,
+            "notes": ""
+        },
+        {
+            "path": "docker-compose.yml",
+            "current_sha256": "7255bd63b4c0e11129b4555f457fc6e3eae7ab8365927bf13968b15bb2c2a0fe",
+            "previous_sha256": [],
+            "category": "infrastructure",
+            "critical": false,
+            "auto_update": true,
+            "preserve_executable": false,
+            "notes": ""
+        }
+    ]
+}

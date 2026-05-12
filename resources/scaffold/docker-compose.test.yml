@@ -1,0 +1,18 @@
+services:
+  phpunit:
+    build: .
+    env_file:
+      - path: .env.default
+        required: true
+      - path: .env
+        required: false
+    environment:
+      APP_ENV: dev
+      APP_DEBUG: "1"
+    volumes:
+      - .:/var/www/html
+    working_dir: /var/www/html
+    command: ["vendor/bin/phpunit"]
+    depends_on:
+      setup:
+        condition: service_completed_successfully

@@ -42,7 +42,177 @@ final class JournalRepository
             return;
         }
         $this->db->query($this->createTableSql());
+        $this->reconcileLegacySchema();
         $this->schemaEnsured = true;
+    }
+
+    /**
+     * Reconcile a journal table that was created by an older Semitexa release.
+     *
+     * The pre-2026.05 schema used a single `step_fqcn` identity column. The
+     * current schema splits identity into (`module`, `patch_id`) and adds
+     * `patch_fqcn`, `semitexa_version`, `applied_db_state_hash`. CREATE TABLE
+     * IF NOT EXISTS leaves the legacy table untouched, so we additively
+     * upgrade the column set, backfill identity from `step_fqcn`, and
+     * swap the unique index. Idempotent and safe to run on fresh tables.
+     */
+    private function reconcileLegacySchema(): void
+    {
+        if ($this->db instanceof MysqlAdapter) {
+            $this->reconcileLegacySchemaMysql();
+            return;
+        }
+        if ($this->db instanceof SqliteAdapter) {
+            $this->reconcileLegacySchemaSqlite();
+        }
+    }
+
+    private function reconcileLegacySchemaMysql(): void
+    {
+        $columns = $this->mysqlColumns();
+        if ($columns === []) {
+            return;
+        }
+
+        $additions = [];
+        if (!isset($columns['module'])) {
+            $additions[] = 'ADD COLUMN module VARCHAR(255) NULL';
+        }
+        if (!isset($columns['patch_id'])) {
+            $additions[] = 'ADD COLUMN patch_id VARCHAR(255) NULL';
+        }
+        if (!isset($columns['patch_fqcn'])) {
+            $additions[] = 'ADD COLUMN patch_fqcn VARCHAR(255) NULL';
+        }
+        if (!isset($columns['semitexa_version'])) {
+            $additions[] = 'ADD COLUMN semitexa_version VARCHAR(64) NULL';
+        }
+        if (!isset($columns['applied_db_state_hash'])) {
+            $additions[] = 'ADD COLUMN applied_db_state_hash VARCHAR(64) NULL';
+        }
+        if ($additions !== []) {
+            $this->db->query('ALTER TABLE ' . self::TABLE . ' ' . implode(', ', $additions));
+            $columns = $this->mysqlColumns();
+        }
+
+        if (isset($columns['step_fqcn'])) {
+            $this->db->query(
+                'UPDATE ' . self::TABLE
+                . " SET module = COALESCE(NULLIF(module, ''), 'legacy'),"
+                . '     patch_id = COALESCE(NULLIF(patch_id, \'\'), step_fqcn),'
+                . '     patch_fqcn = COALESCE(patch_fqcn, step_fqcn)'
+                . ' WHERE step_fqcn IS NOT NULL'
+            );
+        }
+
+        if (isset($columns['module']) && $columns['module']['nullable']) {
+            $this->db->query('ALTER TABLE ' . self::TABLE . ' MODIFY COLUMN module VARCHAR(255) NOT NULL');
+        }
+        if (isset($columns['patch_id']) && $columns['patch_id']['nullable']) {
+            $this->db->query('ALTER TABLE ' . self::TABLE . ' MODIFY COLUMN patch_id VARCHAR(255) NOT NULL');
+        }
+        if (isset($columns['step_fqcn']) && !$columns['step_fqcn']['nullable']) {
+            $this->db->query('ALTER TABLE ' . self::TABLE . ' MODIFY COLUMN step_fqcn VARCHAR(255) NULL');
+        }
+
+        $indexes = $this->mysqlIndexes();
+        if (in_array('uniq_step_fqcn', $indexes, true)) {
+            $this->db->query('ALTER TABLE ' . self::TABLE . ' DROP INDEX uniq_step_fqcn');
+        }
+        if (!in_array('uniq_module_patch_id', $indexes, true)) {
+            $this->db->query(
+                'ALTER TABLE ' . self::TABLE
+                . ' ADD UNIQUE KEY uniq_module_patch_id (module, patch_id)'
+            );
+        }
+    }
+
+    /**
+     * @return array<string, array{nullable: bool}>
+     */
+    private function mysqlColumns(): array
+    {
+        $result = $this->db->query(
+            "SELECT COLUMN_NAME, IS_NULLABLE FROM information_schema.COLUMNS"
+            . " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '" . self::TABLE . "'"
+        );
+        $columns = [];
+        foreach ($result->fetchAll() as $row) {
+            $name = (string) ($row['COLUMN_NAME'] ?? $row['column_name'] ?? '');
+            $nullable = strtoupper((string) ($row['IS_NULLABLE'] ?? $row['is_nullable'] ?? 'NO')) === 'YES';
+            if ($name !== '') {
+                $columns[$name] = ['nullable' => $nullable];
+            }
+        }
+        return $columns;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function mysqlIndexes(): array
+    {
+        $result = $this->db->query(
+            "SELECT DISTINCT INDEX_NAME FROM information_schema.STATISTICS"
+            . " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '" . self::TABLE . "'"
+        );
+        $names = [];
+        foreach ($result->fetchAll() as $row) {
+            $name = (string) ($row['INDEX_NAME'] ?? $row['index_name'] ?? '');
+            if ($name !== '') {
+                $names[] = $name;
+            }
+        }
+        return $names;
+    }
+
+    private function reconcileLegacySchemaSqlite(): void
+    {
+        $columns = $this->sqliteColumns();
+        if ($columns === []) {
+            return;
+        }
+        if (isset($columns['module'])) {
+            return;
+        }
+
+        $hasStepFqcn = isset($columns['step_fqcn']);
+        $legacyTable = self::TABLE . '__legacy';
+
+        $this->db->query('ALTER TABLE ' . self::TABLE . ' RENAME TO ' . $legacyTable);
+        $this->db->query($this->createTableSql());
+
+        if ($hasStepFqcn) {
+            $this->db->query(
+                'INSERT INTO ' . self::TABLE
+                . ' (id, module, patch_id, patch_fqcn, phase, checksum, status,'
+                . '  semitexa_version, applied_db_state_hash,'
+                . '  started_at, completed_at, duration_ms, error)'
+                . " SELECT id, 'legacy', step_fqcn, step_fqcn, phase, checksum, status,"
+                . '        NULL, NULL,'
+                . '        started_at, completed_at, duration_ms, error'
+                . ' FROM ' . $legacyTable
+            );
+        }
+
+        $this->db->query('DROP TABLE ' . $legacyTable);
+    }
+
+    /**
+     * @return array<string, array{nullable: bool}>
+     */
+    private function sqliteColumns(): array
+    {
+        $result = $this->db->query('PRAGMA table_info(' . self::TABLE . ')');
+        $columns = [];
+        foreach ($result->fetchAll() as $row) {
+            $name = (string) ($row['name'] ?? '');
+            $notnull = (int) ($row['notnull'] ?? 0);
+            if ($name !== '') {
+                $columns[$name] = ['nullable' => $notnull === 0];
+            }
+        }
+        return $columns;
     }
 
     /**

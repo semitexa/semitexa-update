@@ -1,0 +1,2586 @@
+#!/bin/sh
+# ─────────────────────────────────────────────────────────────────────────────
+# Semitexa CLI — universal entry point (POSIX shell, no PHP required on host)
+#
+# Usage:  bin/semitexa <command> [arguments...]
+#
+# Server lifecycle commands (server:start, server:stop, server:restart) are
+# handled natively in this shell script via Docker Compose.
+#
+# Local routing commands (local-router:* and local-domain:*) manage the shared
+# Semitexa workstation router for .test domains.
+#
+# All other commands are proxied into the running "app" container so PHP
+# execution always uses the exact same runtime that powers the framework.
+#
+# Compatible with: macOS, Linux, Windows (Git Bash / WSL / MSYS2)
+# Architecture:    AMD64 and ARM64 (Apple Silicon, Raspberry Pi, etc.)
+# ─────────────────────────────────────────────────────────────────────────────
+set -e
+
+# ── Resolve project root (follow symlinks, works on macOS + Linux) ──────────
+resolve_script_dir() {
+    _source="$0"
+    while [ -L "$_source" ]; do
+        _dir="$(cd -P "$(dirname "$_source")" && pwd)"
+        _source="$(readlink "$_source")"
+        case "$_source" in
+            /*) ;;
+            *)  _source="$_dir/$_source" ;;
+        esac
+    done
+    cd -P "$(dirname "$_source")" && pwd
+}
+
+SCRIPT_DIR="$(resolve_script_dir)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$PROJECT_ROOT" || {
+    printf '[ERROR] Failed to enter project root: %s\n' "$PROJECT_ROOT" >&2
+    exit 1
+}
+
+# ── Colour helpers (safe for non-tty / Windows) ────────────────────────────
+if [ -t 1 ] && command -v tput >/dev/null 2>&1; then
+    C_RESET="$(tput sgr0 2>/dev/null || true)"
+    C_GREEN="$(tput setaf 2 2>/dev/null || true)"
+    C_YELLOW="$(tput setaf 3 2>/dev/null || true)"
+    C_RED="$(tput setaf 1 2>/dev/null || true)"
+    C_CYAN="$(tput setaf 6 2>/dev/null || true)"
+    C_BOLD="$(tput bold 2>/dev/null || true)"
+else
+    C_RESET="" C_GREEN="" C_YELLOW="" C_RED="" C_CYAN="" C_BOLD=""
+fi
+
+info()    { printf "%s[INFO]%s  %s\n"    "$C_CYAN"   "$C_RESET" "$*"; }
+success() { printf "%s[OK]%s    %s\n"    "$C_GREEN"  "$C_RESET" "$*"; }
+warn()    { printf "%s[WARN]%s  %s\n"    "$C_YELLOW" "$C_RESET" "$*" >&2; }
+error()   { printf "%s[ERROR]%s %s\n"    "$C_RED"    "$C_RESET" "$*" >&2; }
+
+# ── Env readers (.env.default + .env) ───────────────────────────────────────
+env_existing_files_low_to_high() {
+    for _file in \
+        "$PROJECT_ROOT/.env.default" \
+        "$PROJECT_ROOT/.env"
+    do
+        [ -f "$_file" ] && printf '%s\n' "$_file"
+    done
+}
+
+env_runtime_file_exists() {
+    for _file in "$PROJECT_ROOT/.env.default" "$PROJECT_ROOT/.env"; do
+        [ -f "$_file" ] && return 0
+    done
+    return 1
+}
+
+env_merged_lines() {
+    _files="$(env_existing_files_low_to_high | tr '\n' ' ')"
+    [ -n "$_files" ] || return 0
+
+    # shellcheck disable=SC2086
+    awk '
+        /^[[:space:]]*#/ || /^[[:space:]]*$/ || index($0, "=") == 0 { next }
+        {
+            line = $0
+            sub(/\r$/, "", line)
+            key = line
+            sub(/[[:space:]]*=.*$/, "", key)
+            gsub(/[[:space:]]/, "", key)
+            if (key !~ /^[A-Za-z_][A-Za-z0-9_]*$/) {
+                next
+            }
+            values[key] = line
+            if (!(key in first_seen)) {
+                order[++count] = key
+                first_seen[key] = 1
+            }
+        }
+        END {
+            for (i = 1; i <= count; i++) {
+                key = order[i]
+                if (!(key in printed) && (key in values)) {
+                    print values[key]
+                    printed[key] = 1
+                }
+            }
+        }
+    ' $_files
+}
+
+env_val() {
+    _key="$1"
+    _default="$2"
+    _val="$(env_merged_lines 2>/dev/null | grep -E "^[[:space:]]*${_key}[[:space:]]*=" 2>/dev/null | head -1 | sed 's/^[^=]*=[[:space:]]*//' | sed 's/[[:space:]]*$//' | sed 's/^"//' | sed 's/"$//')"
+    if [ -n "$_val" ]; then
+        printf '%s' "$_val"
+        return
+    fi
+    printf '%s' "$_default"
+}
+
+env_export_compose_context() {
+    _merged="$(env_merged_lines || true)"
+    [ -n "$_merged" ] || return 0
+
+    _old_ifs=$IFS
+    IFS='
+'
+    for _line in $_merged; do
+        [ -n "$_line" ] || continue
+        _key="$(printf '%s' "$_line" | sed 's/[[:space:]]*=.*$//' | tr -d '[:space:]')"
+        _val="$(printf '%s' "$_line" | sed 's/^[^=]*=[[:space:]]*//' | sed 's/[[:space:]]*$//' | sed 's/^"//' | sed 's/"$//')"
+        case "$_key" in
+            ''|*[!A-Za-z0-9_]*)
+                continue
+                ;;
+        esac
+        export "$_key=$_val"
+    done
+    IFS=$_old_ifs
+}
+
+# ── Docker Compose helpers ──────────────────────────────────────────────────
+has_compose() {
+    docker compose version >/dev/null 2>&1 && return 0
+    docker-compose version >/dev/null 2>&1 && return 0
+    return 1
+}
+
+compose_bin() {
+    if docker compose version >/dev/null 2>&1; then
+        echo "docker compose"
+    elif docker-compose version >/dev/null 2>&1; then
+        echo "docker-compose"
+    else
+        error "Docker Compose not found. Install Docker Desktop or docker-compose."
+        exit 1
+    fi
+}
+
+compose_args() {
+    _args="-f docker-compose.yml"
+    _has_overlay=0
+
+    # Per-operator override — standard Docker Compose convention.
+    # Explicit -f overrides compose's auto-discovery, so we must re-include it.
+    if [ -f "$PROJECT_ROOT/docker-compose.override.yml" ]; then
+        _args="$_args -f docker-compose.override.yml"
+        _has_overlay=1
+    fi
+
+    if [ -f "$PROJECT_ROOT/docker-compose.nats.yml" ]; then
+        _async="$(env_val EVENTS_ASYNC 0)"
+        case "$_async" in 1|true|yes) _args="$_args -f docker-compose.nats.yml"; _has_overlay=1 ;; esac
+    fi
+    if [ -f "$PROJECT_ROOT/docker-compose.mysql.yml" ]; then
+        _db="$(env_val DB_DRIVER "")"
+        if [ -n "$_db" ]; then _args="$_args -f docker-compose.mysql.yml"; _has_overlay=1; fi
+    fi
+    if [ -f "$PROJECT_ROOT/docker-compose.redis.yml" ]; then
+        _redis="$(env_val REDIS_HOST "")"
+        if [ -n "$_redis" ]; then _args="$_args -f docker-compose.redis.yml"; _has_overlay=1; fi
+    fi
+    if [ -f "$PROJECT_ROOT/docker-compose.ollama.yml" ]; then
+        _llm_provider="$(env_val LLM_PROVIDER "")"
+        if [ "$_llm_provider" = "ollama" ]; then _args="$_args -f docker-compose.ollama.yml"; _has_overlay=1; fi
+    fi
+    # External path-repo overlay. Loaded only when the operator has created
+    # the project-root symlink `./semitexa.pl`. Mounts that path into the
+    # phpunit / e2e-runner / app / scheduler services so vendor symlinks for
+    # composer path-repo packages whose sources live outside the project
+    # tree (currently semitexa/platform-ui) resolve identically on host and
+    # in containers. See docker-compose.path-repos.yml header for details.
+    if [ -f "$PROJECT_ROOT/docker-compose.path-repos.yml" ] && [ -L "$PROJECT_ROOT/semitexa.pl" ]; then
+        _args="$_args -f docker-compose.path-repos.yml"
+        _has_overlay=1
+    fi
+    if [ "$_has_overlay" -eq 0 ]; then
+        echo ""
+    else
+        echo "$_args"
+    fi
+}
+
+# Returns ALL compose files regardless of .env settings (for stop/cleanup).
+compose_all_args() {
+    _args="-f docker-compose.yml"
+    for _overlay in docker-compose.override.yml docker-compose.nats.yml docker-compose.mysql.yml docker-compose.redis.yml docker-compose.ollama.yml; do
+        [ -f "$PROJECT_ROOT/$_overlay" ] && _args="$_args -f $_overlay"
+    done
+    echo "$_args"
+}
+
+run_compose() {
+    _compose="$(compose_bin)"
+    _overlays="$(compose_args)"
+    (
+        env_export_compose_context
+        if [ -n "$_overlays" ]; then
+            # shellcheck disable=SC2086
+            $_compose $_overlays "$@"
+        else
+            $_compose "$@"
+        fi
+    )
+}
+
+is_app_running() {
+    _compose="$(compose_bin)"
+    _overlays="$(compose_args)"
+    _status="$(
+        env_export_compose_context
+        if [ -n "$_overlays" ]; then
+            # shellcheck disable=SC2086
+            $_compose $_overlays ps --format '{{.State}}' app 2>/dev/null || true
+        else
+            $_compose ps --format '{{.State}}' app 2>/dev/null || true
+        fi
+    )"
+    case "$_status" in
+        *running*) return 0 ;;
+        *)         return 1 ;;
+    esac
+}
+
+wait_for_service() {
+    _service_name="$1" _host="$2" _port="$3" _max_attempts="$4" _delay="$5" _initial_wait="${6:-0}"
+
+    if [ "$_initial_wait" -gt 0 ]; then
+        info "Waiting ${_initial_wait}s for $_service_name to initialise..."
+        sleep "$_initial_wait"
+    fi
+
+    _attempt=1
+    while [ "$_attempt" -le "$_max_attempts" ]; do
+        if run_compose exec -T app sh -c "
+            (echo > /dev/tcp/$_host/$_port) 2>/dev/null ||
+            nc -z $_host $_port 2>/dev/null ||
+            timeout 3 sh -c \"cat < /dev/null > /dev/tcp/$_host/$_port\" 2>/dev/null
+        " >/dev/null 2>&1; then
+            success "$_service_name: reachable"
+            return 0
+        fi
+        _attempt=$((_attempt + 1))
+        [ "$_attempt" -le "$_max_attempts" ] && sleep "$_delay"
+    done
+
+    warn "$_service_name: not reachable after $_max_attempts attempts (may still be starting)"
+    return 1
+}
+
+# ── Shared local router helpers ─────────────────────────────────────────────
+SEMITEXA_HOME="${SEMITEXA_HOME:-$HOME/.semitexa}"
+ROUTER_ROOT="$SEMITEXA_HOME/router"
+ROUTER_COMPOSE="$ROUTER_ROOT/docker-compose.yml"
+ROUTER_MODE_FILE="$ROUTER_ROOT/mode"
+ROUTER_REGISTRY_DIR="$ROUTER_ROOT/registry/domains"
+ROUTER_NGINX_DIR="$ROUTER_ROOT/nginx/generated"
+ROUTER_DNS_DIR="$ROUTER_ROOT/dns/generated"
+ROUTER_NGINX_DEFAULT="$ROUTER_NGINX_DIR/default.conf"
+ROUTER_NGINX_DOMAINS="$ROUTER_NGINX_DIR/domains.conf"
+ROUTER_DNSMASQ_CONF="$ROUTER_DNS_DIR/dnsmasq.conf"
+ROUTER_DNS_DOMAINS="$ROUTER_DNS_DIR/domains.conf"
+
+router_ensure_dirs() {
+    mkdir -p "$ROUTER_ROOT" "$ROUTER_REGISTRY_DIR" "$ROUTER_NGINX_DIR" "$ROUTER_DNS_DIR"
+}
+
+router_entry_key() {
+    printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9.-' '_'
+}
+
+router_entry_path() {
+    printf '%s/%s.env' "$ROUTER_REGISTRY_DIR" "$(router_entry_key "$1")"
+}
+
+router_mode_get() {
+    if [ -f "$ROUTER_MODE_FILE" ]; then
+        _mode="$(tr -d '[:space:]' < "$ROUTER_MODE_FILE" 2>/dev/null || true)"
+        case "$_mode" in dns|hosts) printf '%s' "$_mode"; return ;; esac
+    fi
+    printf 'dns'
+}
+
+router_mode_set() {
+    _mode="$1"
+    case "$_mode" in
+        dns|hosts) ;;
+        *)
+            error "Unsupported local router mode: $_mode"
+            exit 1
+            ;;
+    esac
+    router_ensure_dirs
+    printf '%s\n' "$_mode" > "$ROUTER_MODE_FILE"
+}
+
+router_validate_domain() {
+    _domain="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+    case "$_domain" in
+        *.test) ;;
+        *) return 1 ;;
+    esac
+    _label="${_domain%.test}"
+    [ -n "$_label" ] || return 1
+    case "$_label" in
+        *[!a-z0-9.-]*|-*|*-) return 1 ;;
+    esac
+    return 0
+}
+
+router_registry_write_entry() {
+    _domain="$1"
+    _upstream_port="$2"
+    _mode="$3"
+    _path="$(router_entry_path "$_domain")"
+    _compose_project_name="$(basename "$PROJECT_ROOT")"
+
+    router_ensure_dirs
+    cat > "$_path" <<EOF
+DOMAIN=$_domain
+PROJECT_ROOT=$PROJECT_ROOT
+COMPOSE_PROJECT_NAME=$_compose_project_name
+UPSTREAM_HOST=host.docker.internal
+UPSTREAM_PORT=$_upstream_port
+MODE=$_mode
+UPDATED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+EOF
+}
+
+router_registry_delete_entry() {
+    _domain="$1"
+    rm -f "$(router_entry_path "$_domain")"
+}
+
+router_registry_count() {
+    find "$ROUTER_REGISTRY_DIR" -maxdepth 1 -type f -name '*.env' 2>/dev/null | wc -l | tr -d ' '
+}
+
+router_collect_project_domains() {
+    env_merged_lines 2>/dev/null \
+        | grep -E '^[[:space:]]*[A-Z0-9_]*DOMAIN[A-Z0-9_]*[[:space:]]*=' 2>/dev/null \
+        | while IFS= read -r _line; do
+            _value="$(printf '%s' "$_line" | sed 's/^[^=]*=[[:space:]]*//' | sed 's/[[:space:]]*$//' | sed 's/^"//' | sed 's/"$//')"
+            printf '%s\n' "$_value" | tr ', ' '\n\n' | while IFS= read -r _candidate; do
+                _candidate="$(printf '%s' "$_candidate" | tr '[:upper:]' '[:lower:]')"
+                [ -n "$_candidate" ] || continue
+                if router_validate_domain "$_candidate"; then
+                    printf '%s\n' "$_candidate"
+                fi
+            done
+        done | sort -u
+}
+
+router_sync_project_domains() {
+    _domains="$(router_collect_project_domains || true)"
+    [ -n "$_domains" ] || return 0
+
+    _saved_project_root="$PROJECT_ROOT"
+    _port="$(env_val SWOOLE_PORT 8080)"
+    _mode="$(router_mode_get)"
+
+    router_ensure_dirs
+
+    for _entry in "$ROUTER_REGISTRY_DIR"/*.env; do
+        [ -f "$_entry" ] || continue
+        DOMAIN='' PROJECT_ROOT='' UPSTREAM_PORT='' MODE=''
+        # shellcheck disable=SC1090
+        . "$_entry"
+        [ "$PROJECT_ROOT" = "$_saved_project_root" ] || continue
+        if ! printf '%s\n' "$_domains" | grep -Fx -- "$DOMAIN" >/dev/null 2>&1; then
+            rm -f "$_entry"
+        fi
+    done
+
+    PROJECT_ROOT="$_saved_project_root"
+    printf '%s\n' "$_domains" | while IFS= read -r _domain; do
+        [ -n "$_domain" ] || continue
+        router_registry_write_entry "$_domain" "$_port" "$_mode"
+    done
+    PROJECT_ROOT="$_saved_project_root"
+}
+
+router_project_domain_count() {
+    _project_root="${1:-$PROJECT_ROOT}"
+    _saved_project_root="$PROJECT_ROOT"
+    _count=0
+    for _entry in "$ROUTER_REGISTRY_DIR"/*.env; do
+        [ -f "$_entry" ] || continue
+        DOMAIN='' PROJECT_ROOT='' UPSTREAM_PORT='' MODE=''
+        # shellcheck disable=SC1090
+        . "$_entry"
+        [ "$PROJECT_ROOT" = "$_project_root" ] || continue
+        _count=$((_count + 1))
+    done
+    PROJECT_ROOT="$_saved_project_root"
+    printf '%s' "$_count"
+}
+
+# Print domains registered in the shared router for the given project root,
+# one per line, alphabetically sorted. Used by server:start to show the real
+# URLs the project is reachable at instead of generic http://localhost:<port>.
+router_list_project_domains() {
+    _project_root="${1:-$PROJECT_ROOT}"
+    _saved_project_root="$PROJECT_ROOT"
+    for _entry in "$ROUTER_REGISTRY_DIR"/*.env; do
+        [ -f "$_entry" ] || continue
+        DOMAIN='' PROJECT_ROOT='' UPSTREAM_PORT='' MODE=''
+        # shellcheck disable=SC1090
+        . "$_entry"
+        [ "$PROJECT_ROOT" = "$_project_root" ] || continue
+        [ -n "$DOMAIN" ] || continue
+        printf '%s\n' "$DOMAIN"
+    done | sort
+    PROJECT_ROOT="$_saved_project_root"
+}
+
+project_has_shared_domains() {
+    [ "$(router_project_domain_count "$PROJECT_ROOT")" -gt 0 ] && return 0
+    [ -n "$(router_collect_project_domains || true)" ]
+}
+
+# ── Local app registry + Swoole port broker ─────────────────────────────────
+# Each installed Semitexa project registers itself in
+#   ~/.semitexa/router/registry/apps/<app-id>.env
+# and gets a unique, persisted Swoole port from a configurable range
+# (default 9501-9599). Prevents host-port collisions when multiple Semitexa
+# projects run on the same workstation.
+ROUTER_APP_REGISTRY_DIR="$ROUTER_ROOT/registry/apps"
+ROUTER_CONFIG_FILE="$ROUTER_ROOT/config.env"
+ROUTER_LOCK_DIR="$ROUTER_ROOT/locks"
+
+router_ensure_app_dirs() {
+    mkdir -p "$ROUTER_APP_REGISTRY_DIR" "$ROUTER_LOCK_DIR"
+}
+
+# Best-effort lock via mkdir; gives up after ~5s. Workstation-only collisions
+# are extremely rare; the lock just guards back-to-back installs.
+router_lock_acquire() {
+    router_ensure_app_dirs
+    _lock="$ROUTER_LOCK_DIR/registry.lock"
+    _waited=0
+    while [ "$_waited" -lt 50 ]; do
+        if mkdir "$_lock" 2>/dev/null; then
+            return 0
+        fi
+        sleep 0.1 2>/dev/null || sleep 1
+        _waited=$((_waited + 1))
+    done
+    return 0
+}
+
+router_lock_release() {
+    rm -rf "$ROUTER_LOCK_DIR/registry.lock" 2>/dev/null || true
+}
+
+port_range_start() {
+    if [ -f "$ROUTER_CONFIG_FILE" ]; then
+        _v="$(grep -E '^[[:space:]]*SEMITEXA_LOCAL_PORT_RANGE_START[[:space:]]*=' "$ROUTER_CONFIG_FILE" 2>/dev/null | head -1 | sed 's/^[^=]*=[[:space:]]*//' | tr -d '[:space:]"')"
+        case "$_v" in ''|*[!0-9]*) ;; *) printf '%s' "$_v"; return ;; esac
+    fi
+    printf '9501'
+}
+
+port_range_end() {
+    if [ -f "$ROUTER_CONFIG_FILE" ]; then
+        _v="$(grep -E '^[[:space:]]*SEMITEXA_LOCAL_PORT_RANGE_END[[:space:]]*=' "$ROUTER_CONFIG_FILE" 2>/dev/null | head -1 | sed 's/^[^=]*=[[:space:]]*//' | tr -d '[:space:]"')"
+        case "$_v" in ''|*[!0-9]*) ;; *) printf '%s' "$_v"; return ;; esac
+    fi
+    printf '9599'
+}
+
+port_in_range() {
+    _p="$1"
+    case "$_p" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$_p" -ge "$(port_range_start)" ] && [ "$_p" -le "$(port_range_end)" ]
+}
+
+# Returns 0 if <port> is bound on the host by ANY listening process.
+# Tries ss → netstat → nc → bash /dev/tcp for portability.
+port_in_use_on_host() {
+    _p="$1"
+    case "$_p" in ''|*[!0-9]*) return 1 ;; esac
+
+    if command -v ss >/dev/null 2>&1; then
+        ss -ltn 2>/dev/null | awk 'NR>1 {print $4}' | grep -E "[:.]${_p}\$" >/dev/null 2>&1
+        return $?
+    fi
+    if command -v netstat >/dev/null 2>&1; then
+        netstat -an 2>/dev/null | awk '/LISTEN/ {print $4}' | grep -E "[:.]${_p}\$" >/dev/null 2>&1
+        return $?
+    fi
+    if command -v nc >/dev/null 2>&1; then
+        nc -z 127.0.0.1 "$_p" >/dev/null 2>&1
+        return $?
+    fi
+    if command -v bash >/dev/null 2>&1; then
+        bash -c "exec 9<>/dev/tcp/127.0.0.1/$_p" >/dev/null 2>&1
+        _rc=$?
+        bash -c "exec 9>&-" >/dev/null 2>&1 || true
+        return $_rc
+    fi
+    return 1
+}
+
+router_app_entry_path() {
+    _id="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9.-' '_')"
+    printf '%s/%s.env' "$ROUTER_APP_REGISTRY_DIR" "$_id"
+}
+
+router_app_entry_exists() {
+    [ -f "$(router_app_entry_path "$1")" ]
+}
+
+# Iterate over every app entry and emit "APP_ID<TAB>SWOOLE_PORT<TAB>PROJECT_ROOT<TAB>PROJECT_NAME".
+router_app_iter() {
+    [ -d "$ROUTER_APP_REGISTRY_DIR" ] || return 0
+    for _entry in "$ROUTER_APP_REGISTRY_DIR"/*.env; do
+        [ -f "$_entry" ] || continue
+        APP_ID='' SWOOLE_PORT='' PROJECT_ROOT='' PROJECT_NAME='' REGISTERED_AT='' UPDATED_AT=''
+        # shellcheck disable=SC1090
+        . "$_entry"
+        [ -n "$APP_ID" ] || continue
+        [ -n "$SWOOLE_PORT" ] || continue
+        printf '%s\t%s\t%s\t%s\n' "$APP_ID" "$SWOOLE_PORT" "${PROJECT_ROOT:-}" "${PROJECT_NAME:-}"
+    done
+}
+
+# Find the app id matching a project root, if registered. Empty stdout if not.
+router_app_find_by_project() {
+    _root="$1"
+    [ -n "$_root" ] || return 1
+    [ -d "$ROUTER_APP_REGISTRY_DIR" ] || return 1
+    for _entry in "$ROUTER_APP_REGISTRY_DIR"/*.env; do
+        [ -f "$_entry" ] || continue
+        APP_ID='' SWOOLE_PORT='' PROJECT_ROOT='' PROJECT_NAME='' REGISTERED_AT='' UPDATED_AT=''
+        # shellcheck disable=SC1090
+        . "$_entry"
+        if [ "$PROJECT_ROOT" = "$_root" ] && [ -n "$APP_ID" ]; then
+            printf '%s' "$APP_ID"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Returns 0 if <port> is registered to a DIFFERENT app than <self_app_id>.
+port_owned_by_other_app() {
+    _port="$1"
+    _self="$2"
+    [ -d "$ROUTER_APP_REGISTRY_DIR" ] || return 1
+    for _entry in "$ROUTER_APP_REGISTRY_DIR"/*.env; do
+        [ -f "$_entry" ] || continue
+        APP_ID='' SWOOLE_PORT='' PROJECT_ROOT='' PROJECT_NAME='' REGISTERED_AT='' UPDATED_AT=''
+        # shellcheck disable=SC1090
+        . "$_entry"
+        [ -n "$APP_ID" ] || continue
+        [ -n "$SWOOLE_PORT" ] || continue
+        [ "$SWOOLE_PORT" = "$_port" ] || continue
+        [ "$APP_ID" != "$_self" ] || continue
+        return 0
+    done
+    return 1
+}
+
+# Scan [start..end] for a port that is neither owned by another app id
+# nor bound on the host. Echoes the chosen port; non-zero exit if exhausted.
+allocate_free_port() {
+    _self="$1"
+    _start="$(port_range_start)"
+    _end="$(port_range_end)"
+    _p="$_start"
+    while [ "$_p" -le "$_end" ]; do
+        if ! port_owned_by_other_app "$_p" "$_self" && ! port_in_use_on_host "$_p"; then
+            printf '%s' "$_p"
+            return 0
+        fi
+        _p=$((_p + 1))
+    done
+    return 1
+}
+
+# Generate a UUIDv4. Prefers `uuidgen`; falls back to /dev/urandom and
+# manually sets the version + variant nibbles per RFC 4122 §4.4.
+app_generate_uuid() {
+    if command -v uuidgen >/dev/null 2>&1; then
+        uuidgen 2>/dev/null | tr '[:upper:]' '[:lower:]'
+        return 0
+    fi
+    if [ -r /proc/sys/kernel/random/uuid ]; then
+        cat /proc/sys/kernel/random/uuid 2>/dev/null
+        return 0
+    fi
+    if [ -r /dev/urandom ]; then
+        _hex="$(od -An -N16 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n')"
+        if [ -n "$_hex" ]; then
+            _g1="$(printf '%s' "$_hex" | cut -c1-8)"
+            _g2="$(printf '%s' "$_hex" | cut -c9-12)"
+            _g3="$(printf '4%s' "$(printf '%s' "$_hex" | cut -c14-16)")"
+            _v9="$(printf '%s' "$_hex" | cut -c17)"
+            case "$_v9" in
+                0|1|2|3|4|5|6|7) _v9=8 ;;
+                c|d|e|f)         _v9=a ;;
+            esac
+            _g4="$(printf '%s%s' "$_v9" "$(printf '%s' "$_hex" | cut -c18-20)")"
+            _g5="$(printf '%s' "$_hex" | cut -c21-32)"
+            printf '%s-%s-%s-%s-%s\n' "$_g1" "$_g2" "$_g3" "$_g4" "$_g5"
+            return 0
+        fi
+    fi
+    error "Cannot generate UUID: no uuidgen, /proc UUID, or /dev/urandom available."
+    exit 1
+}
+
+# Loose validator: accepts canonical UUIDv4 or a [a-z0-9-]{6,64} slug.
+app_validate_app_id() {
+    _id="$1"
+    case "$_id" in
+        ''|*[!a-z0-9-]*) return 1 ;;
+    esac
+    _len=${#_id}
+    [ "$_len" -ge 6 ] && [ "$_len" -le 64 ]
+}
+
+# Persist an app entry. REGISTERED_AT is preserved across re-writes.
+router_app_write_entry() {
+    _id="$1"
+    _port="$2"
+    _project_root_arg="${3:-$PROJECT_ROOT}"
+    _project_name="$(basename "$_project_root_arg" 2>/dev/null || echo unknown)"
+    _path="$(router_app_entry_path "$_id")"
+    _registered_at=""
+    if [ -f "$_path" ]; then
+        APP_ID='' SWOOLE_PORT='' PROJECT_ROOT='' PROJECT_NAME='' REGISTERED_AT='' UPDATED_AT=''
+        # shellcheck disable=SC1090
+        . "$_path"
+        _registered_at="$REGISTERED_AT"
+    fi
+    [ -n "$_registered_at" ] || _registered_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+    router_ensure_app_dirs
+    cat > "$_path" <<EOF
+APP_ID=$_id
+PROJECT_ROOT=$_project_root_arg
+PROJECT_NAME=$_project_name
+SWOOLE_PORT=$_port
+REGISTERED_AT=$_registered_at
+UPDATED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+EOF
+}
+
+router_app_delete_entry() {
+    _id="$1"
+    rm -f "$(router_app_entry_path "$_id")"
+}
+
+# Rewrite UPSTREAM_PORT for every domain entry under a project root, regenerate
+# nginx + dnsmasq config, and reload the proxy if it's running.
+router_apply_app_port_to_domains() {
+    _project_root_arg="$1"
+    _new_port="$2"
+    [ -n "$_project_root_arg" ] || return 0
+    [ -n "$_new_port" ] || return 0
+    [ -d "$ROUTER_REGISTRY_DIR" ] || return 0
+
+    _saved_project_root="$PROJECT_ROOT"
+    _changed=0
+    for _entry in "$ROUTER_REGISTRY_DIR"/*.env; do
+        [ -f "$_entry" ] || continue
+        DOMAIN='' PROJECT_ROOT='' COMPOSE_PROJECT_NAME='' UPSTREAM_HOST='' UPSTREAM_PORT='' MODE='' UPDATED_AT=''
+        # shellcheck disable=SC1090
+        . "$_entry"
+        [ "$PROJECT_ROOT" = "$_project_root_arg" ] || continue
+        [ "$UPSTREAM_PORT" != "$_new_port" ] || continue
+        PROJECT_ROOT="$_project_root_arg"
+        router_registry_write_entry "$DOMAIN" "$_new_port" "$MODE"
+        _changed=1
+    done
+    PROJECT_ROOT="$_saved_project_root"
+
+    if [ "$_changed" -eq 1 ]; then
+        router_generate_nginx_config
+        router_generate_dns_config
+        if [ -f "$ROUTER_COMPOSE" ]; then
+            router_compose restart proxy >/dev/null 2>&1 || true
+        fi
+    fi
+}
+
+# Atomic-ish .env upsert: replace KEY=... line in-place, otherwise append.
+env_upsert_kv() {
+    _file="$1"
+    _key="$2"
+    _val="$3"
+    [ -n "$_file" ] || return 1
+    [ -n "$_key" ] || return 1
+    if [ ! -f "$_file" ]; then
+        printf '%s=%s\n' "$_key" "$_val" > "$_file"
+        return 0
+    fi
+    _tmp="$(mktemp "${_file}.XXXXXX")"
+    awk -v k="$_key" -v v="$_val" '
+        BEGIN { written = 0 }
+        {
+            line = $0
+            stripped = line
+            sub(/^[[:space:]]+/, "", stripped)
+            if (stripped ~ "^"k"[[:space:]]*=") {
+                if (!written) { print k "=" v; written = 1 }
+                next
+            }
+            print line
+        }
+        END { if (!written) print k "=" v }
+    ' "$_file" > "$_tmp" && mv "$_tmp" "$_file"
+}
+
+# Returns 0 (success) if the project rooted at $1 has its `app` compose service
+# in a "running" state, 1 otherwise. Unlike `is_app_running` this is per-project
+# (takes the project root explicitly), and queries Docker directly via compose
+# labels so it works even when $PROJECT_ROOT doesn't match the argument.
+#
+# The broker uses this to gate self-port reuse: a registry entry from a
+# project whose `app` container isn't actually up MUST NOT be treated as
+# "owns this port" — otherwise a stopped project would shadow whoever has
+# actually bound the port (another Semitexa app or an unrelated host process).
+project_is_app_running() {
+    _project_root_arg="${1:-$PROJECT_ROOT}"
+    [ -n "$_project_root_arg" ] || return 1
+    command -v docker >/dev/null 2>&1 || return 1
+    _proj_name="$(basename "$_project_root_arg" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')"
+    [ -n "$_proj_name" ] || return 1
+    _running="$(
+        docker ps \
+            --filter "label=com.docker.compose.project=$_proj_name" \
+            --filter "label=com.docker.compose.service=app" \
+            --filter "status=running" \
+            --format '{{.ID}}' 2>/dev/null | head -n 1
+    )"
+    [ -n "$_running" ]
+}
+
+# Treat "in use by us" as not-in-use, so reconciling while our own container
+# is publishing this port doesn't relocate the app.
+#
+# Registry-match alone is not sufficient: a stale entry whose app isn't
+# actually running could otherwise shadow a port that some other process
+# now holds. We require the project's app container to be running before
+# trusting a router-registry entry as proof of self-ownership.
+port_in_use_on_host_excluding_self() {
+    _port="$1"
+    _project_root_arg="${2:-$PROJECT_ROOT}"
+    if ! port_in_use_on_host "$_port"; then
+        return 1
+    fi
+    _project_running=0
+    if project_is_app_running "$_project_root_arg"; then
+        _project_running=1
+    fi
+    if [ -d "$ROUTER_REGISTRY_DIR" ]; then
+        for _entry in "$ROUTER_REGISTRY_DIR"/*.env; do
+            [ -f "$_entry" ] || continue
+            DOMAIN='' PROJECT_ROOT='' COMPOSE_PROJECT_NAME='' UPSTREAM_HOST='' UPSTREAM_PORT='' MODE='' UPDATED_AT=''
+            # shellcheck disable=SC1090
+            . "$_entry"
+            if [ "$_project_running" -eq 1 ] && [ "$PROJECT_ROOT" = "$_project_root_arg" ] && [ "$UPSTREAM_PORT" = "$_port" ]; then
+                return 1
+            fi
+        done
+    fi
+    _existing="$(router_app_find_by_project "$_project_root_arg" 2>/dev/null || true)"
+    if [ -n "$_existing" ] && [ -f "$(router_app_entry_path "$_existing")" ]; then
+        APP_ID='' SWOOLE_PORT='' PROJECT_ROOT='' PROJECT_NAME='' REGISTERED_AT='' UPDATED_AT=''
+        # shellcheck disable=SC1090
+        . "$(router_app_entry_path "$_existing")"
+        if [ "$_project_running" -eq 1 ] && [ "$SWOOLE_PORT" = "$_port" ]; then
+            return 1
+        fi
+    fi
+    return 0
+}
+
+# Core registration algorithm. Inputs: <app-id> [<requested-port>] [<project-root>]
+# Echoes the assigned port; non-zero exit if no port could be allocated.
+local_app_register_logic() {
+    _id="$1"
+    _requested="${2:-}"
+    _project_root_arg="${3:-$PROJECT_ROOT}"
+
+    if ! app_validate_app_id "$_id"; then
+        error "Invalid SEMITEXA_APP_ID: '$_id' (expected 6-64 chars, [a-z0-9-])."
+        return 1
+    fi
+
+    router_ensure_app_dirs
+    router_lock_acquire
+
+    _existing_port=""
+    if router_app_entry_exists "$_id"; then
+        APP_ID='' SWOOLE_PORT='' PROJECT_ROOT='' PROJECT_NAME='' REGISTERED_AT='' UPDATED_AT=''
+        # shellcheck disable=SC1090
+        . "$(router_app_entry_path "$_id")"
+        _existing_port="$SWOOLE_PORT"
+    fi
+
+    case "$_requested" in
+        ''|auto) _requested="" ;;
+        *[!0-9]*)
+            warn "Requested port '$_requested' is not numeric; ignoring."
+            _requested=""
+            ;;
+    esac
+
+    _assigned=""
+    if [ -z "$_requested" ]; then
+        if [ -n "$_existing_port" ] \
+            && port_in_range "$_existing_port" \
+            && ! port_owned_by_other_app "$_existing_port" "$_id" \
+            && ! port_in_use_on_host_excluding_self "$_existing_port" "$_project_root_arg"; then
+            _assigned="$_existing_port"
+        else
+            _assigned="$(allocate_free_port "$_id" || true)"
+        fi
+    else
+        if ! port_in_range "$_requested"; then
+            warn "Port $_requested is outside the allowed range ($(port_range_start)-$(port_range_end))."
+        elif port_owned_by_other_app "$_requested" "$_id"; then
+            warn "Port $_requested is already assigned to another local Semitexa app."
+        elif port_in_use_on_host_excluding_self "$_requested" "$_project_root_arg"; then
+            warn "Port $_requested is currently bound by another process on the host."
+        else
+            _assigned="$_requested"
+        fi
+        if [ -z "$_assigned" ]; then
+            _assigned="$(allocate_free_port "$_id" || true)"
+            [ -n "$_assigned" ] && warn "Falling back to free port $_assigned."
+        fi
+    fi
+
+    if [ -z "$_assigned" ]; then
+        router_lock_release
+        error "No free port in $(port_range_start)-$(port_range_end). Adjust SEMITEXA_LOCAL_PORT_RANGE_START/END in $ROUTER_CONFIG_FILE."
+        return 1
+    fi
+
+    router_app_write_entry "$_id" "$_assigned" "$_project_root_arg"
+    router_apply_app_port_to_domains "$_project_root_arg" "$_assigned"
+    router_lock_release
+    printf '%s' "$_assigned"
+}
+
+# High-level reconcile for $PROJECT_ROOT: ensure SEMITEXA_APP_ID + SWOOLE_PORT
+# in .env are valid against the broker; rewrite .env if the assigned port
+# differs from what the project asked for. No-op when no .env.* file exists.
+local_app_reconcile() {
+    _env_file="$PROJECT_ROOT/.env"
+    if [ ! -f "$_env_file" ] && [ ! -f "$PROJECT_ROOT/.env.default" ]; then
+        return 0
+    fi
+
+    _app_id="$(env_val SEMITEXA_APP_ID '')"
+    if [ -z "$_app_id" ]; then
+        _app_id="$(router_app_find_by_project "$PROJECT_ROOT" 2>/dev/null || true)"
+        if [ -z "$_app_id" ]; then
+            _app_id="$(app_generate_uuid)"
+            info "Generated SEMITEXA_APP_ID=$_app_id for $(basename "$PROJECT_ROOT")."
+        else
+            info "Reusing existing app id $_app_id for $(basename "$PROJECT_ROOT")."
+        fi
+        [ -f "$_env_file" ] || : > "$_env_file"
+        env_upsert_kv "$_env_file" SEMITEXA_APP_ID "$_app_id"
+    fi
+
+    _current_port="$(env_val SWOOLE_PORT '')"
+    _assigned="$(local_app_register_logic "$_app_id" "$_current_port" "$PROJECT_ROOT" || true)"
+    if [ -z "$_assigned" ]; then
+        warn "Local app registry could not assign a Swoole port; keeping existing value."
+        return 1
+    fi
+
+    if [ "$_assigned" != "$_current_port" ]; then
+        if [ -n "$_current_port" ]; then
+            warn "Swoole port for app $_app_id changed from $_current_port to $_assigned (conflict or out-of-range)."
+        else
+            info "Swoole port for app $_app_id assigned to $_assigned."
+        fi
+        [ -f "$_env_file" ] || : > "$_env_file"
+        env_upsert_kv "$_env_file" SWOOLE_PORT "$_assigned"
+    fi
+    return 0
+}
+
+router_generate_nginx_config() {
+    router_ensure_dirs
+    _saved_project_root="$PROJECT_ROOT"
+    cat > "$ROUTER_NGINX_DEFAULT" <<'EOF'
+server {
+    listen 80 default_server;
+    server_name _;
+
+    default_type text/plain;
+
+    location / {
+        return 404 "Semitexa local router: domain is not registered or its upstream is unavailable.\n";
+    }
+}
+EOF
+
+    : > "$ROUTER_NGINX_DOMAINS"
+    for _entry in "$ROUTER_REGISTRY_DIR"/*.env; do
+        [ -f "$_entry" ] || continue
+        DOMAIN='' PROJECT_ROOT='' COMPOSE_PROJECT_NAME='' UPSTREAM_HOST='' UPSTREAM_PORT='' MODE='' UPDATED_AT=''
+        # shellcheck disable=SC1090
+        . "$_entry"
+        [ -n "$DOMAIN" ] || continue
+        [ -n "$UPSTREAM_PORT" ] || continue
+        cat >> "$ROUTER_NGINX_DOMAINS" <<EOF
+server {
+    listen 80;
+    server_name $DOMAIN;
+
+    location / {
+        proxy_pass http://$UPSTREAM_HOST:$UPSTREAM_PORT;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+
+EOF
+    done
+    PROJECT_ROOT="$_saved_project_root"
+}
+
+router_generate_dns_config() {
+    router_ensure_dirs
+    _saved_project_root="$PROJECT_ROOT"
+    cat > "$ROUTER_DNSMASQ_CONF" <<'EOF'
+port=53
+no-resolv
+no-daemon
+log-queries
+conf-file=/etc/dnsmasq.d/domains.conf
+EOF
+
+    : > "$ROUTER_DNS_DOMAINS"
+    for _entry in "$ROUTER_REGISTRY_DIR"/*.env; do
+        [ -f "$_entry" ] || continue
+        DOMAIN='' MODE=''
+        # shellcheck disable=SC1090
+        . "$_entry"
+        [ -n "$DOMAIN" ] || continue
+        printf 'address=/%s/127.0.0.1\n' "$DOMAIN" >> "$ROUTER_DNS_DOMAINS"
+    done
+    PROJECT_ROOT="$_saved_project_root"
+}
+
+router_generate_compose() {
+    router_ensure_dirs
+    cat > "$ROUTER_COMPOSE" <<EOF
+services:
+  dns:
+    image: alpine:3.21
+    container_name: semitexa-router-dns
+    restart: unless-stopped
+    command: ["sh", "-c", "apk add --no-cache dnsmasq && dnsmasq --keep-in-foreground --conf-file=/etc/dnsmasq.d/dnsmasq.conf"]
+    ports:
+      - "127.0.0.1:5553:53/udp"
+      - "127.0.0.1:5553:53/tcp"
+    volumes:
+      - $ROUTER_DNSMASQ_CONF:/etc/dnsmasq.d/dnsmasq.conf:ro
+      - $ROUTER_DNS_DOMAINS:/etc/dnsmasq.d/domains.conf:ro
+    cap_add:
+      - NET_ADMIN
+    healthcheck:
+      test: ["CMD", "nslookup", "localhost", "127.0.0.1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  proxy:
+    image: nginx:alpine
+    container_name: semitexa-router-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - $ROUTER_NGINX_DEFAULT:/etc/nginx/conf.d/default.conf:ro
+      - $ROUTER_NGINX_DOMAINS:/etc/nginx/conf.d/semitexa-domains.conf:ro
+EOF
+}
+
+router_render() {
+    router_generate_compose
+    router_generate_nginx_config
+    router_generate_dns_config
+}
+
+router_compose() {
+    _compose="$(compose_bin)"
+    $_compose -f "$ROUTER_COMPOSE" "$@"
+}
+
+tty_available() {
+    [ -t 0 ] && [ -e /dev/tty ]
+}
+
+sudo_ready() {
+    sudo -n true >/dev/null 2>&1
+}
+
+router_configure_resolved_for_test() {
+    if ! command -v systemctl >/dev/null 2>&1 || ! systemctl is-active --quiet systemd-resolved; then
+        return 0
+    fi
+
+    _needs_restart=0
+    if grep -qi "^DNSStubListener=no" /etc/systemd/resolved.conf 2>/dev/null; then
+        warn "systemd-resolved has DNSStubListener=no (breaks shared .test resolution)."
+        if tty_available; then
+            printf "%s? Do you want to fix this automatically? (requires sudo) [Y/n]%s " "$C_YELLOW" "$C_RESET"
+            read -r _ans </dev/tty
+        elif sudo_ready; then
+            _ans="y"
+        else
+            warn "Skipping DNSStubListener fix (no TTY and sudo requires a password)."
+            _ans="n"
+        fi
+        if [ "$_ans" != "n" ] && [ "$_ans" != "N" ]; then
+            if sudo sed -i 's/^DNSStubListener=no/DNSStubListener=yes/i' /etc/systemd/resolved.conf; then
+                success "Set DNSStubListener=yes"
+                _needs_restart=1
+            else
+                warn "Failed to set DNSStubListener=yes."
+            fi
+        fi
+    fi
+
+    if [ ! -f /etc/systemd/resolved.conf.d/semitexa-router.conf ]; then
+        info "Shared Semitexa router is not yet bound to .test."
+        if tty_available; then
+            printf "%s? Do you want to configure this automatically? (requires sudo) [Y/n]%s " "$C_YELLOW" "$C_RESET"
+            read -r _ans </dev/tty
+        elif sudo_ready; then
+            _ans="y"
+        else
+            warn "Skipping automatic .test resolver setup (no TTY and sudo requires a password)."
+            _ans="n"
+        fi
+        if [ "$_ans" != "n" ] && [ "$_ans" != "N" ]; then
+            if sudo mkdir -p /etc/systemd/resolved.conf.d/ \
+                && printf "[Resolve]\nDNS=127.0.0.1:5553\nDomains=~test\n" | sudo tee /etc/systemd/resolved.conf.d/semitexa-router.conf >/dev/null; then
+                success "Created /etc/systemd/resolved.conf.d/semitexa-router.conf"
+                _needs_restart=1
+            else
+                warn "Failed to create /etc/systemd/resolved.conf.d/semitexa-router.conf."
+            fi
+        fi
+    fi
+
+    if [ "$_needs_restart" -eq 1 ]; then
+        info "Restarting systemd-resolved to apply shared .test routing..."
+        if sudo systemctl restart systemd-resolved \
+            && sudo ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf; then
+            success "systemd-resolved restarted and configured!"
+            echo ""
+        else
+            warn "Failed to restart systemd-resolved cleanly."
+        fi
+    fi
+}
+
+router_hosts_remove_domain() {
+    _domain="$1"
+    if ! grep -q "^[[:space:]]*127\\.0\\.0\\.1[[:space:]].*${_domain}.*# semitexa-router\$" /etc/hosts 2>/dev/null; then
+        return 0
+    fi
+    _tmp="$(mktemp)"
+    grep -v "^[[:space:]]*127\\.0\\.0\\.1[[:space:]].*${_domain}.*# semitexa-router\$" /etc/hosts > "$_tmp" 2>/dev/null || true
+    sudo tee /etc/hosts >/dev/null < "$_tmp"
+    rm -f "$_tmp"
+}
+
+router_hosts_ensure_domain() {
+    _domain="$1"
+    if grep -q "^[[:space:]]*127\\.0\\.0\\.1[[:space:]].*${_domain}.*# semitexa-router\$" /etc/hosts 2>/dev/null; then
+        return 0
+    fi
+    printf '127.0.0.1 %s # semitexa-router\n' "$_domain" | sudo tee -a /etc/hosts >/dev/null
+}
+
+router_apply_name_resolution() {
+    _mode="$(router_mode_get)"
+    _domain="${1:-}"
+
+    case "$_mode" in
+        dns)
+            router_configure_resolved_for_test
+            [ -n "$_domain" ] && router_hosts_remove_domain "$_domain" >/dev/null 2>&1 || true
+            ;;
+        hosts)
+            [ -n "$_domain" ] && router_hosts_ensure_domain "$_domain"
+            ;;
+    esac
+}
+
+router_start_for_mode() {
+    _mode="$(router_mode_get)"
+    router_render
+    case "$_mode" in
+        dns)
+            router_apply_name_resolution
+            router_compose up -d dns proxy
+            router_compose restart dns proxy >/dev/null 2>&1 || true
+            ;;
+        hosts)
+            router_compose up -d proxy
+            router_compose stop dns >/dev/null 2>&1 || true
+            router_compose restart proxy >/dev/null 2>&1 || true
+            ;;
+    esac
+}
+
+cmd_local_router_init() {
+    printf "\n%s%s Semitexa — Shared Local Router Init %s\n\n" "$C_BOLD" "$C_CYAN" "$C_RESET"
+    router_ensure_dirs
+    router_mode_set "$(router_mode_get)"
+    router_render
+    success "Shared local router workspace prepared at $ROUTER_ROOT"
+    info "Mode: $(router_mode_get)"
+    printf "\n"
+}
+
+cmd_local_router_start() {
+    printf "\n%s%s Semitexa — Shared Local Router Start %s\n\n" "$C_BOLD" "$C_CYAN" "$C_RESET"
+    cmd_local_router_init >/dev/null
+    router_start_for_mode
+    success "Shared local router started."
+    info "Mode: $(router_mode_get)"
+    printf "\n"
+}
+
+cmd_local_router_stop() {
+    printf "\n%s%s Semitexa — Shared Local Router Stop %s\n\n" "$C_BOLD" "$C_CYAN" "$C_RESET"
+    if [ ! -f "$ROUTER_COMPOSE" ]; then
+        info "Shared local router is not initialized."
+        exit 0
+    fi
+    router_compose down
+    success "Shared local router stopped."
+    printf "\n"
+}
+
+cmd_local_router_restart() {
+    printf "\n%s%s Semitexa — Shared Local Router Restart %s\n\n" "$C_BOLD" "$C_CYAN" "$C_RESET"
+    cmd_local_router_init >/dev/null
+    router_render
+    _mode="$(router_mode_get)"
+    case "$_mode" in
+        dns)
+            router_compose restart dns proxy
+            ;;
+        hosts)
+            router_compose restart proxy
+            ;;
+    esac
+    success "Shared local router restarted."
+    printf "\n"
+}
+
+cmd_local_router_doctor() {
+    printf "\n%s%s Semitexa — Shared Local Router Doctor %s\n\n" "$C_BOLD" "$C_CYAN" "$C_RESET"
+    if [ ! -d "$ROUTER_ROOT" ]; then
+        warn "Shared local router workspace does not exist."
+        info "Run: bin/semitexa local-router:init"
+        exit 1
+    fi
+
+    info "Root: $ROUTER_ROOT"
+    info "Mode: $(router_mode_get)"
+    info "Registered domains: $(router_registry_count)"
+    info "Port range: $(port_range_start)-$(port_range_end)"
+
+    if [ -f "$ROUTER_COMPOSE" ]; then
+        printf "\n"
+        router_compose ps || true
+    fi
+
+    printf "\n"
+    cmd_local_domain_list
+    cmd_local_app_list
+}
+
+cmd_local_domain_mode() {
+    _mode="${1:-}"
+    if [ -z "$_mode" ]; then
+        printf "%s\n" "$(router_mode_get)"
+        exit 0
+    fi
+    router_mode_set "$_mode"
+    router_render
+    success "Shared local router mode set to $_mode."
+    case "$_mode" in
+        dns)
+            info "Restart the shared router to enable shared .test DNS."
+            ;;
+        hosts)
+            info "Future domain registrations will write /etc/hosts entries."
+            ;;
+    esac
+}
+
+cmd_local_domain_add() {
+    _domain="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')"
+    if [ -z "$_domain" ]; then
+        error "Usage: bin/semitexa local-domain:add <domain.test>"
+        exit 1
+    fi
+    if ! router_validate_domain "$_domain"; then
+        error "Only valid .test domains are supported."
+        exit 1
+    fi
+
+    _port="$(env_val SWOOLE_PORT 8080)"
+    cmd_local_router_init >/dev/null
+    router_registry_write_entry "$_domain" "$_port" "$(router_mode_get)"
+    router_render
+    router_apply_name_resolution "$_domain"
+    if [ -f "$ROUTER_COMPOSE" ]; then
+        router_start_for_mode
+        if [ "$(router_mode_get)" = "dns" ]; then
+            router_compose restart dns proxy >/dev/null 2>&1 || true
+        else
+            router_compose restart proxy >/dev/null 2>&1 || true
+        fi
+    fi
+
+    success "Registered shared local domain: $_domain -> http://host.docker.internal:${_port}"
+}
+
+cmd_local_domain_remove() {
+    _domain="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')"
+    if [ -z "$_domain" ]; then
+        error "Usage: bin/semitexa local-domain:remove <domain.test>"
+        exit 1
+    fi
+    _path="$(router_entry_path "$_domain")"
+    if [ ! -f "$_path" ]; then
+        warn "Domain '$_domain' is not registered in the shared router."
+        exit 0
+    fi
+
+    router_registry_delete_entry "$_domain"
+    router_render
+    router_hosts_remove_domain "$_domain" >/dev/null 2>&1 || true
+    if [ -f "$ROUTER_COMPOSE" ]; then
+        if [ "$(router_mode_get)" = "dns" ]; then
+            router_compose restart dns proxy >/dev/null 2>&1 || true
+        else
+            router_compose restart proxy >/dev/null 2>&1 || true
+        fi
+    fi
+
+    success "Removed shared local domain: $_domain"
+}
+
+cmd_local_domain_list() {
+    printf "\n%s%s Semitexa — Shared Local Domains %s\n\n" "$C_BOLD" "$C_CYAN" "$C_RESET"
+    router_ensure_dirs
+    _saved_project_root="$PROJECT_ROOT"
+    _count=0
+    for _entry in "$ROUTER_REGISTRY_DIR"/*.env; do
+        [ -f "$_entry" ] || continue
+        DOMAIN='' UPSTREAM_PORT='' PROJECT_ROOT='' MODE=''
+        # shellcheck disable=SC1090
+        . "$_entry"
+        [ -n "$DOMAIN" ] || continue
+        _project_label="$(basename "${PROJECT_ROOT:-}")"
+        [ -n "$_project_label" ] || _project_label="unknown"
+        printf "  %s%-30s%s → host.docker.internal:%s [%s] (%s)\n" "$C_GREEN" "$DOMAIN" "$C_RESET" "$UPSTREAM_PORT" "$MODE" "$_project_label"
+        _count=$((_count + 1))
+    done
+    printf "\n"
+    [ "$_count" -eq 0 ] && info "No shared local domains registered."
+    [ "$_count" -gt 0 ] && info "$_count shared domain(s) configured."
+    PROJECT_ROOT="$_saved_project_root"
+    printf "\n"
+}
+
+# ═══════════════════════════════════════════════════════════════════════
+#  local-app:* — local application registry & port broker
+# ═══════════════════════════════════════════════════════════════════════
+cmd_local_app_register() {
+    _id=""
+    _port=""
+    _root=""
+    _write_env=0
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --app-id=*)         _id="${1#--app-id=}" ;;
+            --requested-port=*) _port="${1#--requested-port=}" ;;
+            --project-root=*)   _root="${1#--project-root=}" ;;
+            --write-env)        _write_env=1 ;;
+            -h|--help)
+                printf 'Usage: bin/semitexa local-app:register [--app-id=<id>] [--requested-port=<p>] [--project-root=<path>] [--write-env]\n'
+                exit 0
+                ;;
+            *)
+                error "Unknown argument: $1"
+                exit 1
+                ;;
+        esac
+        shift
+    done
+
+    [ -n "$_root" ] || _root="$PROJECT_ROOT"
+    if [ -z "$_id" ]; then
+        _id="$(router_app_find_by_project "$_root" 2>/dev/null || true)"
+        [ -n "$_id" ] || _id="$(app_generate_uuid)"
+    fi
+
+    _saved_project_root="$PROJECT_ROOT"
+    PROJECT_ROOT="$_root"
+    _assigned="$(local_app_register_logic "$_id" "$_port" "$_root")"
+    PROJECT_ROOT="$_saved_project_root"
+    [ -n "$_assigned" ] || exit 1
+
+    if [ "$_write_env" -eq 1 ]; then
+        _env_file="$_root/.env"
+        [ -f "$_env_file" ] || : > "$_env_file"
+        env_upsert_kv "$_env_file" SEMITEXA_APP_ID "$_id"
+        env_upsert_kv "$_env_file" SWOOLE_PORT "$_assigned"
+        success "Wrote SEMITEXA_APP_ID=$_id and SWOOLE_PORT=$_assigned to $_env_file"
+    fi
+
+    printf '%s\n' "$_assigned"
+}
+
+cmd_local_app_reconcile() {
+    printf "\n%s%s Semitexa — Local App Reconcile %s\n\n" "$C_BOLD" "$C_CYAN" "$C_RESET"
+    if local_app_reconcile; then
+        _id="$(env_val SEMITEXA_APP_ID '')"
+        _port="$(env_val SWOOLE_PORT '')"
+        success "Reconciled $(basename "$PROJECT_ROOT")."
+        info "  SEMITEXA_APP_ID=$_id"
+        info "  SWOOLE_PORT=$_port"
+        printf "\n"
+    else
+        exit 1
+    fi
+}
+
+cmd_local_app_list() {
+    printf "\n%s%s Semitexa — Local App Registry %s\n\n" "$C_BOLD" "$C_CYAN" "$C_RESET"
+    router_ensure_app_dirs
+    _has_any=0
+    if [ -d "$ROUTER_APP_REGISTRY_DIR" ]; then
+        _count_files="$(find "$ROUTER_APP_REGISTRY_DIR" -maxdepth 1 -type f -name '*.env' 2>/dev/null | wc -l | tr -d ' ')"
+        if [ "$_count_files" -gt 0 ]; then
+            _has_any=1
+        fi
+    fi
+    if [ "$_has_any" -eq 1 ]; then
+        router_app_iter | while IFS="$(printf '\t')" read -r _app_id _port _root _name; do
+            printf "  %s%-36s%s  port=%-5s  %s%s%s  %s\n" \
+                "$C_GREEN" "$_app_id" "$C_RESET" "$_port" \
+                "$C_CYAN" "${_name:-unknown}" "$C_RESET" "${_root:-?}"
+        done
+    else
+        info "No local apps registered."
+    fi
+    printf "\n"
+    info "Range: $(port_range_start)-$(port_range_end)  (override: $ROUTER_CONFIG_FILE)"
+    printf "\n"
+}
+
+cmd_local_app_remove() {
+    _id="${1:-}"
+    if [ -z "$_id" ]; then
+        error "Usage: bin/semitexa local-app:remove <app-id>"
+        exit 1
+    fi
+    if ! router_app_entry_exists "$_id"; then
+        warn "App '$_id' is not registered."
+        exit 0
+    fi
+    APP_ID='' SWOOLE_PORT='' PROJECT_ROOT='' PROJECT_NAME='' REGISTERED_AT='' UPDATED_AT=''
+    # shellcheck disable=SC1090
+    . "$(router_app_entry_path "$_id")"
+    router_app_delete_entry "$_id"
+    success "Removed local app: $_id (port ${SWOOLE_PORT:-?}, project ${PROJECT_ROOT:-?})."
+}
+
+cmd_local_app_doctor() {
+    printf "\n%s%s Semitexa — Local App Doctor %s\n\n" "$C_BOLD" "$C_CYAN" "$C_RESET"
+    info "Range: $(port_range_start)-$(port_range_end)"
+    info "Registry: $ROUTER_APP_REGISTRY_DIR"
+    info "Config:   $ROUTER_CONFIG_FILE"
+    cmd_local_app_list
+}
+
+# Run the frontend skin-mode regression guard (scripts/lint-skin-legacy-markers.sh).
+# Fails when forbidden legacy theme markers reappear in the migrated marketing
+# packages or when the three site.js files drift apart. Demo + Hello scaffold
+# are intentionally NOT scanned (deferred to tk-demo-hello-skin-migration-followup).
+cmd_lint_skin_legacy() {
+    _script="$PROJECT_ROOT/scripts/lint-skin-legacy-markers.sh"
+    if [ ! -f "$_script" ]; then
+        info "Skin-mode legacy guard script not present in this project."
+        info "  (Expected at: scripts/lint-skin-legacy-markers.sh)"
+        info "  This is normal for fresh installs / single-app starters that don't"
+        info "  ship the marketing-site packages. Nothing to enforce — skipping."
+        exit 0
+    fi
+    PROJECT_ROOT="$PROJECT_ROOT" sh "$_script" "$@"
+}
+
+# Run the canonical skin token-format guard (scripts/lint-skin-tokens.php).
+# Fails when any src/skins/<slug>/tokens.css drifts from a fresh TokenEmitter
+# rebuild of skin.json, or when the canonical structural markers / forbidden
+# legacy markers regress. Runs locally — does not require the app container.
+cmd_lint_skin_tokens() {
+    _script="$PROJECT_ROOT/scripts/lint-skin-tokens.php"
+    if [ ! -f "$_script" ]; then
+        info "Skin token canonical guard script not present in this project."
+        info "  (Expected at: scripts/lint-skin-tokens.php)"
+        info "  This is normal for fresh installs without src/skins/ — skipping."
+        exit 0
+    fi
+    if ! command -v php >/dev/null 2>&1; then
+        error "php CLI not available — cannot run lint:skin-tokens locally."
+        exit 1
+    fi
+    php "$_script" "$@"
+}
+
+# Returns 0 if the captured compose log contains a clear port-conflict signal
+# AND mentions <port>. Conservative: only fires when both halves match, so
+# unrelated compose failures fall through to the default error path.
+server_start_log_signals_port_conflict() {
+    _file="$1"
+    _port="$2"
+    [ -f "$_file" ] || return 1
+    [ -n "$_port" ] || return 1
+    grep -qE "(port is already allocated|address already in use|Bind for [^ ]+ failed)" "$_file" || return 1
+    grep -qE "(:|\.)$_port([^0-9]|\$)" "$_file"
+}
+
+# Wraps `run_compose up -d --build`, capturing exit + log so we can offer to
+# auto-recover from a Swoole port conflict that slipped past pre-start
+# reconcile (e.g., another process bound the broker-assigned port in the gap).
+# Behavior:
+#   - On success: nothing extra; return 0.
+#   - On failure that is confidently a port conflict for our SWOOLE_PORT:
+#       * interactive shell → prompt (default Y), reconcile, retry once.
+#       * non-interactive   → auto-reconcile, retry once (no prompt, no hang).
+#       * if reconcile didn't change the port (conflict is from a non-Semitexa
+#         process) → surface a clear error with a suggested next command.
+#   - On any other failure: pass through the original exit code.
+server_start_run_with_port_conflict_fallback() {
+    _log_file="$(mktemp)"
+    _rc_file="$(mktemp)"
+    # Subshell + `set +e` so a non-zero compose exit doesn't abort the outer
+    # script. tee preserves the developer's real-time view of the build.
+    ( set +e; run_compose up -d --build; echo "$?" > "$_rc_file" ) 2>&1 | tee "$_log_file"
+    _rc="$(cat "$_rc_file" 2>/dev/null || echo 1)"
+    rm -f "$_rc_file"
+
+    if [ "$_rc" -eq 0 ]; then
+        rm -f "$_log_file"
+        return 0
+    fi
+
+    _port="$(env_val SWOOLE_PORT '')"
+    if [ -z "$_port" ] || ! server_start_log_signals_port_conflict "$_log_file" "$_port"; then
+        rm -f "$_log_file"
+        return "$_rc"
+    fi
+
+    printf "\n"
+    warn "Swoole port conflict detected for SWOOLE_PORT=${_port}."
+
+    _accept=0
+    if [ -e /dev/tty ] && [ -t 1 ]; then
+        printf "%s? Do you want Semitexa to reconcile this app with the local port broker and assign a free port? [Y/n]%s " "$C_YELLOW" "$C_RESET"
+        _ans=""
+        read -r _ans </dev/tty 2>/dev/null || _ans=""
+        case "$_ans" in
+            ''|y|Y|yes|Yes|YES) _accept=1 ;;
+            *)                  _accept=0 ;;
+        esac
+    else
+        info "Non-interactive shell; auto-reconciling without prompt."
+        _accept=1
+    fi
+
+    if [ "$_accept" -ne 1 ]; then
+        info "Run: bin/semitexa local-app:reconcile && bin/semitexa server:start"
+        rm -f "$_log_file"
+        return "$_rc"
+    fi
+
+    rm -f "$_log_file"
+    local_app_reconcile || warn "Reconcile reported a problem."
+
+    _new_port="$(env_val SWOOLE_PORT '')"
+    if [ "$_new_port" = "$_port" ]; then
+        error "Reconcile kept SWOOLE_PORT=${_port}; the conflict appears to be from a non-Semitexa process holding the port."
+        info "Inspect with: bin/semitexa local-app:doctor"
+        info "Or release the port and re-run: bin/semitexa server:start"
+        return "$_rc"
+    fi
+
+    info "Reconciled to SWOOLE_PORT=${_new_port}. Retrying server:start once..."
+    _log_file="$(mktemp)"
+    _rc_file="$(mktemp)"
+    ( set +e; run_compose up -d --build; echo "$?" > "$_rc_file" ) 2>&1 | tee "$_log_file"
+    _rc="$(cat "$_rc_file" 2>/dev/null || echo 1)"
+    rm -f "$_rc_file" "$_log_file"
+
+    if [ "$_rc" -eq 0 ]; then
+        success "Recovered: server bound to SWOOLE_PORT=${_new_port}."
+    else
+        error "Retry failed (exit $_rc). Re-run 'bin/semitexa server:start' or inspect docker compose logs."
+    fi
+    return "$_rc"
+}
+
+# ═══════════════════════════════════════════════════════════════════════
+#  server:start
+# ═══════════════════════════════════════════════════════════════════════
+cmd_server_start() {
+    printf "\n%s%s Semitexa — Starting Environment %s\n\n" "$C_BOLD" "$C_CYAN" "$C_RESET"
+
+    if [ ! -f "$PROJECT_ROOT/docker-compose.yml" ]; then
+        error "docker-compose.yml not found."
+        info  "Run: bin/semitexa init"
+        exit 1
+    fi
+
+    # Reconcile local app registry: ensure SEMITEXA_APP_ID exists in .env and
+    # SWOOLE_PORT is unique on this workstation. May rewrite .env when a port
+    # collision is detected. compose_args reads .env, so this must run first.
+    local_app_reconcile || warn "Local app reconcile reported a problem; continuing with current .env."
+
+    _overlays="$(compose_args)"
+    [ -n "$_overlays" ] && info "Compose files: $_overlays"
+
+    # ── Pre-flight Checks (Proxy & DNS) ──────────────────────────────
+    if project_has_shared_domains; then
+        router_sync_project_domains
+        if command -v ss >/dev/null 2>&1; then
+            _port80_pid="$(ss -ltnp 2>/dev/null | awk '$4 ~ /:80$/ {print $6}' | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | head -n 1)"
+            if [ -n "$_port80_pid" ]; then
+                _port80_proc="$(ps -p "$_port80_pid" -o comm= 2>/dev/null || echo "unknown")"
+                if [ "$_port80_proc" != "docker-proxy" ] && [ "$_port80_proc" != "docker" ] && [ "$_port80_proc" != "dockerd" ]; then
+                    warn "Port 80 is occupied by '$_port80_proc' (PID: $_port80_pid)."
+                    warn "The shared Semitexa proxy will fail to start."
+                    printf "%s? Do you want to stop it now? (requires sudo) [Y/n]%s " "$C_YELLOW" "$C_RESET"
+                    read -r _ans </dev/tty
+                    if [ "$_ans" != "n" ] && [ "$_ans" != "N" ]; then
+                        sudo systemctl stop "$_port80_proc" 2>/dev/null || sudo kill -9 "$_port80_pid"
+                        success "Attempted to stop $_port80_proc."
+                    fi
+                    echo ""
+                fi
+            fi
+        fi
+
+        info "Project uses shared local routing. Ensuring shared router is running..."
+        if ! router_start_for_mode; then
+            error "Failed to start the shared local router."
+            info "Inspect it with: bin/semitexa local-router:doctor"
+            exit 1
+        fi
+    fi
+
+    info "Starting containers..."
+    server_start_run_with_port_conflict_fallback || exit $?
+
+    _port="$(env_val SWOOLE_PORT 8080)"
+    printf "\n"
+    success "Semitexa environment started!"
+
+    # Show project-specific URLs. Shared-router (.test) domains take priority;
+    # fall back to http://localhost:<port> when no domains are registered.
+    if project_has_shared_domains; then
+        info "App URLs:"
+        router_list_project_domains | while IFS= read -r _dom; do
+            [ -n "$_dom" ] || continue
+            printf "          ${C_GREEN}http://%s${C_RESET}\n" "$_dom"
+        done
+        printf "          ${C_CYAN}http://localhost:%s${C_RESET} (direct)\n" "$_port"
+    else
+        info "App:  ${C_GREEN}http://localhost:${_port}${C_RESET}"
+    fi
+    info "Logs: docker compose logs -f"
+    info "Stop: bin/semitexa server:stop"
+
+    _async="$(env_val EVENTS_ASYNC 0)"
+    case "$_async" in
+        1|true|yes)
+            [ -f "$PROJECT_ROOT/docker-compose.nats.yml" ] && wait_for_service "NATS" "nats" "4222" 3 2 1 || true
+            ;;
+    esac
+
+    _db="$(env_val DB_DRIVER "")"
+    [ -n "$_db" ] && [ -f "$PROJECT_ROOT/docker-compose.mysql.yml" ] && wait_for_service "MySQL" "mysql" "3306" 5 4 20 || true
+
+    _redis="$(env_val REDIS_HOST "")"
+    [ -n "$_redis" ] && [ -f "$PROJECT_ROOT/docker-compose.redis.yml" ] && wait_for_service "Redis" "redis" "6379" 3 2 1 || true
+
+    printf "\n"
+}
+
+# ═══════════════════════════════════════════════════════════════════════
+#  server:stop
+# ═══════════════════════════════════════════════════════════════════════
+cmd_server_stop() {
+    printf "\n%s%s Semitexa — Stopping Environment %s\n\n" "$C_BOLD" "$C_CYAN" "$C_RESET"
+
+    if [ ! -f "$PROJECT_ROOT/docker-compose.yml" ]; then
+        warn "docker-compose.yml not found. Nothing to stop."
+        exit 0
+    fi
+
+    info "Stopping containers..."
+    _compose="$(compose_bin)"
+    _overlays="$(compose_all_args)"
+    # shellcheck disable=SC2086
+    $_compose $_overlays down --remove-orphans
+    success "Semitexa environment stopped."
+
+    for _pidfile in "$PROJECT_ROOT/var/swoole.pid" "$PROJECT_ROOT/var/run/semitexa.pid"; do
+        if [ -f "$_pidfile" ]; then
+            _pid="$(cat "$_pidfile" 2>/dev/null || true)"
+            [ -n "$_pid" ] && kill "$_pid" 2>/dev/null || true
+            rm -f "$_pidfile"
+        fi
+    done
+
+    printf "\n"
+}
+
+# ═══════════════════════════════════════════════════════════════════════
+#  server:restart
+# ═══════════════════════════════════════════════════════════════════════
+cmd_server_restart() {
+    _service="${1:-}"
+    printf "\n%s%s Semitexa — Restarting Environment %s\n\n" "$C_BOLD" "$C_CYAN" "$C_RESET"
+
+    if [ ! -f "$PROJECT_ROOT/docker-compose.yml" ]; then
+        error "docker-compose.yml not found."
+        exit 1
+    fi
+
+    _compose="$(compose_bin)"
+
+    if [ -n "$_service" ]; then
+        info "Recreating service: $_service"
+        run_compose up -d --build --force-recreate --no-deps "$_service"
+    else
+        info "Recreating all containers..."
+        _overlays="$(compose_all_args)"
+        # shellcheck disable=SC2086
+        $_compose $_overlays down --remove-orphans
+        run_compose up -d --build
+    fi
+
+    success "Semitexa environment restarted!"
+    printf "\n"
+}
+
+# ═══════════════════════════════════════════════════════════════════════
+cmd_list() {
+    printf "\n%s%s Semitexa Framework %s— CLI Commands\n\n" "$C_BOLD" "$C_GREEN" "$C_CYAN"
+    printf "%s%s Shell Commands (no PHP required):%s\n" "$C_BOLD" "$C_YELLOW" "$C_RESET"
+    printf "  %-32s %s\n" "install"       "Run composer install inside Docker (no local PHP needed)"
+    printf "  %-32s %s\n" "demo:install"  "Install semitexa/demo inside Docker"
+    printf "  %-32s %s\n" "server:start"   "Start Semitexa environment (Docker Compose)"
+    printf "  %-32s %s\n" "server:stop"    "Stop Semitexa environment"
+    printf "  %-32s %s\n" "server:restart" "Restart Semitexa environment and refresh env/config"
+    printf "  %-32s %s\n" "local-router:init"       "Prepare shared local router workspace"
+    printf "  %-32s %s\n" "local-router:start"      "Start shared local router"
+    printf "  %-32s %s\n" "local-router:stop"       "Stop shared local router"
+    printf "  %-32s %s\n" "local-router:restart"    "Restart shared local router"
+    printf "  %-32s %s\n" "local-router:doctor"     "Inspect shared local router state"
+    printf "  %-32s %s\n" "local-domain:mode [dns|hosts]" "Get or set shared local domain mode"
+    printf "  %-32s %s\n" "local-domain:add <domain.test>" "Register shared local domain"
+    printf "  %-32s %s\n" "local-domain:remove <domain.test>" "Remove shared local domain"
+    printf "  %-32s %s\n" "local-domain:list"       "List shared local domains"
+    printf "  %-32s %s\n" "local-app:register"      "Register this project; allocate Swoole port"
+    printf "  %-32s %s\n" "local-app:reconcile"     "Validate / reassign Swoole port for this project"
+    printf "  %-32s %s\n" "local-app:list"          "List local app registrations and ports"
+    printf "  %-32s %s\n" "local-app:remove <id>"   "Remove an app from the local registry"
+    printf "  %-32s %s\n" "local-app:doctor"        "Inspect local app registry health"
+    printf "  %-32s %s\n" "lint:skin-legacy"        "Regression guard for the unified frontend skin-mode contract"
+    printf "  %-32s %s\n" "lint:skin-tokens"        "Regression guard for the canonical skin token format (skin.json + tokens.css)"
+    printf "  %-32s %s\n" "test:run [-- phpunit-args]" "Run PHPUnit then E2E (Playwright) inside Docker (APP_ENV=dev)"
+    printf "  %-32s %s\n" "self-test"             "Verify setup"
+    printf "  %-32s %s\n" "list"                  "Show this help"
+
+    printf "\n%s%s PHP Commands (proxied to app container):%s\n" "$C_BOLD" "$C_YELLOW" "$C_RESET"
+    if is_app_running; then
+        run_compose exec -T app php vendor/bin/semitexa list --raw 2>/dev/null | while IFS= read -r _line; do
+            _cmd="$(echo "$_line" | awk '{print $1}')"; _desc="$(echo "$_line" | sed 's/^[^ ]* *//')"
+            case "$_cmd" in server:start|server:stop|server:restart|list|"") continue ;; esac
+            printf "  %-32s %s\n" "$_cmd" "$_desc"
+        done
+    else
+        info "(Start the server first to see all PHP commands)"
+    fi
+    printf "\n"
+}
+
+cmd_self_test() {
+    printf "\n%s%s Semitexa — Self Test %s\n\n" "$C_BOLD" "$C_CYAN" "$C_RESET"
+    _ok=0 _warn=0 _fail=0
+    if command -v docker >/dev/null 2>&1; then success "Docker: $(docker --version 2>/dev/null)"; _ok=$((_ok+1)); else error "Docker: not found"; _fail=$((_fail+1)); fi
+    if has_compose; then success "Compose: $(docker compose version 2>/dev/null || docker-compose version 2>/dev/null)"; _ok=$((_ok+1)); else error "Compose: not found"; _fail=$((_fail+1)); fi
+    for _f in docker-compose.yml Dockerfile server.php .env.default composer.json; do
+        if [ -f "$PROJECT_ROOT/$_f" ]; then success "File: $_f"; _ok=$((_ok+1)); else
+            error "File: $_f (missing)"; _fail=$((_fail+1))
+        fi
+    done
+    if [ -f "$PROJECT_ROOT/.env" ]; then success "File: .env"; _ok=$((_ok+1)); else info "File: .env (optional override, not present)"; fi
+    [ -f "$PROJECT_ROOT/vendor/bin/semitexa" ] && { success "File: vendor/bin/semitexa"; _ok=$((_ok+1)); } || { error "File: vendor/bin/semitexa (missing)"; _fail=$((_fail+1)); }
+    _arch="$(uname -m 2>/dev/null || echo unknown)"
+    case "$_arch" in x86_64|amd64) success "Arch: AMD64" ;; aarch64|arm64) success "Arch: ARM64" ;; *) warn "Arch: $_arch (untested)" ;; esac
+    if is_app_running; then success "App container: running"; _ok=$((_ok+1)); else info "App container: not running"; fi
+    if [ -f "$PROJECT_ROOT/scripts/lint-skin-legacy-markers.sh" ]; then
+        if ( PROJECT_ROOT="$PROJECT_ROOT" sh "$PROJECT_ROOT/scripts/lint-skin-legacy-markers.sh" >/dev/null 2>&1 ); then
+            success "Skin-mode legacy guard: clean"; _ok=$((_ok+1))
+        else
+            error "Skin-mode legacy guard: FAILED — run 'bin/semitexa lint:skin-legacy' for details"; _fail=$((_fail+1))
+        fi
+    fi
+    if [ -f "$PROJECT_ROOT/scripts/lint-skin-tokens.php" ] && command -v php >/dev/null 2>&1; then
+        if ( php "$PROJECT_ROOT/scripts/lint-skin-tokens.php" >/dev/null 2>&1 ); then
+            success "Skin token canonical guard: clean"; _ok=$((_ok+1))
+        else
+            error "Skin token canonical guard: FAILED — run 'bin/semitexa lint:skin-tokens' for details"; _fail=$((_fail+1))
+        fi
+    fi
+    printf "\n  Results: %s%d OK%s, %s%d Warn%s, %s%d Error%s\n\n" "$C_GREEN" "$_ok" "$C_RESET" "$C_YELLOW" "$_warn" "$C_RESET" "$C_RED" "$_fail" "$C_RESET"
+    [ "$_fail" -gt 0 ] && exit 1; exit 0
+}
+
+local_semitexa_package_names() {
+    for _dir in "$PROJECT_ROOT"/packages/semitexa-*; do
+        [ -f "$_dir/composer.json" ] || continue
+        awk -F'"' '
+            $2 == "name" && $4 ~ /^semitexa\// {
+                print $4
+                exit
+            }
+        ' "$_dir/composer.json"
+    done | sort -u
+}
+
+locked_semitexa_package_names() {
+    [ -f "$PROJECT_ROOT/composer.lock" ] || return 0
+
+    grep -o '"name"[[:space:]]*:[[:space:]]*"semitexa/[^"]*"' "$PROJECT_ROOT/composer.lock" 2>/dev/null \
+        | sed 's/.*"name"[[:space:]]*:[[:space:]]*"//' \
+        | sed 's/"$//' \
+        | sort -u
+}
+
+local_semitexa_package_update_specs() {
+    _tmp_local="$(mktemp)"
+    _tmp_locked="$(mktemp)"
+    local_semitexa_package_names >"$_tmp_local"
+    locked_semitexa_package_names >"$_tmp_locked"
+
+    for _dir in "$PROJECT_ROOT"/packages/semitexa-*; do
+        [ -f "$_dir/composer.json" ] || continue
+
+        _package="$(awk -F'"' '
+            $2 == "name" && $4 ~ /^semitexa\// {
+                print $4
+                exit
+            }
+        ' "$_dir/composer.json")"
+        [ -n "$_package" ] || continue
+
+        if ! grep -Fx -- "$_package" "$_tmp_locked" >/dev/null 2>&1; then
+            continue
+        fi
+
+        _branch=''
+        if [ -d "$_dir/.git" ]; then
+            _branch="$(git -C "$_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+        fi
+
+        case "$_branch" in
+            ''|HEAD)
+                printf '%s\n' "$_package"
+                ;;
+            *)
+                printf '%s:dev-%s\n' "$_package" "$_branch"
+                ;;
+        esac
+    done | sort -u
+
+    rm -f "$_tmp_local" "$_tmp_locked"
+}
+
+refresh_local_semitexa_packages() {
+    _packages="$(local_semitexa_package_update_specs)"
+    [ -n "$_packages" ] || return 0
+
+    info "Refreshing local Semitexa path packages in composer.lock..."
+    info "(This keeps workspace clones ahead of stale published tags)\n"
+
+    # shellcheck disable=SC2086
+    run_compose run --rm --no-deps --user "$(id -u):$(id -g)" app \
+        composer update --no-interaction --with-all-dependencies $_packages
+}
+
+cmd_install() {
+    printf "\n%s%s Semitexa — Install Dependencies %s\n\n" "$C_BOLD" "$C_CYAN" "$C_RESET"
+    if ! has_compose; then error "Docker Compose is required. Install Docker Desktop or docker-compose."; exit 1; fi
+    if [ ! -f "$PROJECT_ROOT/Dockerfile" ]; then error "Dockerfile not found. Cannot build container for installation."; exit 1; fi
+    if [ ! -f "$PROJECT_ROOT/composer.json" ]; then error "composer.json not found. Is this a Semitexa project?"; exit 1; fi
+    if [ ! -f "$PROJECT_ROOT/.env.default" ]; then error ".env.default not found. This project is missing its Semitexa baseline configuration."; exit 1; fi
+    info "Building Docker image and running composer install inside container..."
+    info "(This may take a few minutes on the first run)\n"
+    run_compose build app
+    run_compose run --rm --no-deps --user "$(id -u):$(id -g)" app composer install --no-interaction --prefer-dist
+    if [ $? -ne 0 ]; then
+        printf "\n"
+        error "Installation failed. Check the output above."
+        exit 1
+    fi
+
+    refresh_local_semitexa_packages
+    if [ $? -eq 0 ]; then printf "\n"; success "Dependencies installed successfully!"; info "Next: bin/semitexa server:start"
+    else printf "\n"; error "Installation failed. Check the output above."; exit 1; fi
+    printf "\n"
+}
+
+cmd_demo_install() {
+    printf "\n%s%s Semitexa — Install Demo %s\n\n" "$C_BOLD" "$C_CYAN" "$C_RESET"
+    if ! has_compose; then error "Docker Compose is required. Install Docker Desktop or docker-compose."; exit 1; fi
+    if [ ! -f "$PROJECT_ROOT/Dockerfile" ]; then error "Dockerfile not found. Cannot build container for demo installation."; exit 1; fi
+    if [ ! -f "$PROJECT_ROOT/composer.json" ]; then error "composer.json not found. Is this a Semitexa project?"; exit 1; fi
+    if [ ! -f "$PROJECT_ROOT/.env.default" ]; then error ".env.default not found. This project is missing its Semitexa baseline configuration."; exit 1; fi
+    info "Installing semitexa/demo via Composer inside Docker..."
+    info "(This may take a few minutes on the first run)\n"
+    run_compose build app
+    run_compose run --rm --no-deps --user "$(id -u):$(id -g)" app composer config repositories.semitexa-demo vcs https://github.com/semitexa/semitexa-demo.git
+    run_compose run --rm --no-deps --user "$(id -u):$(id -g)" app composer require semitexa/demo:* --no-interaction --prefer-dist
+    if [ $? -eq 0 ]; then printf "\n"; success "Semitexa Demo installed (semitexa/demo)."; info "Start or restart the server to load the new routes."; info "Remove when done: composer remove semitexa/demo"
+    else printf "\n"; error "Demo installation failed. Check the output above."; exit 1; fi
+    printf "\n"
+}
+
+cmd_init() {
+    if ! has_compose; then error "Docker is required. Install Docker Desktop."; exit 1; fi
+    if [ ! -f "$PROJECT_ROOT/Dockerfile" ]; then error "Dockerfile not found."; exit 1; fi
+    if [ ! -f "$PROJECT_ROOT/.env.default" ]; then
+        if command -v php >/dev/null 2>&1 && [ -f "$PROJECT_ROOT/vendor/bin/semitexa" ]; then
+            warn ".env.default not found. Falling back to local PHP so init can scaffold it."
+            php "$PROJECT_ROOT/vendor/bin/semitexa" init "$@"
+            return
+        fi
+        error ".env.default not found. Run init once with local PHP so the scaffold can create it."
+        exit 1
+    fi
+    info "Running init via Docker..."
+    run_compose run --rm --no-deps --user "$(id -u):$(id -g)" app php vendor/bin/semitexa init "$@"
+}
+
+# Discover module-level E2E spec dirs. Every Semitexa package and local module
+# owns its tests under `tests/{Unit,Integration,E2E}/`; this function walks the
+# E2E category in both packages and src/modules and echoes one spec dir per
+# line that contains at least one *.spec.ts file.
+discover_e2e_dirs() {
+    if [ -d "$PROJECT_ROOT/packages" ]; then
+        for _dir in "$PROJECT_ROOT"/packages/*/tests/E2E; do
+            [ -d "$_dir" ] || continue
+            if find "$_dir" -mindepth 1 -name '*.spec.ts' -print -quit 2>/dev/null | grep -q .; then
+                printf '%s\n' "${_dir#$PROJECT_ROOT/}"
+            fi
+        done
+    fi
+    if [ -d "$PROJECT_ROOT/src/modules" ]; then
+        for _dir in "$PROJECT_ROOT"/src/modules/*/tests/E2E; do
+            [ -d "$_dir" ] || continue
+            if find "$_dir" -mindepth 1 -name '*.spec.ts' -print -quit 2>/dev/null | grep -q .; then
+                printf '%s\n' "${_dir#$PROJECT_ROOT/}"
+            fi
+        done
+    fi
+}
+
+cmd_test_run() {
+    if ! has_compose; then
+        error "Docker Compose is required. Install Docker Desktop or docker-compose."
+        exit 1
+    fi
+    if [ ! -f "$PROJECT_ROOT/docker-compose.yml" ]; then
+        error "docker-compose.yml not found."
+        exit 1
+    fi
+    if [ ! -f "$PROJECT_ROOT/docker-compose.test.yml" ]; then
+        error "docker-compose.test.yml not found."
+        exit 1
+    fi
+
+    _env="$(env_val APP_ENV "")"
+    if [ "$_env" != "dev" ]; then
+        error "test:run is only available when APP_ENV=dev."
+        info "Set APP_ENV=dev in your .env to enable test containers."
+        exit 1
+    fi
+
+    _overlays="$(compose_args)"
+    if [ -z "$_overlays" ]; then
+        _overlays="-f docker-compose.yml"
+    fi
+    _overlays="$_overlays -f docker-compose.test.yml"
+    # Test-side counterpart of docker-compose.path-repos.yml. Mounts the
+    # operator-local ./semitexa.pl symlink into the phpunit + e2e-runner
+    # services so composer path-repo packages whose source lives outside
+    # the project tree (currently semitexa/platform-ui) can be exercised by
+    # `bin/semitexa test:run`. Gate matches compose_args (symlink present).
+    if [ -f "$PROJECT_ROOT/docker-compose.test.path-repos.yml" ] && [ -L "$PROJECT_ROOT/semitexa.pl" ]; then
+        _overlays="$_overlays -f docker-compose.test.path-repos.yml"
+    fi
+
+    _compose="$(compose_bin)"
+    _files_display="$(printf '%s' "$_overlays" | sed 's/-f //g' | awk '{$1=$1; print}' | tr ' ' ',' | sed 's/,/, /g')"
+
+    # ── Phase 1: PHPUnit ────────────────────────────────────────────────
+    printf "\n%s%s Phase 1/2 — PHPUnit (Docker) %s\n\n" "$C_BOLD" "$C_CYAN" "$C_RESET"
+    info "Compose files: $_files_display"
+
+    # Build test-path list on the host, appended only when the user did not pass
+    # any positional targets. Fresh installs only have tests/; monorepo layouts
+    # also have packages/*/tests — this is where monorepo awareness lives
+    # (phpunit.xml.dist stays minimal and environment-agnostic).
+    _has_positional=0
+    _broad_packages_run=0
+    for _arg in "$@"; do
+        case "$_arg" in
+            -*) ;;
+            packages|packages/|./packages|./packages/) _has_positional=1; _broad_packages_run=1 ;;
+            *) _has_positional=1 ;;
+        esac
+    done
+    # Auto-discovery (no positional args) is also a broad packages run.
+    if [ "$_has_positional" -eq 0 ]; then
+        _broad_packages_run=1
+    fi
+
+    # Collect external composer path-repo URLs (those declared in composer.json
+    # whose "url" points OUTSIDE the project's own packages/ tree). These are
+    # checked twice below: (a) on explicit positional invocations that name
+    # such a path — to fail loudly if the source isn't currently available;
+    # (b) during automatic discovery — to fail loudly when broad runs would
+    # otherwise silently omit those tests. Opt-out via SEMITEXA_SKIP_PATH_REPO_TESTS=1.
+    _external_path_repo_urls=""
+    if [ -f "$PROJECT_ROOT/composer.json" ]; then
+        _external_path_repo_urls="$(awk '
+            /"type"[[:space:]]*:[[:space:]]*"path"/ { intype = 1; next }
+            intype && /"url"[[:space:]]*:/ {
+                sub(/.*"url"[[:space:]]*:[[:space:]]*"/, "")
+                sub(/".*/, "")
+                print
+                intype = 0
+            }
+        ' "$PROJECT_ROOT/composer.json" 2>/dev/null | awk '
+            /^packages\// || /^\.\/packages\// { next }
+            { print }
+        ')"
+    fi
+
+    # Process env takes priority over .env (CI / one-off shell overrides).
+    # Falls back to the .env file value via env_val so the opt-out can be
+    # pinned for stable CI configurations.
+    _skip_path_repos="${SEMITEXA_SKIP_PATH_REPO_TESTS:-}"
+    [ -n "$_skip_path_repos" ] || _skip_path_repos="$(env_val SEMITEXA_SKIP_PATH_REPO_TESTS "")"
+    case "$_skip_path_repos" in 1|true|yes|on) _skip_path_repos=1 ;; *) _skip_path_repos=0 ;; esac
+
+    # (a) explicit positional path validation. If the user named an external
+    #     path-repo path, refuse to proceed when the source isn't there.
+    if [ "$_has_positional" -eq 1 ]; then
+        for _arg in "$@"; do
+            case "$_arg" in
+                -*) continue ;;
+            esac
+            _match_url=""
+            for _url in $_external_path_repo_urls; do
+                _url_clean="${_url#./}"
+                case "$_arg" in
+                    "${_url_clean}"|"${_url_clean}/"*|"./${_url_clean}"|"./${_url_clean}/"*) _match_url="$_url_clean"; break ;;
+                esac
+            done
+            [ -n "$_match_url" ] || continue
+
+            _root_seg="${_match_url%%/*}"
+            if [ -e "$PROJECT_ROOT/$_arg" ]; then
+                continue
+            fi
+            error "External path-repo test target not available: $_arg"
+            if [ -L "$PROJECT_ROOT/$_root_seg" ]; then
+                error "  ./$_root_seg is a broken symlink — its target is missing on this host."
+            else
+                error "  ./$_root_seg symlink is missing — this is the entry point for the external path repo."
+            fi
+            info  ""
+            info  "Fix one of:"
+            info  "  1. Create the operator-local symlink (one-time, gitignored):"
+            info  "       ln -s /absolute/host/path/to/$_root_seg \"$PROJECT_ROOT/$_root_seg\""
+            info  "       composer dump-autoload --no-scripts"
+            info  "  2. Or set SEMITEXA_SKIP_PATH_REPO_TESTS=1 to opt out of path-repo discovery."
+            info  "     (This will NOT make an explicit positional target valid — it only silences"
+            info  "      automatic discovery on broad runs.)"
+            info  ""
+            info  "Details: var/docs/ui-foundation-step1-quarantine.md"
+            exit 1
+        done
+    fi
+
+    # (b) Path-repo audit on every broad-packages run. Whether the operator
+    # invoked `bin/semitexa test:run` (auto-discovery) or `bin/semitexa
+    # test:run packages` (explicit broad target), the absence of an external
+    # path-repo source must not be invisible. We DO NOT silently ignore
+    # missing sources: a missing or broken symlink makes the run fail loudly
+    # with an actionable message, unless the operator/CI has opted out via
+    # SEMITEXA_SKIP_PATH_REPO_TESTS=1 (in which case the skip is loudly
+    # logged and surfaced in the final summary).
+    _missing_path_repos=""
+    if [ "$_broad_packages_run" -eq 1 ]; then
+        for _url in $_external_path_repo_urls; do
+            _url_clean="${_url#./}"
+            if [ ! -e "$PROJECT_ROOT/$_url_clean" ]; then
+                _missing_path_repos="$_missing_path_repos
+$_url_clean"
+            fi
+        done
+        _missing_path_repos="$(printf '%s' "$_missing_path_repos" | sed '/^$/d')"
+    fi
+
+    if [ -n "$_missing_path_repos" ]; then
+        if [ "$_skip_path_repos" -eq 1 ]; then
+            warn "External path-repo discovery skipped (SEMITEXA_SKIP_PATH_REPO_TESTS=1)."
+            printf '%s\n' "$_missing_path_repos" | while IFS= read -r _u; do
+                [ -z "$_u" ] && continue
+                warn "  - $_u  (source not available; tests NOT executed)"
+            done
+            # Remember the skipped set so the post-PHPUnit summary can
+            # surface it again — the warning at the top of a long run
+            # is easy to miss.
+            SEMITEXA_TEST_SKIPPED_PATH_REPOS="$_missing_path_repos"
+            export SEMITEXA_TEST_SKIPPED_PATH_REPOS
+        else
+            error "External path-repository tests cannot be discovered."
+            printf '%s\n' "$_missing_path_repos" | while IFS= read -r _u; do
+                [ -z "$_u" ] && continue
+                _root="${_u%%/*}"
+                if [ -L "$PROJECT_ROOT/$_root" ]; then
+                    error "  - $_u  (./$_root is a broken symlink)"
+                else
+                    error "  - $_u  (./$_root symlink is missing)"
+                fi
+            done
+            info ""
+            info "A broad-packages run must not silently skip Platform UI tests."
+            info "Fix one of:"
+            info "  1. Create the operator-local symlink (one-time, gitignored):"
+            _first_root="$(printf '%s' "$_missing_path_repos" | head -n1)"
+            _first_root="${_first_root%%/*}"
+            info "       ln -s /absolute/host/path/to/$_first_root \"$PROJECT_ROOT/$_first_root\""
+            info "       composer dump-autoload --no-scripts"
+            info "  2. Or set SEMITEXA_SKIP_PATH_REPO_TESTS=1 to opt out (run will still emit"
+            info "     a loud warning and surface the skipped repos in the final summary)."
+            info ""
+            info "Details: var/docs/ui-foundation-step1-quarantine.md"
+            exit 1
+        fi
+    fi
+
+    _test_paths=""
+    if [ "$_has_positional" -eq 0 ] || [ "$_broad_packages_run" -eq 1 ]; then
+        _discovered=""
+        if [ -d "$PROJECT_ROOT/packages" ]; then
+            for _dir in "$PROJECT_ROOT"/packages/*/tests; do
+                [ -d "$_dir" ] || continue
+                _discovered="$_discovered
+${_dir#$PROJECT_ROOT/}"
+            done
+        fi
+        # src/modules is only auto-included on pure no-arg discovery; an
+        # explicit `packages` positional should not pull modules in.
+        if [ "$_has_positional" -eq 0 ] && [ -d "$PROJECT_ROOT/src/modules" ]; then
+            for _dir in "$PROJECT_ROOT"/src/modules/*/tests; do
+                [ -d "$_dir" ] || continue
+                # Skip empty test dirs so PHPUnit doesn't error on no-tests.
+                if find "$_dir" -mindepth 1 -name '*Test.php' -print -quit 2>/dev/null | grep -q .; then
+                    _discovered="$_discovered
+${_dir#$PROJECT_ROOT/}"
+                fi
+            done
+        fi
+        # Include external path-repo tests where the source IS available;
+        # missing sources were already handled in the audit above.
+        for _url in $_external_path_repo_urls; do
+            _url_clean="${_url#./}"
+            [ -e "$PROJECT_ROOT/$_url_clean" ] || continue
+            _tests_dir="$PROJECT_ROOT/$_url_clean/tests"
+            [ -d "$_tests_dir" ] || continue
+            if find "$_tests_dir" -mindepth 1 -name '*Test.php' -print -quit 2>/dev/null | grep -q .; then
+                _discovered="$_discovered
+${_url_clean}/tests"
+            fi
+        done
+
+        if [ -n "$_discovered" ]; then
+            _test_paths="$(printf '%s' "$_discovered" | sed '/^$/d' | LC_ALL=C sort | tr '\n' ' ')"
+        fi
+    fi
+
+    # When the user typed the `packages` alias as the broad target, drop it
+    # from the args so the expanded discovered list (which already covers
+    # packages/* AND external path-repo tests) is what PHPUnit receives.
+    if [ "$_broad_packages_run" -eq 1 ] && [ "$_has_positional" -eq 1 ]; then
+        _new_args=""
+        for _arg in "$@"; do
+            case "$_arg" in
+                packages|packages/|./packages|./packages/) continue ;;
+            esac
+            _new_args="$_new_args $_arg"
+        done
+        # shellcheck disable=SC2086
+        set -- $_new_args
+    fi
+
+    if [ -n "$_test_paths" ]; then
+        info "Discovered test paths: $(printf '%s' "$_test_paths" | awk '{$1=$1; print}' | tr ' ' ',' | sed 's/,/, /g')"
+    fi
+
+    # `set -e` is in effect at the top of this script; wrap with `|| ...`
+    # so a non-zero exit is captured here instead of killing the script
+    # silently before we can report it and decide whether to continue.
+    _phpunit_rc=0
+    (
+        env_export_compose_context
+        # shellcheck disable=SC2086
+        $_compose $_overlays run --rm phpunit vendor/bin/phpunit "$@" $_test_paths
+    ) || _phpunit_rc=$?
+
+    if [ "$_phpunit_rc" -ne 0 ]; then
+        printf "\n"
+        error "PHPUnit failed (exit $_phpunit_rc). Skipping E2E phase."
+        exit "$_phpunit_rc"
+    fi
+    success "PHPUnit phase passed."
+
+    # If path-repo discovery was opted out by SEMITEXA_SKIP_PATH_REPO_TESTS,
+    # surface the skipped set in the final summary so a green PHPUnit phase
+    # cannot be mistaken for "everything ran".
+    if [ -n "${SEMITEXA_TEST_SKIPPED_PATH_REPOS:-}" ]; then
+        warn "Note: external path-repo tests were NOT executed (SEMITEXA_SKIP_PATH_REPO_TESTS=1)."
+        printf '%s\n' "$SEMITEXA_TEST_SKIPPED_PATH_REPOS" | while IFS= read -r _u; do
+            [ -z "$_u" ] && continue
+            warn "  - $_u  (source not available)"
+        done
+        warn "PHPUnit phase reports success ONLY for the discovered subset above."
+    fi
+
+    # ── Phase 2: E2E (Playwright) ───────────────────────────────────────
+    # When the operator passed positional PHPUnit targets, this is a
+    # focused PHPUnit run; do NOT auto-run the full E2E suite.
+    if [ "$_has_positional" -eq 1 ]; then
+        info "Positional PHPUnit targets supplied — E2E phase skipped."
+        exit 0
+    fi
+
+    printf "\n%s%s Phase 2/2 — E2E tests (Playwright in Docker) %s\n\n" "$C_BOLD" "$C_CYAN" "$C_RESET"
+
+    _e2e_dirs="$(discover_e2e_dirs)"
+    if [ -z "$_e2e_dirs" ]; then
+        info "No E2E tests discovered (looked in packages/*/tests/E2E and src/modules/*/tests/E2E)."
+        success "All tests passed (no E2E specs to run)."
+        exit 0
+    fi
+
+    info "Discovered E2E spec dirs: $(printf '%s' "$_e2e_dirs" | tr '\n' ',' | sed 's/,$//' | sed 's/,/, /g')"
+    info "E2E baseURL: ${PLAYWRIGHT_BASE_URL:-http://localhost:9502 (default; runner shares app netns)}"
+
+    _app_rc=0
+    (
+        env_export_compose_context
+        # Bring up the application so the E2E runner has a target. depends_on
+        # in the compose service handles the rest, but `up -d app` is explicit
+        # and makes the failure mode obvious if app cannot start.
+        # shellcheck disable=SC2086
+        $_compose $_overlays up -d app
+    ) || _app_rc=$?
+    if [ "$_app_rc" -ne 0 ]; then
+        error "Failed to start app service for E2E phase (exit $_app_rc)."
+        exit "$_app_rc"
+    fi
+
+    _e2e_rc=0
+    (
+        env_export_compose_context
+        # shellcheck disable=SC2086
+        $_compose $_overlays run --rm e2e-runner
+    ) || _e2e_rc=$?
+
+    if [ "$_e2e_rc" -ne 0 ]; then
+        printf "\n"
+        error "E2E phase failed (exit $_e2e_rc)."
+        exit "$_e2e_rc"
+    fi
+    success "E2E phase passed."
+    exit 0
+}
+
+# Resolve the Docker Compose project name for $PROJECT_ROOT — preferring the
+# value compose itself reports (so we never disagree with the runtime), with a
+# fallback to compose's name-normalization rule (`basename`, lowercase, drop
+# disallowed chars). Stdout is the resolved name.
+proxy_compose_project_name() {
+    _compose="$(compose_bin 2>/dev/null)"
+    _overlays="$(compose_args)"
+    if [ -n "$_compose" ]; then
+        _name="$(
+            env_export_compose_context
+            # shellcheck disable=SC2086
+            $_compose $_overlays config --format json 2>/dev/null \
+                | sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+                | head -n 1
+        )"
+        if [ -n "$_name" ]; then
+            printf '%s' "$_name"
+            return 0
+        fi
+    fi
+    # Compose normalization: lowercase basename, strip anything not [a-z0-9_-].
+    printf '%s' "$(basename "$PROJECT_ROOT" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')"
+}
+
+# Look up the runtime owner of a published port. Prints up to four
+# tab-separated fields when a Docker container is the publisher:
+#   <container-name>\t<compose-project>\t<compose-service>\t<status>
+# Empty stdout when no Docker container publishes the port.
+proxy_runtime_owner_for_port() {
+    _port="$1"
+    [ -n "$_port" ] || return 0
+    command -v docker >/dev/null 2>&1 || return 0
+    docker ps --filter "publish=${_port}" --no-trunc --format \
+        '{{.Names}}{{"\t"}}{{.Label "com.docker.compose.project"}}{{"\t"}}{{.Label "com.docker.compose.service"}}{{"\t"}}{{.Status}}' \
+        2>/dev/null | head -n 1
+}
+
+# Best-effort host-process owner of a listening port. Prints "<pid>\t<command>"
+# when ss is available and reports a pid; empty otherwise.
+proxy_host_process_for_port() {
+    _port="$1"
+    [ -n "$_port" ] || return 0
+    if command -v ss >/dev/null 2>&1; then
+        ss -ltnp 2>/dev/null \
+            | awk -v p="$_port" '$0 ~ ":" p "$" || $0 ~ ":" p " " {print; exit}' \
+            | sed -n 's/.*users:(("\([^"]*\)",pid=\([0-9]*\),.*/\2\t\1/p' \
+            | head -n 1
+    fi
+}
+
+# Look up the registered owner of a port in ~/.semitexa/router/registry/apps.
+# Prints "<app_id>\t<project_name>\t<project_root>" when the port is registered;
+# empty otherwise.
+proxy_registry_owner_for_port() {
+    _port="$1"
+    [ -n "$_port" ] || return 0
+    [ -d "$ROUTER_APP_REGISTRY_DIR" ] || return 0
+    for _entry in "$ROUTER_APP_REGISTRY_DIR"/*.env; do
+        [ -f "$_entry" ] || continue
+        APP_ID='' SWOOLE_PORT='' PROJECT_ROOT='' PROJECT_NAME='' REGISTERED_AT='' UPDATED_AT=''
+        # shellcheck disable=SC1090
+        . "$_entry"
+        [ -n "$APP_ID" ] || continue
+        [ "$SWOOLE_PORT" = "$_port" ] || continue
+        printf '%s\t%s\t%s\n' "$APP_ID" "${PROJECT_NAME:-}" "${PROJECT_ROOT:-}"
+        return 0
+    done
+    return 0
+}
+
+# Pure render: emit an ownership-aware diagnosis given already-resolved
+# fields. No I/O — Docker, ss, and the registry are queried by the caller
+# (`proxy_diagnose_port_conflict`). Kept pure so the case logic can be
+# unit-tested by sourcing this file and feeding fixtures.
+#
+# Args:
+#   $1 port
+#   $2 our compose project name
+#   $3 our SEMITEXA_APP_ID (may be empty)
+#   $4 runtime line  : "<container>\t<compose-project>\t<service>\t<status>" or empty
+#   $5 registry line : "<app-id>\t<project-name>\t<project-root>" or empty
+#   $6 host process  : "<pid>\t<command>" or empty (only consulted when no runtime line)
+#
+# Always exits non-zero so the caller can chain `|| true` after consultation.
+proxy_diagnose_port_conflict_render() {
+    _port="$1"
+    _our_compose="$2"
+    _our_app_id="$3"
+    _runtime_line="$4"
+    _registry_line="$5"
+    _host_proc="${6:-}"
+
+    _runtime_name=""; _runtime_project=""; _runtime_service=""; _runtime_status=""
+    if [ -n "$_runtime_line" ]; then
+        _runtime_name="$(printf '%s' "$_runtime_line" | awk -F'\t' '{print $1}')"
+        _runtime_project="$(printf '%s' "$_runtime_line" | awk -F'\t' '{print $2}')"
+        _runtime_service="$(printf '%s' "$_runtime_line" | awk -F'\t' '{print $3}')"
+        _runtime_status="$(printf '%s' "$_runtime_line" | awk -F'\t' '{print $4}')"
+    fi
+
+    _reg_app_id=""; _reg_project=""; _reg_root=""
+    if [ -n "$_registry_line" ]; then
+        _reg_app_id="$(printf '%s' "$_registry_line" | awk -F'\t' '{print $1}')"
+        _reg_project="$(printf '%s' "$_registry_line" | awk -F'\t' '{print $2}')"
+        _reg_root="$(printf '%s' "$_registry_line" | awk -F'\t' '{print $3}')"
+    fi
+
+    _registered_to_us=0
+    if [ -n "$_reg_app_id" ] && [ "$_reg_app_id" = "$_our_app_id" ]; then
+        _registered_to_us=1
+    fi
+
+    printf "\n"
+
+    if [ -z "$_runtime_line" ]; then
+        # No Docker container publishes the port — host process or Docker
+        # socket not reachable.
+        _pid="$(printf '%s' "$_host_proc" | awk -F'\t' '{print $1}')"
+        _cmd="$(printf '%s' "$_host_proc" | awk -F'\t' '{print $2}')"
+        if [ "$_registered_to_us" -eq 1 ]; then
+            error "Port $_port is registered to this project (${_reg_project:-unknown}) but is currently bound by a host process."
+        elif [ -n "$_reg_project" ]; then
+            error "Port $_port is registered to '${_reg_project}' but is currently bound by a host process."
+        else
+            error "Port $_port is bound by a host process and is not in the local app registry."
+        fi
+        if [ -n "$_pid" ]; then
+            info  "Host owner: pid=${_pid} command=${_cmd:-?}"
+        else
+            info  "Host owner: unknown (run with sudo for ss -ltnp, or use lsof -iTCP:${_port} -sTCP:LISTEN)"
+        fi
+        info  ""
+        info  "Resolve by either stopping that process, or choosing another port for this project:"
+        info  "  bin/semitexa local-app:reconcile"
+        info  "  bin/semitexa server:start"
+        return 1
+    fi
+
+    # A Docker container holds the port.
+    if [ "$_runtime_project" = "$_our_compose" ]; then
+        # Case A or B — same compose project as ours.
+        if [ "$_registered_to_us" -eq 1 ] || [ -z "$_reg_app_id" ]; then
+            error "Port $_port is bound by this project's container '${_runtime_name}' (${_runtime_status})."
+            info  "The local-app registry says this port belongs to this project, but our 'app' service is reporting"
+            info  "as not running — likely a stale or partially-stopped container under the same compose project."
+            info  ""
+            info  "Resolve by recreating this project's containers:"
+            info  "  bin/semitexa server:stop"
+            info  "  bin/semitexa server:start"
+        else
+            error "Port $_port is bound by this project's container '${_runtime_name}', but the local-app registry"
+            info  "says the port is registered to '${_reg_project}' (${_reg_root})."
+            info  "Either stop the conflicting container or reconcile registry/runtime."
+        fi
+        return 1
+    fi
+
+    # Different compose project than ours.
+    if [ "$_registered_to_us" -eq 1 ]; then
+        error "Port $_port is registered to this project (${_reg_project}) but is currently bound by a different container."
+        info  "Runtime owner: container '${_runtime_name}' (compose project '${_runtime_project}', service '${_runtime_service}', ${_runtime_status})."
+        info  ""
+        info  "This project owns the port logically; reconciling to a different port would only mask the conflict."
+        info  "Stop the conflicting container so this project can use its registered port:"
+        info  "  docker stop ${_runtime_name}"
+        info  "or, if it is a sibling Semitexa project, run 'bin/semitexa server:stop' from that project's root:"
+        if [ -n "$_reg_root" ]; then
+            info  "  (this project root: ${_reg_root})"
+        fi
+        return 1
+    fi
+
+    if [ -n "$_reg_project" ]; then
+        # Registry says someone else owns this port; runtime confirms a third
+        # party also holds it.
+        error "Port $_port is registered to '${_reg_project}' but is currently bound by container '${_runtime_name}'"
+        info  "(compose project '${_runtime_project}', service '${_runtime_service}', ${_runtime_status})."
+        info  "Your project does not own this port. Reconcile to a free port:"
+        info  "  bin/semitexa local-app:reconcile"
+        info  "  bin/semitexa server:start"
+        return 1
+    fi
+
+    # Port is not in the local-app registry at all; some other Docker
+    # container owns it.
+    error "Port $_port is bound by container '${_runtime_name}' (compose project '${_runtime_project}', ${_runtime_status})."
+    info  "Your project's SWOOLE_PORT is set to $_port but the local-app registry has no entry for that port."
+    info  "Reconcile this project to a free port, or pick one explicitly:"
+    info  "  bin/semitexa local-app:reconcile"
+    info  "  bin/semitexa server:start"
+    return 1
+}
+
+# Resolves runtime, registry, and host-process facts for $_port and hands
+# them to the pure renderer above.
+proxy_diagnose_port_conflict() {
+    _port="$1"
+    _our_compose="$2"
+    _our_app_id="$3"
+
+    _runtime_line="$(proxy_runtime_owner_for_port "$_port")"
+    _registry_line="$(proxy_registry_owner_for_port "$_port")"
+    _host_proc=""
+    if [ -z "$_runtime_line" ]; then
+        _host_proc="$(proxy_host_process_for_port "$_port")"
+    fi
+
+    proxy_diagnose_port_conflict_render \
+        "$_port" "$_our_compose" "$_our_app_id" \
+        "$_runtime_line" "$_registry_line" "$_host_proc"
+}
+
+# Run a one-off, no-host-port app container to execute a CLI command. Compose
+# `run` does NOT publish service ports by default, so this works even when
+# another container/process holds SWOOLE_PORT — which is the right design for
+# CLI-only commands like `update`, `list`, `routes:list`.
+proxy_run_one_off_app() {
+    _compose="$(compose_bin)"
+    _overlays="$(compose_args)"
+    (
+        env_export_compose_context
+        if [ -t 0 ] && [ -t 1 ]; then
+            # shellcheck disable=SC2086
+            $_compose $_overlays run --rm app php vendor/bin/semitexa "$@"
+        else
+            # shellcheck disable=SC2086
+            $_compose $_overlays run --rm -T app php vendor/bin/semitexa "$@"
+        fi
+    )
+}
+
+cmd_proxy() {
+    if command -v php >/dev/null 2>&1; then
+        if [ -f "$PROJECT_ROOT/vendor/bin/semitexa" ]; then
+            if is_app_running; then
+                if [ -t 0 ] && [ -t 1 ]; then run_compose exec app php vendor/bin/semitexa "$@"; else run_compose exec -T app php vendor/bin/semitexa "$@"; fi
+            elif has_compose; then
+                if env_runtime_file_exists; then
+                    # CLI commands don't need a long-running, port-publishing
+                    # app server. If SWOOLE_PORT is currently free we can still
+                    # use a one-off container; if it is bound, we *also* use a
+                    # one-off container (compose `run` does not publish ports),
+                    # but first emit an ownership-aware advisory so the
+                    # operator knows the long-running server can't start.
+                    _swoole_port="$(env_val SWOOLE_PORT '')"
+                    if [ -n "$_swoole_port" ] && port_in_use_on_host "$_swoole_port"; then
+                        _our_compose="$(proxy_compose_project_name)"
+                        _our_app_id="$(env_val SEMITEXA_APP_ID '')"
+                        warn "App container is not running for this project, and SWOOLE_PORT=$_swoole_port is held by another owner."
+                        # Diagnosis returns non-zero, but we continue because
+                        # the CLI command does not need a published port.
+                        proxy_diagnose_port_conflict "$_swoole_port" "$_our_compose" "$_our_app_id" || true
+                        printf "\n"
+                        info "Running this command in a one-off container (no host port published)."
+                        proxy_run_one_off_app "$@"
+                        return $?
+                    fi
+
+                    info "App container is not running; using a one-off container for this CLI command..."
+                    proxy_run_one_off_app "$@"
+                    return $?
+                else
+                    info "Running locally with PHP (no Semitexa env files for Docker)..."
+                    php "$PROJECT_ROOT/vendor/bin/semitexa" "$@"
+                fi
+            else
+                info "Running locally with PHP (Docker not available)..."
+                php "$PROJECT_ROOT/vendor/bin/semitexa" "$@"
+            fi
+        else
+            error "vendor/bin/semitexa not found. Run: bin/semitexa install"
+            exit 1
+        fi
+    else
+        if has_compose; then
+            if is_app_running; then
+                if [ -t 0 ] && [ -t 1 ]; then run_compose exec app php vendor/bin/semitexa "$@"; else run_compose exec -T app php vendor/bin/semitexa "$@"; fi
+            elif env_runtime_file_exists; then
+                _swoole_port="$(env_val SWOOLE_PORT '')"
+                if [ -n "$_swoole_port" ] && port_in_use_on_host "$_swoole_port"; then
+                    _our_compose="$(proxy_compose_project_name)"
+                    _our_app_id="$(env_val SEMITEXA_APP_ID '')"
+                    warn "App container is not running and SWOOLE_PORT=$_swoole_port is held by another owner."
+                    proxy_diagnose_port_conflict "$_swoole_port" "$_our_compose" "$_our_app_id" || true
+                    printf "\n"
+                    info "Running this command in a one-off container (no host port published)."
+                fi
+                proxy_run_one_off_app "$@"
+            else
+                error "App container is not running."
+                info "Start with: bin/semitexa server:start"
+                exit 1
+            fi
+        else
+            error "PHP is not available and Docker is not running."
+            info "Either start Docker and run: bin/semitexa server:start"
+            info "Or install PHP locally"
+            exit 1
+        fi
+    fi
+}
+
+# ═══════════════════════════════════════════════════════════════════════
+# Tests source this file to exercise individual helper functions in
+# isolation (e.g. `proxy_diagnose_port_conflict_render`). When sourced with
+# SEMITEXA_BIN_SOURCE_ONLY=1, skip the dispatch so no command is run.
+if [ "${SEMITEXA_BIN_SOURCE_ONLY:-0}" = "1" ]; then
+    return 0 2>/dev/null || exit 0
+fi
+
+COMMAND="${1:-}"
+[ -z "$COMMAND" ] && { cmd_list; exit 0; }
+shift
+case "$COMMAND" in
+    server:start)    cmd_server_start "$@" ;;
+    server:stop)     cmd_server_stop "$@" ;;
+    server:restart)  _svc=""; while [ $# -gt 0 ]; do case "$1" in --service=*) _svc="${1#--service=}" ;; -s) shift; _svc="${1:-}" ;; *) _svc="$1" ;; esac; shift; done; cmd_server_restart "$_svc" ;;
+    local-router:init) cmd_local_router_init "$@" ;;
+    local-router:start) cmd_local_router_start "$@" ;;
+    local-router:stop) cmd_local_router_stop "$@" ;;
+    local-router:restart) cmd_local_router_restart "$@" ;;
+    local-router:doctor) cmd_local_router_doctor "$@" ;;
+    local-domain:mode) cmd_local_domain_mode "$@" ;;
+    local-domain:add) cmd_local_domain_add "$@" ;;
+    local-domain:remove) cmd_local_domain_remove "$@" ;;
+    local-domain:list) cmd_local_domain_list "$@" ;;
+    local-app:register) cmd_local_app_register "$@" ;;
+    local-app:reconcile) cmd_local_app_reconcile "$@" ;;
+    local-app:list) cmd_local_app_list "$@" ;;
+    local-app:remove) cmd_local_app_remove "$@" ;;
+    local-app:doctor) cmd_local_app_doctor "$@" ;;
+    lint:skin-legacy) cmd_lint_skin_legacy "$@" ;;
+    lint:skin-tokens) cmd_lint_skin_tokens "$@" ;;
+    install)         cmd_install "$@" ;;
+    demo:install)    cmd_demo_install "$@" ;;
+    test:run)        cmd_test_run "$@" ;;
+    list|help|--help|-h) cmd_list "$@" ;;
+    self-test)       cmd_self_test "$@" ;;
+    init)            cmd_init "$@" ;;
+    *)               cmd_proxy "$COMMAND" "$@" ;;
+esac
