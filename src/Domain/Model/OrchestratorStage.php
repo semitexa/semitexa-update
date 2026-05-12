@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Update\Domain\Model;
 
+use Semitexa\Update\Domain\Model\Composer\ComposerUpdateResult;
 use Semitexa\Update\Domain\Model\Scaffold\ScaffoldSyncReport;
 use Semitexa\Update\Domain\Model\SchemaSyncResult;
 
@@ -22,6 +23,7 @@ final readonly class OrchestratorStage
         public ?RunReport $report,
         public ?SchemaSyncResult $syncResult,
         public ?ScaffoldSyncReport $scaffoldReport = null,
+        public ?ComposerUpdateResult $composerResult = null,
     ) {
     }
 
@@ -32,6 +34,9 @@ final readonly class OrchestratorStage
         }
         if ($this->scaffoldReport !== null) {
             return $this->scaffoldReport->isSuccess();
+        }
+        if ($this->composerResult !== null) {
+            return $this->composerResult->isSuccess();
         }
         return true;
     }

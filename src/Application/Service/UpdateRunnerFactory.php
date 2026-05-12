@@ -9,6 +9,9 @@ use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\Support\ProjectRoot;
 use Semitexa\Orm\Application\Service\Connection\ConnectionRegistry;
+use Semitexa\Update\Application\Service\Composer\ComposerUpdateRunner;
+use Semitexa\Update\Application\Service\Composer\InContainerComposerExecutor;
+use Semitexa\Update\Application\Service\Composer\PackagistVersionResolver;
 use Semitexa\Update\Application\Service\Scaffold\ScaffoldFileClassifier;
 use Semitexa\Update\Application\Service\Scaffold\ScaffoldHasher;
 use Semitexa\Update\Application\Service\Scaffold\ScaffoldManifestLoader;
@@ -70,6 +73,10 @@ class UpdateRunnerFactory
             projectRoot: $projectRoot,
             scaffoldRoot: $packageRoot . '/resources/scaffold',
             manifestPath: $packageRoot . '/resources/scaffold-manifest.json',
+            composerRunner: new ComposerUpdateRunner(
+                executor: new InContainerComposerExecutor(),
+                resolver: new PackagistVersionResolver(),
+            ),
         );
     }
 
