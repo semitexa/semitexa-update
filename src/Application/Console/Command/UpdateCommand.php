@@ -66,8 +66,9 @@ final class UpdateCommand extends BaseCommand
                 'composer-only',
                 null,
                 InputOption::VALUE_NONE,
-                'Run only the Composer-update phase and stop, even if no semitexa/update upgrade happened. '
-                . 'Useful for two-pass workflows.',
+                'Run only the Composer-update phase and stop. Also acts as an explicit "force composer" '
+                . 'override: even when no pin needs bumping and composer.lock/vendor are coherent — when '
+                . 'the default would skip the composer invocation — this flag forces it to run anyway.',
             )
             ->addOption(
                 'allow-partial-composer-update',

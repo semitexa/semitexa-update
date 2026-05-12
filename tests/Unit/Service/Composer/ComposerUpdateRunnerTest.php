@@ -433,9 +433,29 @@ final class ComposerUpdateRunnerTest extends TestCase
         self::assertSame(1, $executor->callCount);
     }
 
-    public function testCleanOutcomeWhenNothingNeedsBumping(): void
+    public function testCleanStateSkipsComposerInvocationEntirely(): void
     {
-        // Already at the latest version.
+        // Coherent: declared == locked == installed, anchor is the same → no bumps,
+        // no lock/vendor drift, no force → composer must NOT be invoked. The whole
+        // point: avoid composer.lock content-hash churn on no-op `bin/semitexa update`.
+        $this->writeProject(
+            declared:  ['semitexa/update' => '2026.05.12.0744'],
+            locked:    ['semitexa/update' => '2026.05.12.0744'],
+            installed: ['semitexa/update' => '2026.05.12.0744'],
+        );
+        $resolver = new FakeResolver(['semitexa/update' => ['2026.05.12.0744']]);
+        $executor = new FakeExecutor(true);
+
+        $result = (new ComposerUpdateRunner($executor, $resolver))
+            ->execute($this->projectRoot, dryRun: false);
+
+        self::assertSame(ComposerUpdateOutcome::Clean, $result->outcome);
+        self::assertSame(0, $executor->callCount, 'composer must NOT be invoked when nothing needs doing.');
+        self::assertStringContainsString('--composer-only', $result->message, 'Operator-facing message must name the force flag.');
+    }
+
+    public function testForceFlagRunsComposerEvenWhenClean(): void
+    {
         $this->writeProject(
             declared:  ['semitexa/update' => '2026.05.12.0744'],
             locked:    ['semitexa/update' => '2026.05.12.0744'],
@@ -445,9 +465,66 @@ final class ComposerUpdateRunnerTest extends TestCase
         $executor = new FakeExecutor(true, runReturns: ['exitCode' => 0, 'output' => '']);
 
         $result = (new ComposerUpdateRunner($executor, $resolver))
-            ->execute($this->projectRoot, dryRun: false);
+            ->execute($this->projectRoot, dryRun: false, force: true);
 
         self::assertSame(ComposerUpdateOutcome::Clean, $result->outcome);
+        self::assertSame(1, $executor->callCount, 'force=true must invoke composer even in a clean state.');
+    }
+
+    public function testLockStaleVsInstalledStillRunsComposer(): void
+    {
+        // No bumps needed (declared == locked) BUT installed != locked → there IS
+        // genuine vendor drift that only composer install/update can heal. Skip is
+        // not allowed in this case.
+        $this->writeProject(
+            declared:  ['semitexa/update' => '2026.05.12.0744'],
+            locked:    ['semitexa/update' => '2026.05.12.0744'],
+            installed: ['semitexa/update' => '2026.05.12.0643'],  // drift!
+        );
+        $resolver = new FakeResolver(['semitexa/update' => ['2026.05.12.0744']]);
+        $executor = new FakeExecutor(true, runReturns: ['exitCode' => 0, 'output' => '']);
+
+        (new ComposerUpdateRunner($executor, $resolver))
+            ->execute($this->projectRoot, dryRun: false);
+
+        self::assertSame(1, $executor->callCount, 'composer must run when vendor != lock.');
+    }
+
+    public function testDeclaredVsLockedDriftStillRunsComposer(): void
+    {
+        // composer.json got hand-edited to a new pin that's already on Packagist;
+        // composer.lock is behind. Even though the runner's plan() won't add this
+        // to its bumps (target version IS the declared value), composer must run
+        // to bring the lock and vendor up to date.
+        $this->writeProject(
+            declared:  ['semitexa/update' => '2026.05.12.0744'],  // hand-edited pin
+            locked:    ['semitexa/update' => '2026.05.12.0643'],  // lock stale
+            installed: ['semitexa/update' => '2026.05.12.0643'],
+        );
+        $resolver = new FakeResolver(['semitexa/update' => ['2026.05.12.0744']]);
+        $executor = new FakeExecutor(true, runReturns: ['exitCode' => 0, 'output' => '']);
+
+        $result = (new ComposerUpdateRunner($executor, $resolver))
+            ->execute($this->projectRoot, dryRun: false);
+
+        self::assertSame(1, $executor->callCount, 'composer must run when declared != locked.');
+    }
+
+    public function testDryRunCleanStateReportsCleanWithoutInvokingComposer(): void
+    {
+        $this->writeProject(
+            declared:  ['semitexa/update' => '2026.05.12.0744'],
+            locked:    ['semitexa/update' => '2026.05.12.0744'],
+            installed: ['semitexa/update' => '2026.05.12.0744'],
+        );
+        $resolver = new FakeResolver(['semitexa/update' => ['2026.05.12.0744']]);
+        $executor = new FakeExecutor(true);
+
+        $result = (new ComposerUpdateRunner($executor, $resolver))
+            ->execute($this->projectRoot, dryRun: true);
+
+        self::assertSame(ComposerUpdateOutcome::Clean, $result->outcome);
+        self::assertSame(0, $executor->callCount);
     }
 
     /**
