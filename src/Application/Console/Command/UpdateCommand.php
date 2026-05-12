@@ -44,7 +44,14 @@ final class UpdateCommand extends BaseCommand
         $this
             ->addOption('connection', 'c', InputOption::VALUE_REQUIRED, 'Connection name for the journal', 'default')
             ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Compute and print the plan without executing.')
-            ->addOption('allow-destructive', null, InputOption::VALUE_NONE, 'Permit destructive ORM operations (DROP / type narrow).');
+            ->addOption('allow-destructive', null, InputOption::VALUE_NONE, 'Permit destructive ORM operations (DROP / type narrow).')
+            ->addOption(
+                'write-scaffold-candidates',
+                null,
+                InputOption::VALUE_NONE,
+                'For locally modified scaffold-managed files, write candidate .new files next to them. '
+                . 'Off by default to avoid recreating files the operator has already reviewed and removed.',
+            );
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -53,10 +60,11 @@ final class UpdateCommand extends BaseCommand
         $connection = (string) ($input->getOption('connection') ?: 'default');
         $dryRun = (bool) $input->getOption('dry-run');
         $allowDestructive = (bool) $input->getOption('allow-destructive');
+        $writeCandidates = (bool) $input->getOption('write-scaffold-candidates');
 
         try {
             $orchestrator = $this->runnerFactory->orchestrator($connection);
-            $planReport = $orchestrator->plan();
+            $planReport = $orchestrator->plan($writeCandidates);
         } catch (UpdateException $e) {
             $io->error($e->getMessage());
             return Command::FAILURE;
@@ -66,7 +74,11 @@ final class UpdateCommand extends BaseCommand
 
         if ($dryRun) {
             try {
-                $stages = $orchestrator->run(allowDestructive: $allowDestructive, dryRun: true);
+                $stages = $orchestrator->run(
+                    allowDestructive: $allowDestructive,
+                    dryRun: true,
+                    writeCandidates: $writeCandidates,
+                );
             } catch (UpdateException $e) {
                 $io->error($e->getMessage());
                 return Command::FAILURE;
@@ -77,7 +89,11 @@ final class UpdateCommand extends BaseCommand
         }
 
         try {
-            $stages = $orchestrator->run(allowDestructive: $allowDestructive, dryRun: false);
+            $stages = $orchestrator->run(
+                allowDestructive: $allowDestructive,
+                dryRun: false,
+                writeCandidates: $writeCandidates,
+            );
         } catch (UpdateException $e) {
             $io->error($e->getMessage());
             return Command::FAILURE;
@@ -290,23 +306,31 @@ final class UpdateCommand extends BaseCommand
         $failed = 0;
         $noop = 0;
         $skipped = 0;
+        $manualReview = 0;
         foreach ($report->results as $result) {
             switch ($result->outcome) {
-                case ScaffoldSyncOutcome::Applied:    $applied++; break;
-                case ScaffoldSyncOutcome::WouldApply: $would++; break;
-                case ScaffoldSyncOutcome::Failed:     $failed++; break;
-                case ScaffoldSyncOutcome::NoOp:       $noop++; break;
-                case ScaffoldSyncOutcome::Skipped:    $skipped++; break;
+                case ScaffoldSyncOutcome::Applied:      $applied++; break;
+                case ScaffoldSyncOutcome::WouldApply:   $would++; break;
+                case ScaffoldSyncOutcome::Failed:       $failed++; break;
+                case ScaffoldSyncOutcome::NoOp:         $noop++; break;
+                case ScaffoldSyncOutcome::Skipped:      $skipped++; break;
+                case ScaffoldSyncOutcome::ManualReview: $manualReview++; break;
             }
         }
 
         if ($report->dryRun) {
-            $io->writeln(sprintf('  Dry-run: would apply %d action(s), %d already current.', $would, $noop));
+            $io->writeln(sprintf(
+                '  Dry-run: would apply %d action(s), %d already current, %d manual-review.',
+                $would,
+                $noop,
+                $manualReview,
+            ));
         } else {
             $io->writeln(sprintf(
-                '  applied: %d  ·  no-op: %d  ·  failed: %d  ·  skipped: %d',
+                '  applied: %d  ·  no-op: %d  ·  manual-review: %d  ·  failed: %d  ·  skipped: %d',
                 $applied,
                 $noop,
+                $manualReview,
                 $failed,
                 $skipped,
             ));
@@ -326,8 +350,16 @@ final class UpdateCommand extends BaseCommand
             if ($result->newFilePath !== null) {
                 $io->writeln('      .new:   ' . $result->newFilePath);
             }
-            if ($result->status === ScaffoldSyncStatus::LocallyModified) {
-                $io->writeln('      <comment>Manual review required — live file untouched.</comment>');
+            if ($result->outcome === ScaffoldSyncOutcome::ManualReview) {
+                $io->writeln('      <comment>Live file left untouched.</comment>');
+                $io->writeln(sprintf(
+                    '      <comment>Run `bin/semitexa update --write-scaffold-candidates` to generate %s.new.</comment>',
+                    $result->path,
+                ));
+            } elseif ($result->status === ScaffoldSyncStatus::LocallyModified
+                && $result->action === ScaffoldSyncAction::WriteNew
+            ) {
+                $io->writeln('      <comment>Live file untouched.</comment>');
             }
             if ($result->action === ScaffoldSyncAction::Replace
                 && $result->outcome === ScaffoldSyncOutcome::Applied

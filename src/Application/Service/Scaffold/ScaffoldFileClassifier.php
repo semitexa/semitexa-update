@@ -31,13 +31,14 @@ final class ScaffoldFileClassifier
         string $scaffoldRoot,
         ScaffoldManifest $manifest,
         ?\DateTimeImmutable $now = null,
+        bool $writeCandidates = false,
     ): ScaffoldSyncPlan {
         $now ??= new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
         $integrityErrors = $this->verifyScaffoldIntegrity($scaffoldRoot, $manifest);
 
         $entries = [];
         foreach ($manifest->entries as $manifestEntry) {
-            $entries[] = $this->classify($projectRoot, $manifestEntry, $now);
+            $entries[] = $this->classify($projectRoot, $manifestEntry, $now, $writeCandidates);
         }
 
         return new ScaffoldSyncPlan($entries, $integrityErrors);
@@ -76,29 +77,34 @@ final class ScaffoldFileClassifier
         string $projectRoot,
         ScaffoldFileEntry $manifestEntry,
         \DateTimeImmutable $now,
+        bool $writeCandidates,
     ): ScaffoldSyncPlanEntry {
         $projectFile = $projectRoot . '/' . $manifestEntry->path;
 
         if (!file_exists($projectFile)) {
-            $action = $manifestEntry->autoUpdate
-                ? ScaffoldSyncAction::Create
-                : ScaffoldSyncAction::WriteNew;
-
-            return new ScaffoldSyncPlanEntry(
-                path: $manifestEntry->path,
+            if ($manifestEntry->autoUpdate) {
+                return new ScaffoldSyncPlanEntry(
+                    path: $manifestEntry->path,
+                    status: ScaffoldSyncStatus::Missing,
+                    action: ScaffoldSyncAction::Create,
+                    oldHash: null,
+                    newHash: $manifestEntry->currentSha256,
+                    backupPath: null,
+                    newFilePath: null,
+                    preserveExecutable: $manifestEntry->preserveExecutable,
+                    critical: $manifestEntry->critical,
+                    reason: 'Missing in project — scaffold provides it, auto_update=true.',
+                );
+            }
+            return $this->candidateOrManualReview(
+                manifestEntry: $manifestEntry,
                 status: ScaffoldSyncStatus::Missing,
-                action: $action,
-                oldHash: null,
-                newHash: $manifestEntry->currentSha256,
-                backupPath: null,
-                newFilePath: $action === ScaffoldSyncAction::WriteNew
-                    ? $manifestEntry->path . '.new'
-                    : null,
-                preserveExecutable: $manifestEntry->preserveExecutable,
-                critical: $manifestEntry->critical,
-                reason: $action === ScaffoldSyncAction::Create
-                    ? 'Missing in project — scaffold provides it, auto_update=true.'
-                    : 'Missing in project — auto_update=false, candidate written as .new.',
+                projectHash: null,
+                writeCandidates: $writeCandidates,
+                manualReason: 'Missing in project — auto_update=false; live file left as-is. '
+                    . 'Run `bin/semitexa update --write-scaffold-candidates` to generate '
+                    . $manifestEntry->path . '.new.',
+                candidateReason: 'Missing in project — auto_update=false; candidate written as .new.',
             );
         }
 
@@ -135,9 +141,42 @@ final class ScaffoldFileClassifier
                     reason: 'Project file matches a known prior scaffold hash — safe to auto-update with backup.',
                 );
             }
+            return $this->candidateOrManualReview(
+                manifestEntry: $manifestEntry,
+                status: ScaffoldSyncStatus::KnownPrevious,
+                projectHash: $projectHash,
+                writeCandidates: $writeCandidates,
+                manualReason: 'Matches a prior scaffold but auto_update=false; live file untouched. '
+                    . 'Run `bin/semitexa update --write-scaffold-candidates` to generate '
+                    . $manifestEntry->path . '.new.',
+                candidateReason: 'Matches a prior scaffold but auto_update=false — candidate written as .new.',
+            );
+        }
+
+        return $this->candidateOrManualReview(
+            manifestEntry: $manifestEntry,
+            status: ScaffoldSyncStatus::LocallyModified,
+            projectHash: $projectHash,
+            writeCandidates: $writeCandidates,
+            manualReason: 'Project file is locally modified — live file untouched. '
+                . 'Run `bin/semitexa update --write-scaffold-candidates` to generate '
+                . $manifestEntry->path . '.new.',
+            candidateReason: 'Project file is locally modified — scaffold content written as .new; live file untouched.',
+        );
+    }
+
+    private function candidateOrManualReview(
+        ScaffoldFileEntry $manifestEntry,
+        ScaffoldSyncStatus $status,
+        ?string $projectHash,
+        bool $writeCandidates,
+        string $manualReason,
+        string $candidateReason,
+    ): ScaffoldSyncPlanEntry {
+        if ($writeCandidates) {
             return new ScaffoldSyncPlanEntry(
                 path: $manifestEntry->path,
-                status: ScaffoldSyncStatus::KnownPrevious,
+                status: $status,
                 action: ScaffoldSyncAction::WriteNew,
                 oldHash: $projectHash,
                 newHash: $manifestEntry->currentSha256,
@@ -145,21 +184,20 @@ final class ScaffoldFileClassifier
                 newFilePath: $manifestEntry->path . '.new',
                 preserveExecutable: $manifestEntry->preserveExecutable,
                 critical: $manifestEntry->critical,
-                reason: 'Project file matches a prior scaffold but auto_update=false — candidate written as .new.',
+                reason: $candidateReason,
             );
         }
-
         return new ScaffoldSyncPlanEntry(
             path: $manifestEntry->path,
-            status: ScaffoldSyncStatus::LocallyModified,
-            action: ScaffoldSyncAction::WriteNew,
+            status: $status,
+            action: ScaffoldSyncAction::ManualReview,
             oldHash: $projectHash,
             newHash: $manifestEntry->currentSha256,
             backupPath: null,
-            newFilePath: $manifestEntry->path . '.new',
+            newFilePath: null,
             preserveExecutable: $manifestEntry->preserveExecutable,
             critical: $manifestEntry->critical,
-            reason: 'Project file is locally modified — scaffold content written as .new; live file untouched.',
+            reason: $manualReason,
         );
     }
 
