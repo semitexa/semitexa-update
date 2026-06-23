@@ -121,6 +121,10 @@ final class SemitexaReleaseVersion
 
     private static function schemeRank(bool $semantic): int
     {
-        return $semantic ? 2 : 1;
+        // Date-based versions (2026.MM.DD.HHMM) are the current Semitexa release
+        // scheme and supersede the legacy pre-migration semantic tags (1.x). When
+        // the two schemes are mixed, a date-based release always outranks a
+        // semantic one, so a stray legacy 1.x tag is never mistaken for "latest".
+        return $semantic ? 1 : 2;
     }
 }
