@@ -145,10 +145,21 @@ final class ReleaseComposerManifestBuilder
 
             $remoteUrl = $this->normalizeSemitexaGitHubRemote($remoteUrl);
 
+            // Open-licensed packages are published to public Packagist and resolve
+            // from there over anonymous HTTPS, so they need no repository entry —
+            // dropping them keeps the deploy from depending on git access for openly
+            // available packages. Only proprietary (private) packages keep a VCS
+            // entry below (HTTPS, so the github-oauth token authenticates it).
+            if ($this->isPubliclyPublishedPackage($packageRoot)) {
+                continue;
+            }
+
             if (isset($seenVcsUrls[$remoteUrl])) {
                 continue;
             }
 
+            // Private packages keep a VCS entry, but over HTTPS so composer
+            // authenticates with the github-oauth token (no deploy SSH key needed).
             $result[] = [
                 'type' => 'vcs',
                 'url' => $remoteUrl,
@@ -190,11 +201,41 @@ final class ReleaseComposerManifestBuilder
 
     private function normalizeSemitexaGitHubRemote(string $remoteUrl): string
     {
+        // Emit HTTPS GitHub URLs so composer authenticates VCS access with the
+        // github-oauth token instead of requiring an SSH deploy key on the server.
         if (preg_match('~(?:git@github\.com:|https://github\.com/)(semitexa/[^/]+?)(?:\.git)?$~i', $remoteUrl, $matches) === 1) {
-            return sprintf('git@github.com:%s.git', strtolower($matches[1]));
+            return sprintf('https://github.com/%s.git', strtolower($matches[1]));
         }
 
         return $remoteUrl;
+    }
+
+    /**
+     * A package is publicly published (and therefore resolvable from Packagist with
+     * no repository entry) when its license is NOT proprietary. Proprietary packages
+     * are private and keep a token-authenticated HTTPS VCS entry. A missing/unknown
+     * license is treated as proprietary (fail-safe: keep the VCS entry so a private
+     * package never becomes unresolvable).
+     */
+    private function isPubliclyPublishedPackage(string $packageRoot): bool
+    {
+        $composerPath = $packageRoot . '/composer.json';
+        if (!is_file($composerPath)) {
+            return false;
+        }
+
+        $license = $this->decodeJsonFile($composerPath)['license'] ?? null;
+
+        $licenses = is_array($license) ? $license : [$license];
+        foreach ($licenses as $entry) {
+            if (is_string($entry) && stripos($entry, 'proprietary') !== false) {
+                return false;
+            }
+        }
+
+        // An explicit open license means it is published publicly; no license at all
+        // is treated as private (fail-safe).
+        return $license !== null && $license !== '' && $license !== [];
     }
 
     /**

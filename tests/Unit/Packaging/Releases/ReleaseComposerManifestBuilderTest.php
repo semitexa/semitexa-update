@@ -62,12 +62,12 @@ final class ReleaseComposerManifestBuilderTest extends TestCase
         self::assertSame([
             [
                 'type' => 'vcs',
-                'url' => 'git@github.com:semitexa/semitexa-core.git',
+                'url' => 'https://github.com/semitexa/semitexa-core.git',
             ],
         ], $manifest['repositories']);
     }
 
-    public function testNormalizesHttpsGitHubOriginsToSshForSemitexaRepositories(): void
+    public function testNormalizesGitHubOriginsToHttpsForPrivateSemitexaRepositories(): void
     {
         $projectRoot = sys_get_temp_dir() . '/semitexa-release-manifest-https-origin-' . bin2hex(random_bytes(4));
         mkdir($projectRoot . '/packages/semitexa-core', 0777, true);
@@ -106,7 +106,7 @@ final class ReleaseComposerManifestBuilderTest extends TestCase
         self::assertSame([
             [
                 'type' => 'vcs',
-                'url' => 'git@github.com:semitexa/semitexa-core.git',
+                'url' => 'https://github.com/semitexa/semitexa-core.git',
             ],
         ], $manifest['repositories']);
     }
@@ -218,7 +218,7 @@ final class ReleaseComposerManifestBuilderTest extends TestCase
         self::assertSame([
             [
                 'type' => 'vcs',
-                'url' => 'git@github.com:semitexa/semitexa-site.git',
+                'url' => 'https://github.com/semitexa/semitexa-site.git',
             ],
         ], $manifest['repositories']);
     }
@@ -256,12 +256,12 @@ final class ReleaseComposerManifestBuilderTest extends TestCase
         self::assertSame([
             [
                 'type' => 'vcs',
-                'url' => 'git@github.com:semitexa/semitexa-site.git',
+                'url' => 'https://github.com/semitexa/semitexa-site.git',
             ],
         ], $manifest['repositories']);
     }
 
-    public function testFallsBackToSshForSemitexaPackagesWithoutGitMetadata(): void
+    public function testOmitsRepositoryForOpenLicensedPackagesResolvedFromPackagist(): void
     {
         $projectRoot = sys_get_temp_dir() . '/semitexa-release-manifest-public-' . bin2hex(random_bytes(4));
         mkdir($projectRoot . '/packages/semitexa-cache', 0777, true);
@@ -291,10 +291,41 @@ final class ReleaseComposerManifestBuilderTest extends TestCase
 
         $manifest = (new ReleaseComposerManifestBuilder())->build($projectRoot);
 
+        // Open-licensed (public) package: no VCS repository entry — composer resolves
+        // it from public Packagist over anonymous HTTPS (no deploy key/token needed).
+        self::assertSame([], $manifest['repositories']);
+        self::assertSame('1.0.0', $manifest['require']['semitexa/cache']);
+    }
+
+    public function testKeepsHttpsVcsEntryForProprietaryArrayLicensedPackage(): void
+    {
+        $projectRoot = sys_get_temp_dir() . '/semitexa-release-manifest-private-multi-' . bin2hex(random_bytes(4));
+        mkdir($projectRoot . '/packages/semitexa-os-site', 0777, true);
+
+        file_put_contents($projectRoot . '/composer.json', json_encode([
+            'repositories' => [
+                ['type' => 'path', 'url' => 'packages/semitexa-os-site'],
+            ],
+            'require' => ['semitexa/os-site' => '*'],
+        ], JSON_THROW_ON_ERROR));
+
+        file_put_contents($projectRoot . '/composer.lock', json_encode([
+            'packages' => [
+                ['name' => 'semitexa/os-site', 'version' => '0.1.0'],
+            ],
+        ], JSON_THROW_ON_ERROR));
+
+        file_put_contents($projectRoot . '/packages/semitexa-os-site/composer.json', json_encode([
+            'name' => 'semitexa/os-site',
+            'license' => ['MIT', 'proprietary'],
+        ], JSON_THROW_ON_ERROR));
+
+        $manifest = (new ReleaseComposerManifestBuilder())->build($projectRoot);
+
         self::assertSame([
             [
                 'type' => 'vcs',
-                'url' => 'git@github.com:semitexa/semitexa-cache.git',
+                'url' => 'https://github.com/semitexa/semitexa-os-site.git',
             ],
         ], $manifest['repositories']);
     }
