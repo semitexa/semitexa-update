@@ -34,9 +34,20 @@ final class SemitexaReleaseVersionTest extends TestCase
         self::assertGreaterThan(0, SemitexaReleaseVersion::compare('1.0.12', '1.0.12-beta'));
     }
 
-    public function testPrefersSemanticVersionsWhenSchemesAreMixed(): void
+    public function testPrefersDateBasedVersionsOverLegacySemanticWhenSchemesAreMixed(): void
     {
-        self::assertGreaterThan(0, SemitexaReleaseVersion::compare('1.2.3', '2024.01.15.0001'));
-        self::assertLessThan(0, SemitexaReleaseVersion::compare('2024.01.15.0001', '1.2.3'));
+        // Date-based is the current scheme; legacy semantic (1.x) tags rank below it.
+        self::assertLessThan(0, SemitexaReleaseVersion::compare('1.2.3', '2024.01.15.0001'));
+        self::assertGreaterThan(0, SemitexaReleaseVersion::compare('2024.01.15.0001', '1.2.3'));
+
+        // Real-world regression: the legacy April semantic tags (1.0.23 / 1.0.33)
+        // must never outrank a June date-based release, otherwise auto-deploy would
+        // try to "update" (downgrade) a current install back to a 1.x snapshot.
+        self::assertGreaterThan(0, SemitexaReleaseVersion::compare('2026.06.21.0352', '1.0.23'));
+        self::assertGreaterThan(0, SemitexaReleaseVersion::compare('2026.06.22.0520', '1.0.33'));
+        self::assertSame(
+            '2026.06.22.0520',
+            SemitexaReleaseVersion::latestStable(['1.0.23', '2026.06.21.0352', '1.0.33', '2026.06.22.0520']),
+        );
     }
 }
