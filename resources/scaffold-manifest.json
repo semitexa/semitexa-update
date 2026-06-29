@@ -1,6 +1,6 @@
 {
     "schema_version": "semitexa.scaffold-manifest/v1",
-    "generated_at": "2026-05-12T06:18:04+00:00",
+    "generated_at": "2026-06-29T10:00:50+00:00",
     "files": [
         {
             "path": ".env.default",
@@ -36,8 +36,9 @@
         },
         {
             "path": "bin/semitexa",
-            "current_sha256": "f0227fb9627cc47f995d0600631ef21293d7e8c8d8d590990561d8034b7d2a88",
+            "current_sha256": "19dcb813f827539553c6aacd03880bfa622047db020f1c1083225819ac99cc4a",
             "previous_sha256": [
+                "f0227fb9627cc47f995d0600631ef21293d7e8c8d8d590990561d8034b7d2a88",
                 "6023e10c3fde531896bd2693b3ceced7db693ad4b1c681fe9ef0f357cf588a6b",
                 "8b06fad28f3002bf7ac66b19444edb951555b6c6e3ee646daccb04dc63e9dfe7"
             ],
