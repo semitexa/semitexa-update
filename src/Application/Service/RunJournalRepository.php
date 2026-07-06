@@ -180,8 +180,8 @@ final class RunJournalRepository
         $result = $this->db->execute(
             'SELECT id, kind, actor, updater_version, outcome, failed_stage, stages, package_deltas,'
             . ' patches_applied, error, started_at, completed_at, duration_ms'
-            . ' FROM ' . self::TABLE . ' WHERE id LIKE :prefix LIMIT 2',
-            ['prefix' => str_replace(['%', '_'], ['\\%', '\\_'], $id) . '%'],
+            . ' FROM ' . self::TABLE . " WHERE id LIKE :prefix ESCAPE '!' LIMIT 2",
+            ['prefix' => str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $id) . '%'],
         );
 
         $rows = $result->fetchAll();
