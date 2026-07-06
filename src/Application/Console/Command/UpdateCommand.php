@@ -206,6 +206,14 @@ final class UpdateCommand extends BaseCommand
 
         foreach ($stages as $stage) {
             $io->section($stage->name);
+            if ($stage->preflightReport !== null) {
+                foreach ($stage->preflightReport->checks as $check) {
+                    $io->writeln($check->ok
+                        ? sprintf('  [ok] %s — %s', $check->name, $check->message)
+                        : sprintf('  <error>[fail] %s — %s</error>', $check->name, $check->message));
+                }
+                continue;
+            }
             if ($stage->composerResult !== null) {
                 $this->renderComposerStage($io, $stage->composerResult);
                 continue;
@@ -220,6 +228,13 @@ final class UpdateCommand extends BaseCommand
             }
             $report = $stage->report;
             if ($report === null) {
+                if ($stage->message !== null) {
+                    $io->writeln(
+                        str_starts_with($stage->message, 'WARNING')
+                            ? '  <comment>' . $stage->message . '</comment>'
+                            : '  ' . $stage->message,
+                    );
+                }
                 continue;
             }
 

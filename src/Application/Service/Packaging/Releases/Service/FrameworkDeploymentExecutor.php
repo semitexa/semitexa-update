@@ -5,13 +5,27 @@ declare(strict_types=1);
 namespace Semitexa\Update\Application\Service\Packaging\Releases\Service;
 
 use Semitexa\Core\Environment;
+use Semitexa\Update\Application\Service\HealthChecker;
+use Semitexa\Update\Application\Service\RunJournalRepository;
+use Semitexa\Update\Application\Service\UpdateLock;
+use Semitexa\Update\Domain\Enum\RunOutcome;
 use Semitexa\Update\Domain\Model\DeploymentPlan;
+use Semitexa\Update\Application\Service\Packaging\Releases\Support\ComposerStateSnapshot;
 use Semitexa\Update\Application\Service\Packaging\Releases\Support\DeploymentLogWriter;
 
 final class FrameworkDeploymentExecutor
 {
+    /**
+     * $commandRunner overrides shell execution — tests inject a fake to
+     * exercise partial-failure/rollback ordering without running composer.
+     * Signature: fn (string $command, string $projectRoot): void, throw on
+     * failure (same contract as run()).
+     */
     public function __construct(
         private readonly DeploymentLogWriter $logWriter = new DeploymentLogWriter(),
+        private readonly ?RunJournalRepository $runJournal = null,
+        private readonly ?UpdateLock $lock = null,
+        private readonly ?\Closure $commandRunner = null,
     ) {}
 
     /**
@@ -42,6 +56,14 @@ final class FrameworkDeploymentExecutor
             'restart_required' => false,
         ];
 
+        if ($plan->sourceWarnings !== []) {
+            $result['source_warnings'] = $plan->sourceWarnings;
+        }
+
+        $runId = null;
+        $lock = null;
+        $snapshot = null;
+        $composerUpdated = false;
         try {
             if (!$plan->config->enabled) {
                 return $this->finalize($projectRoot, $result, 'skipped');
@@ -51,7 +73,25 @@ final class FrameworkDeploymentExecutor
                 return $this->finalize($projectRoot, $result, 'noop');
             }
 
+            // Same lock as the manual `update` sweep: never race a running
+            // operator update from the auto-deploy timer (or vice versa).
+            $lock = $this->lock ?? new UpdateLock($projectRoot);
+            if (!$lock->acquire('auto-deploy')) {
+                throw new \RuntimeException(sprintf(
+                    'Another update run is already in progress (%s); auto-deploy will retry on the next tick.',
+                    $lock->holderDescription(),
+                ));
+            }
+
+            // Only actual deployment attempts enter the run journal; the
+            // periodic timer's skipped/noop ticks would drown real history.
+            $runId = $this->beginRunRecord($result);
+
+            $snapshot = ComposerStateSnapshot::capture($projectRoot);
+
             $this->run($this->composerUpdateCommand($projectRoot), $projectRoot);
+            $composerUpdated = true;
+
             $this->run($this->projectCliCommand($projectRoot, 'orm:sync'), $projectRoot);
             $this->run($this->projectCliCommand($projectRoot, 'cache:clear'), $projectRoot);
 
@@ -59,15 +99,131 @@ final class FrameworkDeploymentExecutor
             $result['restart_required'] = !$restartStatus['performed'];
             $result['restart_status'] = $restartStatus['message'];
 
-            if ($plan->config->healthcheckUrl !== null && $restartStatus['performed']) {
-                $this->assertHealthy($plan->config->healthcheckUrl);
+            // Mandatory when configured: a deploy that cannot prove the app
+            // answers is a failed deploy, restart or not.
+            if ($plan->config->healthcheckUrl !== null) {
+                $check = (new HealthChecker())->check($plan->config->healthcheckUrl);
+                if (!$check->ok) {
+                    throw new \RuntimeException($check->message);
+                }
+                $result['healthcheck'] = $check->message;
+            } else {
+                $result['healthcheck'] = 'skipped: SEMITEXA_AUTO_DEPLOY_HEALTHCHECK_URL not configured';
             }
 
-            return $this->finalize($projectRoot, $result, 'updated');
+            return $this->finalize($projectRoot, $result, 'updated', $plan, $runId);
         } catch (\Throwable $e) {
             $result['status'] = 'failed';
             $result['reason'] = $e->getMessage();
-            return $this->finalize($projectRoot, $result, 'failed');
+            if ($composerUpdated && $snapshot !== null) {
+                $result['rollback'] = $this->rollback($projectRoot, $snapshot, $plan->config->restartCommand);
+            }
+            return $this->finalize($projectRoot, $result, 'failed', $plan, $runId);
+        } finally {
+            $lock?->release();
+        }
+    }
+
+    /**
+     * Best-effort revert to the pre-update dependency state after a failure
+     * that happened once vendor/ was already upgraded: restore composer
+     * files, reinstall vendor from the restored lock, restart. The returned
+     * string lands in the deployment log + run journal either way.
+     */
+    private function rollback(string $projectRoot, ComposerStateSnapshot $snapshot, ?string $restartCommand): string
+    {
+        if (!$snapshot->restoreFiles()) {
+            return 'FAILED: could not restore composer.json/lock — system left on the new version; operator intervention required.';
+        }
+
+        try {
+            $this->run($this->composerInstallCommand($projectRoot), $projectRoot);
+        } catch (\Throwable $e) {
+            return 'FAILED: composer files restored but composer install failed — vendor/ still on the new version: ' . $e->getMessage();
+        }
+
+        try {
+            $this->restartRuntime($projectRoot, $restartCommand);
+        } catch (\Throwable $e) {
+            return 'partial: dependency state restored, but restart failed — restart manually: ' . $e->getMessage();
+        }
+
+        return 'performed: composer.json/lock and vendor/ restored to the pre-update state.';
+    }
+
+    private function composerInstallCommand(string $projectRoot): string
+    {
+        return sprintf(
+            '%s install --prefer-dist --no-dev --no-interaction --optimize-autoloader --working-dir=%s',
+            $this->composerBinary($projectRoot),
+            escapeshellarg($projectRoot),
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $result
+     */
+    private function beginRunRecord(array &$result): ?string
+    {
+        if ($this->runJournal === null) {
+            return null;
+        }
+
+        $actor = Environment::getEnvValue('SEMITEXA_UPDATE_ACTOR', null);
+        $actor = is_string($actor) && trim($actor) !== '' ? trim($actor) : 'auto-deploy';
+
+        try {
+            return $this->runJournal->begin(RunJournalRepository::KIND_AUTO_DEPLOY, $actor, null);
+        } catch (\Throwable $e) {
+            $result['run_journal'] = 'unavailable: ' . $e->getMessage();
+            return null;
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $result
+     */
+    private function finishRunRecord(array &$result, string $status, DeploymentPlan $plan, ?string $runId): void
+    {
+        if ($this->runJournal === null || $runId === null) {
+            return;
+        }
+
+        $deltas = [];
+        foreach ($plan->packageUpdates as $update) {
+            $deltas[$update->packageName] = [
+                'from' => $update->installedVersion,
+                'to'   => $update->latestVersion,
+            ];
+        }
+
+        $outcome = $status === 'updated' ? RunOutcome::Success : RunOutcome::Failed;
+        $stage = [
+            'name'    => 'auto-deploy',
+            'success' => $outcome === RunOutcome::Success,
+            'message' => (string) ($result['restart_status'] ?? ''),
+        ];
+        if (isset($result['healthcheck'])) {
+            $stage['healthcheck'] = (string) $result['healthcheck'];
+        }
+        if (isset($result['rollback'])) {
+            $stage['rollback'] = (string) $result['rollback'];
+        }
+        $stages = [$stage];
+
+        try {
+            $this->runJournal->finish(
+                $runId,
+                $outcome,
+                $outcome === RunOutcome::Failed ? 'auto-deploy' : null,
+                $stages,
+                $deltas,
+                0,
+                $outcome === RunOutcome::Failed ? (string) $result['reason'] : null,
+            );
+            $result['run_journal'] = 'recorded run ' . $runId;
+        } catch (\Throwable $e) {
+            $result['run_journal'] = 'unavailable: ' . $e->getMessage();
         }
     }
 
@@ -129,29 +285,13 @@ final class FrameworkDeploymentExecutor
         return ['performed' => false, 'message' => 'No restart command available; operator restart required.'];
     }
 
-    private function assertHealthy(string $url): void
-    {
-        $context = stream_context_create([
-            'http' => [
-                'timeout' => 10,
-                'ignore_errors' => true,
-                'header' => "User-Agent: Semitexa-Dev-Auto-Deploy\r\n",
-            ],
-        ]);
-
-        $response = @file_get_contents($url, false, $context);
-        $statusCode = 0;
-        if (isset($http_response_header[0]) && preg_match('/\s(\d{3})\s/', $http_response_header[0], $m) === 1) {
-            $statusCode = (int) $m[1];
-        }
-
-        if ($response === false || $statusCode < 200 || $statusCode >= 300) {
-            throw new \RuntimeException("Health check failed for {$url}.");
-        }
-    }
-
     private function run(string $command, string $projectRoot): void
     {
+        if ($this->commandRunner !== null) {
+            ($this->commandRunner)($command, $projectRoot);
+            return;
+        }
+
         $fullCommand = sprintf(
             'cd %s && %s%s 2>&1',
             escapeshellarg($projectRoot),
@@ -194,10 +334,13 @@ final class FrameworkDeploymentExecutor
      * @param array<string, mixed> $result
      * @return array<string, mixed>
      */
-    private function finalize(string $projectRoot, array $result, string $status): array
+    private function finalize(string $projectRoot, array $result, string $status, ?DeploymentPlan $plan = null, ?string $runId = null): array
     {
         $result['status'] = $status;
         $result['finished_at'] = gmdate(DATE_ATOM);
+        if ($plan !== null) {
+            $this->finishRunRecord($result, $status, $plan, $runId);
+        }
         $this->logWriter->write($projectRoot, $result);
         return $result;
     }

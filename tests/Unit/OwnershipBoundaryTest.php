@@ -44,9 +44,13 @@ final class OwnershipBoundaryTest extends TestCase
             $relative = substr($item->getPathname(), strlen($srcRoot));
             $relative = str_replace(DIRECTORY_SEPARATOR, '/', $relative);
 
-            // The journal table CREATE is the one place where DDL is legitimate
-            // (the journal is per-database bookkeeping that the runner owns).
-            if ($relative === '/Application/Service/JournalRepository.php') {
+            // The journal table CREATEs are the one place where DDL is legitimate
+            // (patch journal + run journal are per-database bookkeeping that the
+            // runner owns).
+            if (in_array($relative, [
+                '/Application/Service/JournalRepository.php',
+                '/Application/Service/RunJournalRepository.php',
+            ], true)) {
                 continue;
             }
 
@@ -66,7 +70,7 @@ final class OwnershipBoundaryTest extends TestCase
         self::assertSame(
             [],
             $offending,
-            "Only Application/Service/JournalRepository.php may issue DDL inside semitexa-update.\n"
+            "Only the journal repositories (JournalRepository, RunJournalRepository) may issue DDL inside semitexa-update.\n"
             . 'Schema migrations belong to semitexa-orm. Offending: ' . implode('; ', $offending),
         );
     }

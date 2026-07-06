@@ -14,11 +14,20 @@ final class ComposerVcsTagReleaseSource
     ) {}
 
     /**
+     * @return list<string>
+     */
+    public function lastWarnings(): array
+    {
+        return $this->tagSource->lastWarnings();
+    }
+
+    /**
      * @param array<string, string> $installedPackages
      * @return list<PackageUpdate>
      */
     public function discoverUpdates(string $projectRoot, array $installedPackages): array
     {
+        $this->tagSource->resetWarnings();
         $repositoryMap = $this->repositoryMap($projectRoot);
         $updates = [];
 

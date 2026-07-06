@@ -9,6 +9,7 @@ use Semitexa\Update\Application\Service\Scaffold\ScaffoldFileClassifier;
 use Semitexa\Update\Application\Service\Scaffold\ScaffoldManifestLoader;
 use Semitexa\Update\Application\Service\Scaffold\ScaffoldSyncEngine;
 use Semitexa\Update\Domain\Enum\ComposerUpdateOutcome;
+use Semitexa\Update\Domain\Enum\RunOutcome;
 use Semitexa\Update\Domain\Model\Composer\ComposerUpdatePlan;
 use Semitexa\Update\Domain\Model\OrchestratorStage;
 use Semitexa\Update\Domain\Model\OrchestratorPlanReport;
@@ -57,10 +58,29 @@ final class UpdateOrchestrator
         private readonly ?string $scaffoldRoot = null,
         private readonly ?string $manifestPath = null,
         private readonly ?ComposerUpdateRunner $composerRunner = null,
+        private readonly ?RunJournalRepository $runJournal = null,
+        private readonly ?string $actor = null,
+        private readonly ?string $updaterVersion = null,
+        private readonly ?UpdateLock $lock = null,
+        private readonly ?PreflightChecker $preflight = null,
+        private readonly ?HealthChecker $healthChecker = null,
+        private readonly ?string $healthcheckUrl = null,
     ) {
     }
 
     /**
+     * Execute the sweep and record it in the run journal.
+     *
+     * Concurrency: mutating runs (not dry-run) take an exclusive flock-based
+     * lock shared with the auto-deploy pipeline; a second concurrent run
+     * fails fast with the holder's identity instead of racing on
+     * composer.json / vendor / the journal.
+     *
+     * Journal semantics: mutating runs get one row — inserted as `running`
+     * before the first stage, finalized after the last. Journal failures
+     * never fail the update; they surface as a trailing `run-journal` stage
+     * carrying a warning message so the operator still sees them.
+     *
      * @return list<OrchestratorStage> in execution order
      */
     public function run(
@@ -71,7 +91,186 @@ final class UpdateOrchestrator
         bool $composerOnly = false,
         bool $allowPartialComposer = false,
     ): array {
+        $lock = $dryRun ? null : $this->lock;
+        if ($lock !== null && !$lock->acquire($this->actor ?? 'update')) {
+            throw new \Semitexa\Update\Exception\UpdateException(sprintf(
+                'Another update run is already in progress (%s). Wait for it to finish; '
+                . 'a crashed run releases the lock automatically.',
+                $lock->holderDescription(),
+            ));
+        }
+
+        try {
+            return $this->runLocked(
+                $allowDestructive,
+                $dryRun,
+                $writeCandidates,
+                $skipComposer,
+                $composerOnly,
+                $allowPartialComposer,
+            );
+        } finally {
+            $lock?->release();
+        }
+    }
+
+    /**
+     * @return list<OrchestratorStage> in execution order
+     */
+    private function runLocked(
+        bool $allowDestructive,
+        bool $dryRun,
+        bool $writeCandidates,
+        bool $skipComposer,
+        bool $composerOnly,
+        bool $allowPartialComposer,
+    ): array {
+        $journal = $dryRun ? null : $this->runJournal;
+        $runId = null;
+        $journalNote = null;
+        if ($journal !== null) {
+            try {
+                $runId = $journal->begin(RunJournalRepository::KIND_UPDATE, $this->actor, $this->updaterVersion);
+            } catch (\Throwable $e) {
+                $journalNote = 'WARNING: run journal unavailable, this run will not be recorded: ' . $e->getMessage();
+            }
+        }
+
+        try {
+            $stages = $this->executeStages(
+                $allowDestructive,
+                $dryRun,
+                $writeCandidates,
+                $skipComposer,
+                $composerOnly,
+                $allowPartialComposer,
+            );
+        } catch (\Throwable $e) {
+            if ($journal !== null && $runId !== null) {
+                try {
+                    $journal->finish($runId, RunOutcome::Failed, 'exception', [], [], 0, $e->getMessage());
+                } catch (\Throwable) {
+                    // The original exception is what the operator must see.
+                }
+            }
+            throw $e;
+        }
+
+        if ($journal !== null && $runId !== null) {
+            try {
+                $outcome = $this->finalizeRunRecord($journal, $runId, $stages);
+                $journalNote = sprintf('Recorded run %s (outcome: %s).', $runId, $outcome->value);
+            } catch (\Throwable $e) {
+                $journalNote = 'WARNING: run finished but could not be recorded in the run journal: ' . $e->getMessage();
+            }
+        }
+
+        if ($journalNote !== null) {
+            $stages[] = new OrchestratorStage('run-journal', null, null, message: $journalNote);
+        }
+
+        return $stages;
+    }
+
+    /**
+     * @param list<OrchestratorStage> $stages
+     */
+    private function finalizeRunRecord(RunJournalRepository $journal, string $runId, array $stages): RunOutcome
+    {
+        $failedStage = null;
+        $error = null;
+        $packageDeltas = [];
+        $patchesApplied = 0;
+        $updaterChanged = false;
+        $stateChanged = false;
+
+        foreach ($stages as $stage) {
+            if (!$stage->isSuccess() && $failedStage === null) {
+                $failedStage = $stage->name;
+                $error = $this->stageError($stage);
+            }
+            if ($stage->composerResult !== null) {
+                $packageDeltas = $stage->composerResult->bumpedPackages;
+                $updaterChanged = $stage->composerResult->outcome === ComposerUpdateOutcome::UpdaterChanged;
+            }
+            if ($stage->report !== null) {
+                $patchesApplied += count($stage->report->applied);
+            }
+            if ($stage->syncResult !== null && $stage->syncResult->executedOperations > 0) {
+                $stateChanged = true;
+            }
+            if ($stage->scaffoldReport !== null && ($stage->summarize()['applied_files'] ?? 0) > 0) {
+                $stateChanged = true;
+            }
+        }
+
+        $stateChanged = $stateChanged || $packageDeltas !== [] || $patchesApplied > 0;
+
+        $outcome = match (true) {
+            $failedStage !== null => RunOutcome::Failed,
+            $updaterChanged       => RunOutcome::Aborted,
+            $stateChanged         => RunOutcome::Success,
+            default               => RunOutcome::Noop,
+        };
+        if ($outcome === RunOutcome::Aborted) {
+            $error = 'semitexa/update was upgraded mid-run; rerun `bin/semitexa update` to continue.';
+        }
+
+        $journal->finish(
+            $runId,
+            $outcome,
+            $failedStage,
+            array_map(static fn (OrchestratorStage $s): array => $s->summarize(), $stages),
+            $packageDeltas,
+            $patchesApplied,
+            $error,
+        );
+
+        return $outcome;
+    }
+
+    private function stageError(OrchestratorStage $stage): ?string
+    {
+        if ($stage->report !== null) {
+            return $stage->report->failedError;
+        }
+        if ($stage->composerResult !== null) {
+            return $stage->composerResult->message;
+        }
+        if ($stage->scaffoldReport !== null && $stage->scaffoldReport->integrityErrors !== []) {
+            return implode('; ', $stage->scaffoldReport->integrityErrors);
+        }
+        if ($stage->preflightReport !== null) {
+            return implode('; ', array_map(
+                static fn (\Semitexa\Update\Domain\Model\PreflightCheck $c): string => $c->name . ': ' . $c->message,
+                $stage->preflightReport->failedChecks(),
+            ));
+        }
+        return null;
+    }
+
+    /**
+     * @return list<OrchestratorStage> in execution order
+     */
+    private function executeStages(
+        bool $allowDestructive,
+        bool $dryRun,
+        bool $writeCandidates,
+        bool $skipComposer,
+        bool $composerOnly,
+        bool $allowPartialComposer,
+    ): array {
         $stages = [];
+
+        // Preflight is read-only and runs first: a failed check must abort
+        // before composer, scaffold, or the database are touched.
+        if ($this->preflight !== null) {
+            $preflightReport = $this->preflight->check();
+            $stages[] = new OrchestratorStage('preflight', null, null, preflightReport: $preflightReport);
+            if (!$preflightReport->isSuccess()) {
+                return $stages;
+            }
+        }
 
         // Composer phase first: changes vendor/, which everything downstream
         // depends on. If it fails or upgrades semitexa/update itself we stop.
@@ -136,6 +335,21 @@ final class UpdateOrchestrator
 
         $post = $this->runner->runPhases($plan, [UpdatePhase::Post]);
         $stages[] = new OrchestratorStage('post-patches', $post, null);
+        if (!$post->isSuccess()) {
+            return $stages;
+        }
+
+        // Post-update smoke: when a health URL is configured the sweep only
+        // counts as successful if the application actually answers.
+        if ($this->healthChecker !== null && $this->healthcheckUrl !== null) {
+            $check = $this->healthChecker->check($this->healthcheckUrl);
+            $stages[] = new OrchestratorStage(
+                'health-check',
+                null,
+                null,
+                preflightReport: new \Semitexa\Update\Domain\Model\PreflightReport([$check]),
+            );
+        }
 
         return $stages;
     }
