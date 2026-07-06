@@ -259,15 +259,6 @@ final class UpdateScaffoldRebuildCommand extends BaseCommand
         return $json . "\n";
     }
 
-    private function readFile(string $path): string
-    {
-        $contents = file_get_contents($path);
-        if ($contents === false) {
-            throw new \RuntimeException("Failed to read: {$path}");
-        }
-        return $contents;
-    }
-
     private function atomicWrite(string $path, string $contents): void
     {
         $dir = dirname($path);

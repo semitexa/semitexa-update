@@ -41,18 +41,23 @@ final class ComposerStateSnapshotTest extends TestCase
         self::assertStringContainsString('1.0.0', (string) file_get_contents($this->projectRoot . '/composer.lock'));
     }
 
-    public function testCaptureWithoutLockRestoresOnlyJson(): void
+    public function testCaptureWithoutLockRemovesLockCreatedByFailedUpdate(): void
     {
         file_put_contents($this->projectRoot . '/composer.json', '{"require":{}}');
 
         $snapshot = ComposerStateSnapshot::capture($this->projectRoot);
         self::assertNotNull($snapshot);
 
+        // The failed update mutated composer.json AND created a lock file.
         file_put_contents($this->projectRoot . '/composer.json', '{"require":{"x/y":"1"}}');
+        file_put_contents($this->projectRoot . '/composer.lock', '{"packages":[{"name":"x/y","version":"1"}]}');
 
         self::assertTrue($snapshot->restoreFiles());
         self::assertSame('{"require":{}}', file_get_contents($this->projectRoot . '/composer.json'));
-        self::assertFileDoesNotExist($this->projectRoot . '/composer.lock');
+        self::assertFileDoesNotExist(
+            $this->projectRoot . '/composer.lock',
+            'A lock created by the failed update must not survive the rollback.',
+        );
     }
 
     public function testCaptureReturnsNullWithoutComposerJson(): void

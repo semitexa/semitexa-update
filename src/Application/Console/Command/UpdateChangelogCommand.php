@@ -52,7 +52,8 @@ final class UpdateChangelogCommand extends BaseCommand
             return $this->renderPackageNotes($input, $output, $io, $reader, $package, $limit);
         }
 
-        $applied = $this->appliedChanges($connection, $limit);
+        $journalError = null;
+        $applied = $this->appliedChanges($connection, $limit, $journalError);
         $releaseNotes = $this->releaseNotesFor($reader, $applied);
 
         $available = [];
@@ -77,6 +78,7 @@ final class UpdateChangelogCommand extends BaseCommand
                     'available' => $available,
                     'release_notes' => array_map($this->noteToArray(...), $releaseNotes),
                     'source_warnings' => $sourceWarnings,
+                    'journal_error' => $journalError,
                 ],
                 JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
             ));
@@ -86,7 +88,9 @@ final class UpdateChangelogCommand extends BaseCommand
         $io->title('Semitexa Changelog');
 
         $io->section('Applied here (from the run journal)');
-        if ($applied === []) {
+        if ($journalError !== null) {
+            $io->warning('Run journal unavailable — applied history cannot be shown: ' . $journalError);
+        } elseif ($applied === []) {
             $io->writeln('  No package version changes recorded yet.');
         } else {
             $io->table(
@@ -220,14 +224,17 @@ final class UpdateChangelogCommand extends BaseCommand
 
     /**
      * Flattened package deltas from recent successful runs, newest first.
+     * A journal read failure is reported through $journalError — an empty
+     * result must never silently mean "the journal was unreachable".
      *
      * @return list<array{at: string, package: string, from: ?string, to: string, outcome: string}>
      */
-    private function appliedChanges(string $connection, int $limit): array
+    private function appliedChanges(string $connection, int $limit, ?string &$journalError = null): array
     {
         try {
             $records = $this->runnerFactory->runJournal($connection)->findRecent($limit);
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            $journalError = $e->getMessage();
             return [];
         }
 

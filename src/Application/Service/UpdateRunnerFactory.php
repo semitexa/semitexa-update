@@ -128,7 +128,16 @@ class UpdateRunnerFactory
             return trim($override);
         }
 
-        $user = get_current_user();
+        // get_current_user() reports the script file OWNER, not who runs it —
+        // resolve the effective process user, falling back through env.
+        $user = '';
+        if (function_exists('posix_geteuid') && function_exists('posix_getpwuid')) {
+            $user = (string) (posix_getpwuid(posix_geteuid())['name'] ?? '');
+        }
+        if ($user === '') {
+            $user = (string) (getenv('USER') ?: getenv('USERNAME') ?: get_current_user());
+        }
+
         return 'cli:' . ($user !== '' ? $user : 'unknown');
     }
 

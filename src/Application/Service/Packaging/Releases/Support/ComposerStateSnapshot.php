@@ -35,15 +35,23 @@ final class ComposerStateSnapshot
     }
 
     /**
-     * Write the captured composer.json/lock back. Returns false when either
-     * write fails — the caller must surface that as an unrecovered state.
+     * Write the captured composer.json/lock back. When the snapshot had no
+     * lock file, a lock created by the failed update is removed — otherwise
+     * the rollback composer install would keep the post-update dependency
+     * set. Returns false when any step fails — the caller must surface that
+     * as an unrecovered state.
      */
     public function restoreFiles(): bool
     {
         $ok = file_put_contents($this->projectRoot . '/composer.json', $this->composerJson) !== false;
+
+        $lockPath = $this->projectRoot . '/composer.lock';
         if ($this->composerLock !== null) {
-            $ok = file_put_contents($this->projectRoot . '/composer.lock', $this->composerLock) !== false && $ok;
+            $ok = file_put_contents($lockPath, $this->composerLock) !== false && $ok;
+        } elseif (is_file($lockPath)) {
+            $ok = @unlink($lockPath) && $ok;
         }
+
         return $ok;
     }
 }

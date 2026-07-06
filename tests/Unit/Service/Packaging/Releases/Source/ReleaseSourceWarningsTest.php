@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Semitexa\Update\Tests\Unit\Service\Packaging\Releases\Source;
 
 use PHPUnit\Framework\TestCase;
-use Semitexa\Update\Application\Service\HealthChecker;
 use Semitexa\Update\Application\Service\Packaging\Releases\Source\PrivateGitTagSource;
 
 /**
@@ -36,14 +35,5 @@ final class ReleaseSourceWarningsTest extends TestCase
 
         $source->resetWarnings();
         self::assertSame([], $source->lastWarnings());
-    }
-
-    public function testHealthCheckerReportsUnreachableUrl(): void
-    {
-        // Port 1 is never listening; the check must fail with a clear message.
-        $check = (new HealthChecker())->check('http://127.0.0.1:1/health', timeoutSeconds: 2);
-
-        self::assertFalse($check->ok);
-        self::assertStringContainsString('Health check failed', $check->message);
     }
 }

@@ -115,8 +115,14 @@ final class UpdateStatusCommand extends BaseCommand
 
         try {
             $recent = $this->runnerFactory->runJournal($connection)->findRecent(1);
-        } catch (\Throwable) {
-            $recent = [];
+        } catch (\Throwable $e) {
+            $io->writeln(
+                'Last run: <comment>run journal unavailable — '
+                . \Symfony\Component\Console\Formatter\OutputFormatter::escape($e->getMessage())
+                . '</comment>',
+            );
+            $io->newLine();
+            return;
         }
         if ($recent !== []) {
             $run = $recent[0];

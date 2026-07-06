@@ -26,6 +26,7 @@ final class FrameworkDeploymentExecutor
         private readonly ?RunJournalRepository $runJournal = null,
         private readonly ?UpdateLock $lock = null,
         private readonly ?\Closure $commandRunner = null,
+        private readonly HealthChecker $healthChecker = new HealthChecker(),
     ) {}
 
     /**
@@ -102,7 +103,7 @@ final class FrameworkDeploymentExecutor
             // Mandatory when configured: a deploy that cannot prove the app
             // answers is a failed deploy, restart or not.
             if ($plan->config->healthcheckUrl !== null) {
-                $check = (new HealthChecker())->check($plan->config->healthcheckUrl);
+                $check = $this->healthChecker->check($plan->config->healthcheckUrl);
                 if (!$check->ok) {
                     throw new \RuntimeException($check->message);
                 }
@@ -341,7 +342,14 @@ final class FrameworkDeploymentExecutor
         if ($plan !== null) {
             $this->finishRunRecord($result, $status, $plan, $runId);
         }
-        $this->logWriter->write($projectRoot, $result);
+        // A log-write failure must never bubble into the deploy try/catch:
+        // it would mark (and roll back) an otherwise healthy release. The
+        // failure is still visible in the returned/printed result payload.
+        try {
+            $this->logWriter->write($projectRoot, $result);
+        } catch (\Throwable $e) {
+            $result['deployment_log'] = 'unavailable: ' . $e->getMessage();
+        }
         return $result;
     }
 }

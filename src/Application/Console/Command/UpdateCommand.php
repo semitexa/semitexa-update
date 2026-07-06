@@ -208,9 +208,10 @@ final class UpdateCommand extends BaseCommand
             $io->section($stage->name);
             if ($stage->preflightReport !== null) {
                 foreach ($stage->preflightReport->checks as $check) {
+                    $message = \Symfony\Component\Console\Formatter\OutputFormatter::escape($check->message);
                     $io->writeln($check->ok
-                        ? sprintf('  [ok] %s — %s', $check->name, $check->message)
-                        : sprintf('  <error>[fail] %s — %s</error>', $check->name, $check->message));
+                        ? sprintf('  [ok] %s — %s', $check->name, $message)
+                        : sprintf('  <error>[fail] %s — %s</error>', $check->name, $message));
                 }
                 continue;
             }
@@ -229,10 +230,11 @@ final class UpdateCommand extends BaseCommand
             $report = $stage->report;
             if ($report === null) {
                 if ($stage->message !== null) {
+                    $escaped = \Symfony\Component\Console\Formatter\OutputFormatter::escape($stage->message);
                     $io->writeln(
                         str_starts_with($stage->message, 'WARNING')
-                            ? '  <comment>' . $stage->message . '</comment>'
-                            : '  ' . $stage->message,
+                            ? '  <comment>' . $escaped . '</comment>'
+                            : '  ' . $escaped,
                     );
                 }
                 continue;
