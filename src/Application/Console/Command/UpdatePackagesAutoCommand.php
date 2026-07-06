@@ -6,9 +6,13 @@ namespace Semitexa\Update\Application\Console\Command;
 
 use JsonException;
 use Semitexa\Core\Attribute\AsCommand;
+use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Console\BaseCommand;
 use Semitexa\Update\Application\Service\Packaging\Releases\Service\FrameworkDeploymentExecutor;
 use Semitexa\Update\Application\Service\Packaging\Releases\Service\FrameworkDeploymentPlanner;
+use Semitexa\Update\Application\Service\Packaging\Releases\Support\DeploymentLogWriter;
+use Semitexa\Update\Application\Service\RunJournalRepository;
+use Semitexa\Update\Application\Service\UpdateRunnerFactory;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
@@ -18,6 +22,9 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 #[AsCommand(name: 'update:packages:auto', description: 'Run automatic Semitexa framework deployment when enabled and updates are available')]
 final class UpdatePackagesAutoCommand extends BaseCommand
 {
+    #[InjectAsReadonly]
+    protected UpdateRunnerFactory $runnerFactory;
+
     protected function configure(): void
     {
         $this->addOption('json', null, InputOption::VALUE_NONE, 'Output deployment result as JSON');
@@ -27,7 +34,7 @@ final class UpdatePackagesAutoCommand extends BaseCommand
     {
         $projectRoot = $this->getProjectRoot();
         $planner = new FrameworkDeploymentPlanner();
-        $executor = new FrameworkDeploymentExecutor();
+        $executor = new FrameworkDeploymentExecutor(new DeploymentLogWriter(), $this->runJournalOrNull());
 
         $plan = $planner->plan($projectRoot);
         $result = $executor->execute($projectRoot, $plan);
@@ -57,6 +64,23 @@ final class UpdatePackagesAutoCommand extends BaseCommand
             $io->text('Restart: ' . $result['restart_status']);
         }
 
+        if (($result['run_journal'] ?? null) !== null) {
+            $io->text('Run journal: ' . $result['run_journal']);
+        }
+
         return $result['status'] === 'failed' ? Command::FAILURE : Command::SUCCESS;
+    }
+
+    /**
+     * Auto-deploy may run on a host where the app DB is unreachable; the run
+     * journal is then skipped and the JSON deployment log remains the record.
+     */
+    private function runJournalOrNull(): ?RunJournalRepository
+    {
+        try {
+            return $this->runnerFactory->runJournal();
+        } catch (\Throwable) {
+            return null;
+        }
     }
 }

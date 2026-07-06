@@ -22,8 +22,9 @@ use Semitexa\Update\Exception\UpdateException;
  * Identity is `(module, patch_id)` — stable across class renames. The class
  * FQCN is recorded as a diagnostic column.
  *
- * The CREATE TABLE statement here is the only DDL allowed in semitexa-update;
- * data patches must not issue schema changes.
+ * The journal CREATE TABLE statements (here and in {@see RunJournalRepository})
+ * are the only DDL allowed in semitexa-update; data patches must not issue
+ * schema changes.
  */
 final class JournalRepository
 {
@@ -41,9 +42,40 @@ final class JournalRepository
         if ($this->schemaEnsured) {
             return;
         }
-        $this->db->query($this->createTableSql());
-        $this->reconcileLegacySchema();
+        if (!$this->tableExists()) {
+            $this->db->query($this->createTableSql());
+        } else {
+            $this->reconcileLegacySchema();
+        }
         $this->schemaEnsured = true;
+    }
+
+    /**
+     * Read paths (plan / status / dry-run) must stay read-only: when the
+     * journal table does not exist yet there is trivially nothing recorded,
+     * and creating it belongs to the first mutating run.
+     */
+    private function tableExists(): bool
+    {
+        if ($this->db instanceof SqliteAdapter) {
+            $rows = $this->db->query(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = '" . self::TABLE . "'"
+            )->fetchAll();
+            return $rows !== [];
+        }
+
+        if ($this->db instanceof MysqlAdapter) {
+            $rows = $this->db->query(
+                'SELECT 1 FROM information_schema.TABLES'
+                . " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '" . self::TABLE . "'"
+            )->fetchAll();
+            return $rows !== [];
+        }
+
+        throw new UpdateException(sprintf(
+            'Unsupported database adapter: %s. Supports MySQL and SQLite.',
+            $this->db::class,
+        ));
     }
 
     /**
@@ -220,6 +252,9 @@ final class JournalRepository
      */
     public function findAllByIdentity(): array
     {
+        if (!$this->schemaEnsured && !$this->tableExists()) {
+            return [];
+        }
         $this->ensureSchema();
 
         $result = $this->db->query(
@@ -239,6 +274,9 @@ final class JournalRepository
 
     public function findByIdentity(string $module, string $patchId): ?JournalEntry
     {
+        if (!$this->schemaEnsured && !$this->tableExists()) {
+            return null;
+        }
         $this->ensureSchema();
 
         $result = $this->db->execute(

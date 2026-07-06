@@ -206,6 +206,15 @@ final class UpdateCommand extends BaseCommand
 
         foreach ($stages as $stage) {
             $io->section($stage->name);
+            if ($stage->preflightReport !== null) {
+                foreach ($stage->preflightReport->checks as $check) {
+                    $message = \Symfony\Component\Console\Formatter\OutputFormatter::escape($check->message);
+                    $io->writeln($check->ok
+                        ? sprintf('  [ok] %s — %s', $check->name, $message)
+                        : sprintf('  <error>[fail] %s — %s</error>', $check->name, $message));
+                }
+                continue;
+            }
             if ($stage->composerResult !== null) {
                 $this->renderComposerStage($io, $stage->composerResult);
                 continue;
@@ -220,6 +229,14 @@ final class UpdateCommand extends BaseCommand
             }
             $report = $stage->report;
             if ($report === null) {
+                if ($stage->message !== null) {
+                    $escaped = \Symfony\Component\Console\Formatter\OutputFormatter::escape($stage->message);
+                    $io->writeln(
+                        str_starts_with($stage->message, 'WARNING')
+                            ? '  <comment>' . $escaped . '</comment>'
+                            : '  ' . $escaped,
+                    );
+                }
                 continue;
             }
 

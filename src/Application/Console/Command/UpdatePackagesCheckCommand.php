@@ -56,6 +56,7 @@ final class UpdatePackagesCheckCommand extends BaseCommand
                         ],
                         array_values($plan->localWorkspacePackages),
                     ),
+                    'source_warnings' => $plan->sourceWarnings,
                 ];
 
                 $compactJson = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
@@ -100,6 +101,13 @@ final class UpdatePackagesCheckCommand extends BaseCommand
         if ($plan->privateLatestVersion !== null) {
             $io->section('Private repository');
             $io->text('Latest stable tag: ' . $plan->privateLatestVersion);
+        }
+
+        if ($plan->sourceWarnings !== []) {
+            $io->warning(array_merge(
+                ['Release discovery was DEGRADED — "no update" below may hide a newer release:'],
+                $plan->sourceWarnings,
+            ));
         }
 
         return Command::SUCCESS;

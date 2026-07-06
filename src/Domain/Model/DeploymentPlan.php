@@ -10,6 +10,8 @@ final readonly class DeploymentPlan
      * @param array<string, string>             $installedPackages       Vendor-installed Semitexa packages: name => version.
      * @param list<PackageUpdate>               $packageUpdates          Discovered upgrades for vendor packages only.
      * @param array<string, LocalWorkspacePackage> $localWorkspacePackages Path-repository checkouts excluded from update candidates.
+     * @param list<string>                      $sourceWarnings          Discovery diagnostics (unreachable upstream, failed git ls-remote):
+     *                                                                   "no update" alongside warnings means DEGRADED, not verified-current.
      */
     public function __construct(
         public DeploymentConfig $config,
@@ -20,5 +22,6 @@ final readonly class DeploymentPlan
         public bool $updateAvailable,
         public string $reason,
         public array $localWorkspacePackages = [],
+        public array $sourceWarnings = [],
     ) {}
 }

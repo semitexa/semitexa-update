@@ -77,7 +77,88 @@ class UpdateRunnerFactory
                 executor: new InContainerComposerExecutor(),
                 resolver: new PackagistVersionResolver(),
             ),
+            runJournal: $this->runJournal($connection),
+            actor: self::defaultActor(),
+            updaterVersion: self::installedUpdaterVersion(),
+            lock: new UpdateLock($projectRoot),
+            preflight: new PreflightChecker(
+                $this->connections->manager($connection)->getAdapter(),
+                $projectRoot,
+            ),
+            healthChecker: new HealthChecker(),
+            healthcheckUrl: self::healthcheckUrl(),
         );
+    }
+
+    /**
+     * Health URL for the manual sweep's post-update smoke. Dedicated var
+     * first, auto-deploy's healthcheck URL as fallback so a configured
+     * deployment target gets the smoke in both paths.
+     */
+    public static function healthcheckUrl(): ?string
+    {
+        foreach (['SEMITEXA_UPDATE_HEALTHCHECK_URL', 'SEMITEXA_AUTO_DEPLOY_HEALTHCHECK_URL'] as $var) {
+            $value = \Semitexa\Core\Environment::getEnvValue($var, null);
+            if (is_string($value) && trim($value) !== '') {
+                return trim($value);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Run journal for the given connection — the per-run history that
+     * `update:history` and the OS "What's new" surface read.
+     */
+    public function runJournal(string $connection = 'default'): RunJournalRepository
+    {
+        $adapter = $this->connections->manager($connection)->getAdapter();
+
+        return new RunJournalRepository($adapter);
+    }
+
+    /**
+     * Who triggered this run. Overridable for non-interactive contexts
+     * (systemd auto-deploy exports SEMITEXA_UPDATE_ACTOR).
+     */
+    public static function defaultActor(): string
+    {
+        $override = \Semitexa\Core\Environment::getEnvValue('SEMITEXA_UPDATE_ACTOR', null);
+        if (is_string($override) && trim($override) !== '') {
+            return trim($override);
+        }
+
+        // get_current_user() reports the script file OWNER, not who runs it —
+        // resolve the effective process user, falling back through env.
+        $user = '';
+        if (function_exists('posix_geteuid') && function_exists('posix_getpwuid')) {
+            $user = (string) (posix_getpwuid(posix_geteuid())['name'] ?? '');
+        }
+        if ($user === '') {
+            $user = (string) (getenv('USER') ?: getenv('USERNAME') ?: get_current_user());
+        }
+
+        return 'cli:' . ($user !== '' ? $user : 'unknown');
+    }
+
+    /**
+     * Installed version of semitexa/update itself, via Composer's runtime API.
+     * Null in a path-repo dev workspace (dev-main) or when the API is absent.
+     */
+    public static function installedUpdaterVersion(): ?string
+    {
+        if (!class_exists(\Composer\InstalledVersions::class)) {
+            return null;
+        }
+
+        try {
+            if (!\Composer\InstalledVersions::isInstalled('semitexa/update')) {
+                return null;
+            }
+            return \Composer\InstalledVersions::getPrettyVersion('semitexa/update');
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     /**

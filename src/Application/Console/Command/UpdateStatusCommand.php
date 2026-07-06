@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Semitexa\Update\Application\Console\Command;
 
 use Semitexa\Core\Attribute\AsCommand;
+use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Console\BaseCommand;
+use Semitexa\Update\Application\Service\Packaging\Releases\Support\InstalledSemitexaPackageReader;
 use Semitexa\Update\Domain\Enum\PatchStatus;
 use Semitexa\Update\Domain\Enum\UpdatePhase;
 use Semitexa\Update\Exception\UpdateException;
@@ -19,11 +21,8 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 #[AsCommand(name: 'update:status', description: 'Show current update status (applied / pending / failed counts).')]
 final class UpdateStatusCommand extends BaseCommand
 {
-    public function __construct(
-        private readonly UpdateRunnerFactory $runnerFactory,
-    ) {
-        parent::__construct();
-    }
+    #[InjectAsReadonly]
+    protected UpdateRunnerFactory $runnerFactory;
 
     protected function configure(): void
     {
@@ -43,6 +42,8 @@ final class UpdateStatusCommand extends BaseCommand
         }
 
         $io->title('Semitexa Update Status');
+
+        $this->renderOverview($io, $connection);
 
         $rows = [];
         foreach (UpdatePhase::order() as $phase) {
@@ -85,5 +86,57 @@ final class UpdateStatusCommand extends BaseCommand
         }
 
         return Command::SUCCESS;
+    }
+
+    /**
+     * One-look context above the patch table: installed release set, updater
+     * version, and the last recorded update run.
+     */
+    private function renderOverview(SymfonyStyle $io, string $connection): void
+    {
+        $updater = UpdateRunnerFactory::installedUpdaterVersion();
+        $io->writeln('Updater:  semitexa/update ' . ($updater ?? '(dev workspace)'));
+
+        $installed = (new InstalledSemitexaPackageReader())->read($this->getProjectRoot());
+        if ($installed !== []) {
+            $dates = array_values(array_unique(array_map(
+                static fn (string $v): string => substr($v, 0, 10),
+                $installed,
+            )));
+            sort($dates);
+            $io->writeln(sprintf(
+                'Packages: %d vendor-installed semitexa/* (release set %s)',
+                count($installed),
+                count($dates) === 1 ? $dates[0] : 'MIXED: ' . implode(', ', $dates),
+            ));
+        } else {
+            $io->writeln('Packages: none vendor-installed (dev workspace uses path repositories).');
+        }
+
+        try {
+            $recent = $this->runnerFactory->runJournal($connection)->findRecent(1);
+        } catch (\Throwable $e) {
+            $io->writeln(
+                'Last run: <comment>run journal unavailable — '
+                . \Symfony\Component\Console\Formatter\OutputFormatter::escape($e->getMessage())
+                . '</comment>',
+            );
+            $io->newLine();
+            return;
+        }
+        if ($recent !== []) {
+            $run = $recent[0];
+            $io->writeln(sprintf(
+                'Last run: %s — %s%s by %s (%s)',
+                substr($run->startedAt, 0, 19),
+                $run->outcome->value,
+                $run->failedStage !== null ? ' @ ' . $run->failedStage : '',
+                $run->actor ?? '—',
+                $run->kind,
+            ));
+        } else {
+            $io->writeln('Last run: never recorded (run journal is empty).');
+        }
+        $io->newLine();
     }
 }

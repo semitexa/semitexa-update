@@ -10,11 +10,28 @@ use Semitexa\Update\Application\Service\Packaging\Releases\Support\SemitexaRelea
 final class PackagistReleaseSource
 {
     /**
+     * Diagnostics from the last discoverUpdates() call. A network failure
+     * must never masquerade as "no update available" — callers surface these.
+     *
+     * @var list<string>
+     */
+    private array $warnings = [];
+
+    /**
+     * @return list<string>
+     */
+    public function lastWarnings(): array
+    {
+        return $this->warnings;
+    }
+
+    /**
      * @param array<string, string> $installedPackages
      * @return list<PackageUpdate>
      */
     public function discoverUpdates(array $installedPackages): array
     {
+        $this->warnings = [];
         $updates = [];
 
         foreach ($installedPackages as $packageName => $installedVersion) {
@@ -55,7 +72,26 @@ final class PackagistReleaseSource
         ]);
 
         $json = @file_get_contents($url, false, $context);
+        $statusCode = 0;
+        if (isset($http_response_header[0]) && preg_match('/\s(\d{3})\s/', $http_response_header[0], $m) === 1) {
+            $statusCode = (int) $m[1];
+        }
+
         if ($json === false) {
+            $this->warnings[] = sprintf(
+                'packagist unreachable for %s — treating as no update, but this may hide a newer release.',
+                $packageName,
+            );
+            return null;
+        }
+        // 404 means the package simply is not published on Packagist (normal
+        // for private packages in mixed mode) — that is a real "no update".
+        if ($statusCode !== 404 && ($statusCode < 200 || $statusCode >= 300)) {
+            $this->warnings[] = sprintf(
+                'packagist answered HTTP %d for %s — treating as no update, but this may hide a newer release.',
+                $statusCode,
+                $packageName,
+            );
             return null;
         }
 

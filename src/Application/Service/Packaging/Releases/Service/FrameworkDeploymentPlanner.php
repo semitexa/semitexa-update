@@ -31,12 +31,14 @@ final class FrameworkDeploymentPlanner
         $localWorkspacePackages = $classified->localWorkspace;
         $packageUpdates = [];
         $privateLatestVersion = null;
+        $sourceWarnings = [];
 
         if (in_array($config->sourceMode, ['packagist', 'mixed'], true)) {
             $packageUpdates = $this->mergePackageUpdates(
                 $packageUpdates,
                 $this->packagistReleaseSource->discoverUpdates($installedPackages),
             );
+            $sourceWarnings = array_merge($sourceWarnings, $this->packagistReleaseSource->lastWarnings());
         }
 
         if (in_array($config->sourceMode, ['private', 'mixed'], true)) {
@@ -44,15 +46,18 @@ final class FrameworkDeploymentPlanner
                 $packageUpdates,
                 $this->composerVcsTagReleaseSource->discoverUpdates($projectRoot, $installedPackages),
             );
+            $sourceWarnings = array_merge($sourceWarnings, $this->composerVcsTagReleaseSource->lastWarnings());
         }
 
         if (in_array($config->sourceMode, ['private', 'mixed'], true) && $config->privateRepositoryUrl !== null) {
+            $this->privateGitTagSource->resetWarnings();
             $privateLatestVersion = $this->privateGitTagSource->latestStableTag($config->privateRepositoryUrl);
+            $sourceWarnings = array_merge($sourceWarnings, $this->privateGitTagSource->lastWarnings());
         }
 
         $selectedVersion = $this->selectVersion($installedPackages, $packageUpdates, $privateLatestVersion);
         $updateAvailable = $selectedVersion !== null;
-        $reason = $this->buildReason($config->enabled, $packageUpdates, $privateLatestVersion, $selectedVersion);
+        $reason = $this->buildReason($config->enabled, $packageUpdates, $privateLatestVersion, $selectedVersion, $sourceWarnings);
 
         return new DeploymentPlan(
             config: $config,
@@ -63,6 +68,7 @@ final class FrameworkDeploymentPlanner
             updateAvailable: $updateAvailable,
             reason: $reason,
             localWorkspacePackages: $localWorkspacePackages,
+            sourceWarnings: $sourceWarnings,
         );
     }
 
@@ -91,14 +97,21 @@ final class FrameworkDeploymentPlanner
 
     /**
      * @param list<PackageUpdate> $packageUpdates
+     * @param list<string>        $sourceWarnings
      */
-    private function buildReason(bool $enabled, array $packageUpdates, ?string $privateLatestVersion, ?string $selectedVersion): string
+    private function buildReason(bool $enabled, array $packageUpdates, ?string $privateLatestVersion, ?string $selectedVersion, array $sourceWarnings = []): string
     {
         if (!$enabled) {
             return 'Automatic deployment is disabled by configuration.';
         }
 
         if ($selectedVersion === null) {
+            if ($sourceWarnings !== []) {
+                return sprintf(
+                    'No newer stable Semitexa release was discovered, but discovery was DEGRADED (%d source warning(s)) — a newer release may exist.',
+                    count($sourceWarnings),
+                );
+            }
             return 'No newer stable Semitexa release was discovered.';
         }
 

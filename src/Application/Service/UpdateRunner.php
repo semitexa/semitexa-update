@@ -26,7 +26,8 @@ use Throwable;
  * Orchestrates the data-patch half of the update lifecycle.
  *
  * Contract:
- *   - plan() returns a Plan; no side effects except ensuring the journal table exists.
+ *   - plan() returns a Plan; strictly read-only (the journal table is created
+ *     lazily by the first mutating run, never by plan/status/dry-run).
  *   - run() applies pending patches in phase/topological order; stops on first failure.
  *   - Each patch is gated by SchemaCompatibilityChecker; a gated patch is skipped (not failed).
  *   - The journal row transitions pending -> applied on success, pending -> failed on error.
@@ -49,7 +50,8 @@ final class UpdateRunner
 
     public function plan(): Plan
     {
-        $this->journal->ensureSchema();
+        // Read-only by contract: the journal creates its table lazily on the
+        // first write, and findAllByIdentity returns [] when it is absent.
         $patches = $this->discovery->discover();
         $entries = $this->journal->findAllByIdentity();
         return $this->dagBuilder->build($patches, $entries);

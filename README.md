@@ -97,11 +97,26 @@ in that case. Schema mutations belong to the ORM.
 
 ## CLI commands
 
-- `update` — apply pending data patches in phase + DAG order; `--dry-run` prints the plan without changing state
+- `update` — run the full sweep: preflight → composer → scaffold → patches → orm-sync → health check; `--dry-run` prints the plan without changing state
 - `update:plan` — compute and display pending patches only
-- `update:status` — show applied, pending, and failed counts by phase
+- `update:status` — updater version, installed release set, last run, and applied/pending/failed patch counts by phase
+- `update:history` — the run journal: past runs with outcome, package deltas, duration; `--id=<run>` shows one run in full
+- `update:changelog` — package version changes applied here + available upstream, with release-note sections; `--package=<name>` shows one package's CHANGELOG; `--no-remote` skips network
 
 Each accepts `--connection=<name>` and defaults to `default`.
+
+## Run journal & changelog
+
+Every mutating `update` run and every auto-deploy attempt writes one row to
+`platform_update_run_journal` (stages, package version deltas, actor, outcome,
+duration). `update:history` and `update:changelog` read it; a run lock in
+`var/lock/semitexa-update.lock` serializes both paths.
+
+**Per-package release notes convention:** each package keeps a `CHANGELOG.md`
+at its root with sections `## <version> — <date>` (newest first, `v` prefix and
+date optional, `## Unreleased` on top). `update:changelog` resolves a version
+delta to those sections from `vendor/semitexa/<name>/CHANGELOG.md` (consumer)
+or `packages/semitexa-<name>/CHANGELOG.md` (dev workspace).
 
 ## When to use this package
 

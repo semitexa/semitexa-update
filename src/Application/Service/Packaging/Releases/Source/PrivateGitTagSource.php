@@ -8,6 +8,27 @@ use Semitexa\Update\Application\Service\Packaging\Releases\Support\SemitexaRelea
 
 final class PrivateGitTagSource
 {
+    /**
+     * Diagnostics accumulated since the last resetWarnings(). A failed
+     * `git ls-remote` must never masquerade as "no release tag exists".
+     *
+     * @var list<string>
+     */
+    private array $warnings = [];
+
+    /**
+     * @return list<string>
+     */
+    public function lastWarnings(): array
+    {
+        return $this->warnings;
+    }
+
+    public function resetWarnings(): void
+    {
+        $this->warnings = [];
+    }
+
     public function latestStableTag(string $repositoryUrl): ?string
     {
         $repositoryUrl = trim($repositoryUrl);
@@ -15,11 +36,17 @@ final class PrivateGitTagSource
             return null;
         }
 
-        $cmd = sprintf('git ls-remote --tags %s 2>/dev/null', escapeshellarg($repositoryUrl));
+        $cmd = sprintf('git ls-remote --tags %s 2>&1', escapeshellarg($repositoryUrl));
         $output = [];
         exec($cmd, $output, $exitCode);
 
         if ($exitCode !== 0) {
+            $this->warnings[] = sprintf(
+                'git ls-remote failed for %s (exit %d): %s — treating as no update, but this may hide a newer release.',
+                $repositoryUrl,
+                $exitCode,
+                trim(implode(' ', array_slice($output, -3))),
+            );
             return null;
         }
 
