@@ -1,6 +1,6 @@
 {
     "schema_version": "semitexa.scaffold-manifest/v1",
-    "generated_at": "2026-07-06T14:34:15+00:00",
+    "generated_at": "2026-07-07T18:25:50+00:00",
     "files": [
         {
             "path": ".env.default",
@@ -54,8 +54,10 @@
         },
         {
             "path": "docker-compose.mysql.yml",
-            "current_sha256": "d01c7bcdc2a4380c723bf48487fa5f21da4023d82d795fe14aea0f3a8e5469d6",
-            "previous_sha256": [],
+            "current_sha256": "53c8e502ec0bc88abcca04501868c6e728db0bf30d3cc35b7badb41cc36b6d6b",
+            "previous_sha256": [
+                "d01c7bcdc2a4380c723bf48487fa5f21da4023d82d795fe14aea0f3a8e5469d6"
+            ],
             "category": "infrastructure",
             "critical": false,
             "auto_update": true,
