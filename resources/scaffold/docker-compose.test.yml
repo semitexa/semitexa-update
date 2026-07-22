@@ -12,7 +12,14 @@ services:
     volumes:
       - .:/var/www/html
     working_dir: /var/www/html
-    command: ["vendor/bin/phpunit"]
+    # Same env-gated blocking-I/O detection as the app service (Off by default).
+    command:
+      - php
+      - -d
+      - swoole.blocking_detection=${SWOOLE_BLOCKING_DETECTION:-Off}
+      - -d
+      - swoole.blocking_threshold=${SWOOLE_BLOCKING_THRESHOLD:-100000}
+      - vendor/bin/phpunit
     depends_on:
       setup:
         condition: service_completed_successfully
