@@ -1,11 +1,13 @@
 {
     "schema_version": "semitexa.scaffold-manifest/v1",
-    "generated_at": "2026-07-07T18:25:50+00:00",
+    "generated_at": "2026-07-22T07:56:18+00:00",
     "files": [
         {
             "path": ".env.default",
-            "current_sha256": "9fc7be0832e3362c9644c1562b5476668fff77aa3b73850cc735b355f8c3796d",
-            "previous_sha256": [],
+            "current_sha256": "fee0a681795f128b97bce63a4d7d2e6b620b1d20a0eeec6160a7f399ce54ba9a",
+            "previous_sha256": [
+                "9fc7be0832e3362c9644c1562b5476668fff77aa3b73850cc735b355f8c3796d"
+            ],
             "category": "env_template",
             "critical": false,
             "auto_update": true,
@@ -36,8 +38,9 @@
         },
         {
             "path": "bin/semitexa",
-            "current_sha256": "8a77639c688261d5634c32035fcb30b79d21e4a41a3c870300a0d306e0f0793f",
+            "current_sha256": "ca6f1a1643c0f89f28b7ff3447c8e368df050072401d155d608b2c9342b1867a",
             "previous_sha256": [
+                "8a77639c688261d5634c32035fcb30b79d21e4a41a3c870300a0d306e0f0793f",
                 "55cd77bccd6a9004a42c0358104d06c9043be354fdabba32423583e1e253fa6a",
                 "5108c78d46061eb8bf20449f48c2a1da552aec844b0b2c4f1f136e151be20347",
                 "22fec440d63f3045e373c61ea44871de18cc982bec55af4b9c82ad375089f86a",
@@ -106,8 +109,10 @@
         },
         {
             "path": "docker-compose.test.yml",
-            "current_sha256": "b12d38acfcd5babd238a3dddd84df2a45aa8c5f08aa6542a49be962fda7c0c62",
-            "previous_sha256": [],
+            "current_sha256": "85a7a1d4468b2162b3394b5d586b31caa398bc4493bc60360d444c19eebb91e3",
+            "previous_sha256": [
+                "b12d38acfcd5babd238a3dddd84df2a45aa8c5f08aa6542a49be962fda7c0c62"
+            ],
             "category": "infrastructure",
             "critical": false,
             "auto_update": true,
@@ -116,8 +121,10 @@
         },
         {
             "path": "docker-compose.yml",
-            "current_sha256": "7255bd63b4c0e11129b4555f457fc6e3eae7ab8365927bf13968b15bb2c2a0fe",
-            "previous_sha256": [],
+            "current_sha256": "dfe1b31161bab479518985fa5209982fe9398ed28d3fa02327bcb971ee1a8979",
+            "previous_sha256": [
+                "7255bd63b4c0e11129b4555f457fc6e3eae7ab8365927bf13968b15bb2c2a0fe"
+            ],
             "category": "infrastructure",
             "critical": false,
             "auto_update": true,
