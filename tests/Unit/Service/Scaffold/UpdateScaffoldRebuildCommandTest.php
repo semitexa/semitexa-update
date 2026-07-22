@@ -133,7 +133,8 @@ final class UpdateScaffoldRebuildCommandTest extends TestCase
 
     private function tester(): CommandTester
     {
-        $cmd = new UpdateScaffoldRebuildCommand($this->packageRoot);
+        $cmd = new UpdateScaffoldRebuildCommand();
+        $cmd->overridePackageRoot($this->packageRoot);
         // The framework's command discovery sets the name from the Semitexa
         // #[AsCommand] attribute at runtime; the bare Symfony tester needs it set.
         $cmd->setName('update:scaffold:rebuild');

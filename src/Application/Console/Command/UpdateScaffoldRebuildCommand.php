@@ -41,9 +41,16 @@ final class UpdateScaffoldRebuildCommand extends BaseCommand
      *   production — the framework instantiates commands via `new` when the
      *   constructor has no required parameters, so this stays optional.
      */
-    public function __construct(private readonly ?string $packageRootOverride = null)
+    private ?string $packageRootOverride = null;
+
+    /**
+     * Test seam: point the command at a fixture package root instead of the
+     * real semitexa-update checkout. Setter rather than constructor argument —
+     * container-managed commands must stay parameterless (attribute-DI rule).
+     */
+    public function overridePackageRoot(?string $packageRoot): void
     {
-        parent::__construct();
+        $this->packageRootOverride = $packageRoot;
     }
 
     protected function configure(): void
@@ -270,6 +277,9 @@ final class UpdateScaffoldRebuildCommand extends BaseCommand
             @unlink($tmp);
             throw new \RuntimeException("Failed to write: {$path}");
         }
+        // tempnam() creates 0600; without widening, a root-run container
+        // leaves a manifest the host user (and phpunit) cannot read.
+        @chmod($tmp, 0664);
         if (!rename($tmp, $path)) {
             @unlink($tmp);
             throw new \RuntimeException("Failed to finalize write: {$path}");
