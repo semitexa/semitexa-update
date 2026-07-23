@@ -110,6 +110,34 @@ final class SkeletonRequireDiffTest extends TestCase
     }
 
     #[Test]
+    public function unparsableLocalComposerJsonYieldsNoAdvisory(): void
+    {
+        file_put_contents($this->projectRoot . '/composer.json', '{not-json');
+
+        $diff = $this->diff([
+            'semitexa/ultimate' => [[
+                'version' => '2026.07.22.1910',
+                'require' => ['semitexa/media' => '2026.07.22.1910'],
+            ]],
+        ]);
+
+        self::assertNull($diff->missingPackages($this->projectRoot), 'a broken composer.json must not propose everything');
+    }
+
+    #[Test]
+    public function missingLocalComposerJsonYieldsNoAdvisory(): void
+    {
+        $diff = $this->diff([
+            'semitexa/ultimate' => [[
+                'version' => '2026.07.22.1910',
+                'require' => ['semitexa/media' => '2026.07.22.1910'],
+            ]],
+        ]);
+
+        self::assertNull($diff->missingPackages($this->projectRoot));
+    }
+
+    #[Test]
     public function p2ExpanderInheritsAndUnsetsFields(): void
     {
         $expanded = P2MetadataExpander::expand([

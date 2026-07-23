@@ -21,6 +21,7 @@ final class SkeletonRequireDiff
 {
     private const ENDPOINT = 'https://repo.packagist.org/p2/%s.json';
     private const PREFIX = 'semitexa/';
+    private const DESCRIPTION_FETCH_CAP = 10;
 
     /** @var callable(string): (list<array<string, mixed>>|null) */
     private $fetchRows;
@@ -47,7 +48,13 @@ final class SkeletonRequireDiff
         }
 
         $declared = $this->declaredPackages($projectRoot);
+        if ($declared === null) {
+            // Unreadable/unparsable composer.json: proposing "everything is
+            // missing" would be noise — degrade to no advisory instead.
+            return null;
+        }
 
+        $descriptionsFetched = 0;
         $missing = [];
         foreach ($skeletonRequire as $name => $pin) {
             if (!is_string($name) || !is_string($pin)) {
@@ -59,10 +66,18 @@ final class SkeletonRequireDiff
             if (isset($declared[$name])) {
                 continue;
             }
+            // Descriptions cost one extra Packagist request per proposal; cap
+            // them so a far-behind consumer doesn't pay N x timeout on every
+            // update run. Uncapped entries still propose, just undescribed.
+            $description = '';
+            if ($descriptionsFetched < self::DESCRIPTION_FETCH_CAP) {
+                $descriptionsFetched++;
+                $description = $this->descriptionOf($name);
+            }
             $missing[] = new NewSkeletonPackage(
                 name: $name,
                 pinnedVersion: $pin,
-                description: $this->descriptionOf($name),
+                description: $description,
             );
         }
 
@@ -114,18 +129,18 @@ final class SkeletonRequireDiff
     }
 
     /**
-     * @return array<string, true>
+     * @return array<string, true>|null null when composer.json is unreadable or unparsable
      */
-    private function declaredPackages(string $projectRoot): array
+    private function declaredPackages(string $projectRoot): ?array
     {
         $path = $projectRoot . '/composer.json';
         if (!is_file($path)) {
-            return [];
+            return null;
         }
         $json = @file_get_contents($path);
         $data = $json !== false ? json_decode($json, true) : null;
         if (!is_array($data)) {
-            return [];
+            return null;
         }
 
         $declared = [];

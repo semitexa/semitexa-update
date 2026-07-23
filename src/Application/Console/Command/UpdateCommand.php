@@ -358,7 +358,9 @@ final class UpdateCommand extends BaseCommand
     private function renderSkeletonRequireDiff(SymfonyStyle $io): void
     {
         try {
-            $missing = new SkeletonRequireDiff()->missingPackages($this->getProjectRoot());
+            // Tight 3s timeout: this section is advisory and must not make the
+            // interactive update noticeably slower on bad connectivity.
+            $missing = new SkeletonRequireDiff(timeoutSeconds: 3)->missingPackages($this->getProjectRoot());
         } catch (\Throwable) {
             return;
         }
