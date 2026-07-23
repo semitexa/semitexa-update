@@ -36,14 +36,17 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 #[AsCommand(name: 'update:scaffold:rebuild', description: 'Mirror the installer scaffold into this package and regenerate scaffold-manifest.json')]
 final class UpdateScaffoldRebuildCommand extends BaseCommand
 {
+    /** Fixture package root injected by tests via overridePackageRoot(); null in production. */
+    private ?string $packageRootOverride = null;
+
     /**
-     * @param string|null $packageRootOverride Test seam only. Left null in
-     *   production — the framework instantiates commands via `new` when the
-     *   constructor has no required parameters, so this stays optional.
+     * Test seam: point the command at a fixture package root instead of the
+     * real semitexa-update checkout. Setter rather than constructor argument —
+     * container-managed commands must stay parameterless (attribute-DI rule).
      */
-    public function __construct(private readonly ?string $packageRootOverride = null)
+    public function overridePackageRoot(?string $packageRoot): void
     {
-        parent::__construct();
+        $this->packageRootOverride = $packageRoot;
     }
 
     protected function configure(): void
@@ -270,6 +273,10 @@ final class UpdateScaffoldRebuildCommand extends BaseCommand
             @unlink($tmp);
             throw new \RuntimeException("Failed to write: {$path}");
         }
+        // tempnam() creates 0600; without widening, a root-run container
+        // leaves a manifest the host user (and phpunit) cannot read.
+        // 0644, not 0664 — readable everywhere, writable by owner only.
+        @chmod($tmp, 0644);
         if (!rename($tmp, $path)) {
             @unlink($tmp);
             throw new \RuntimeException("Failed to finalize write: {$path}");

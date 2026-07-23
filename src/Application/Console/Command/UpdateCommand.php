@@ -22,6 +22,7 @@ use Semitexa\Update\Domain\Model\Scaffold\ScaffoldSyncReport;
 use Semitexa\Update\Exception\UpdateException;
 use Semitexa\Update\Domain\Model\OrchestratorPlanReport;
 use Semitexa\Update\Domain\Model\OrchestratorStage;
+use Semitexa\Update\Application\Service\Composer\SkeletonRequireDiff;
 use Semitexa\Update\Application\Service\UpdateRunnerFactory;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -159,6 +160,8 @@ final class UpdateCommand extends BaseCommand
         if ($planReport->packageDrift !== null) {
             $this->renderPackageDrift($io, $planReport->packageDrift);
         }
+
+        $this->renderSkeletonRequireDiff($io);
 
         if ($planReport->scaffoldPlan !== null) {
             $this->renderScaffoldPlan($io, $planReport->scaffoldPlan);
@@ -344,6 +347,42 @@ final class UpdateCommand extends BaseCommand
                 $io->writeln('    ' . $line);
             }
         }
+    }
+
+    /**
+     * Advisory only: packages the current ultimate skeleton requires that this
+     * project never declared (projects born from an older skeleton do not gain
+     * new root requires on composer update). Degrades silently when Packagist
+     * is unreachable — this must never block or fail an update run.
+     */
+    private function renderSkeletonRequireDiff(SymfonyStyle $io): void
+    {
+        try {
+            // Tight 3s timeout: this section is advisory and must not make the
+            // interactive update noticeably slower on bad connectivity.
+            $missing = new SkeletonRequireDiff(timeoutSeconds: 3)->missingPackages($this->getProjectRoot());
+        } catch (\Throwable) {
+            return;
+        }
+
+        if ($missing === null || $missing === []) {
+            return;
+        }
+
+        $io->section('New skeleton packages available (advisory, read-only)');
+        foreach ($missing as $package) {
+            $io->writeln(sprintf(
+                '  <comment>%s</comment> %s',
+                $package->name,
+                $package->description !== '' ? '— ' . $package->description : '',
+            ));
+            $io->writeln(sprintf(
+                '    add with:  composer require %s:%s',
+                $package->name,
+                $package->pinnedVersion,
+            ));
+        }
+        $io->writeln('  <comment>The current semitexa/ultimate skeleton ships these; nothing is installed automatically.</comment>');
     }
 
     private function renderPackageDrift(SymfonyStyle $io, PackageDriftReport $drift): void
