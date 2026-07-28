@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Update\Application\Service;
 
+use Semitexa\Orm\Attribute\SelfManagedTable;
 use Semitexa\Update\Domain\Model\JournalEntry;
 
 use Semitexa\Orm\Adapter\DatabaseAdapterInterface;
@@ -26,6 +27,7 @@ use Semitexa\Update\Exception\UpdateException;
  * are the only DDL allowed in semitexa-update; data patches must not issue
  * schema changes.
  */
+#[SelfManagedTable(self::TABLE)]
 final class JournalRepository
 {
     public const TABLE = 'platform_update_journal';

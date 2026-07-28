@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Update\Application\Service;
 
+use Semitexa\Orm\Attribute\SelfManagedTable;
 use Semitexa\Orm\Adapter\DatabaseAdapterInterface;
 use Semitexa\Orm\Adapter\MysqlAdapter;
 use Semitexa\Orm\Adapter\SqliteAdapter;
@@ -25,6 +26,7 @@ use Semitexa\Update\Exception\UpdateException;
  * Writes are best-effort by contract: callers must surface (not swallow) a
  * journal failure as a warning, but never let it fail the update itself.
  */
+#[SelfManagedTable(self::TABLE)]
 final class RunJournalRepository
 {
     public const TABLE = 'platform_update_run_journal';
