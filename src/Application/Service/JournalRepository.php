@@ -27,7 +27,7 @@ use Semitexa\Update\Exception\UpdateException;
  * are the only DDL allowed in semitexa-update; data patches must not issue
  * schema changes.
  */
-#[SelfManagedTable('platform_update_journal')]
+#[SelfManagedTable(self::TABLE)]
 final class JournalRepository
 {
     public const TABLE = 'platform_update_journal';

@@ -26,7 +26,7 @@ use Semitexa\Update\Exception\UpdateException;
  * Writes are best-effort by contract: callers must surface (not swallow) a
  * journal failure as a warning, but never let it fail the update itself.
  */
-#[SelfManagedTable('platform_update_run_journal')]
+#[SelfManagedTable(self::TABLE)]
 final class RunJournalRepository
 {
     public const TABLE = 'platform_update_run_journal';
