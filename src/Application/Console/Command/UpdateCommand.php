@@ -311,7 +311,11 @@ final class UpdateCommand extends BaseCommand
                 count($unresolved),
             ));
             foreach ($unresolved as $entry) {
-                $io->writeln(sprintf('    %s  (declared %s) — no Packagist metadata', $entry->name, (string) $entry->declared));
+                $io->writeln(sprintf(
+                    '    %s  (declared %s) — no release matched, or Packagist could not be reached',
+                    $entry->name,
+                    (string) $entry->declared,
+                ));
             }
             $io->writeln(
                 '  <error>By default this blocks the update. Retry with network access, or pass '

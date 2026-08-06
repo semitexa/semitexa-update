@@ -317,6 +317,23 @@ final class ComposerUpdateRunner
                 skipReason: 'Wildcard constraint — composer update will resolve within it.',
             );
         }
+        if ($declared === null) {
+            // In the lock or vendor but not in composer.json: something else
+            // requires it. There is no pin here to rewrite and nothing for the
+            // operator to decide, so it cannot be "unresolvable" — it simply is
+            // not ours. Without this it fell through to the exact-pin branch
+            // below (both constraint helpers answer false for null) and a
+            // transitive dependency could block the whole update.
+            return new ComposerUpdatePlanEntry(
+                name: $name,
+                declared: $declared,
+                locked: $locked,
+                installed: $installed,
+                targetVersion: null,
+                pinKind: ComposerUpdatePlanEntry::PIN_TRANSITIVE,
+                skipReason: 'Not required by this project — composer resolves it for whoever does.',
+            );
+        }
 
         // Release-pinned. Pick the target.
         $target = null;

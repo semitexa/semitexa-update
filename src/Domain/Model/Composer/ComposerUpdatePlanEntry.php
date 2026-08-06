@@ -29,6 +29,14 @@ final readonly class ComposerUpdatePlanEntry
     public const PIN_PATH_REPO = 'path_repo';
     public const PIN_WILDCARD = 'wildcard';
 
+    /**
+     * Present in the lock or vendor, but absent from composer.json: something
+     * else requires it. This project pins nothing about it, composer resolves
+     * it, and there is no pin here to rewrite — so it must never be able to
+     * block an update the way an unresolvable exact pin does.
+     */
+    public const PIN_TRANSITIVE = 'transitive';
+
     public function __construct(
         public string $name,
         public ?string $declared,
