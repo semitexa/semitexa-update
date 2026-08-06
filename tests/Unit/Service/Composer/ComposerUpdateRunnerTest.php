@@ -85,6 +85,49 @@ final class ComposerUpdateRunnerTest extends TestCase
         self::assertNull($wildcard->targetVersion);
     }
 
+    public function testATransitiveDependencyIsNotTreatedAsAPinAndCannotBlock(): void
+    {
+        // In the lock and vendor, absent from composer.json: something else
+        // requires it. Both constraint helpers answer false for a null
+        // constraint, so it used to fall through to the exact-pin branch, and a
+        // package this project pins nothing about could block the whole update.
+        // Seen live with semitexa/platform-settings.
+        $this->writeProject(
+            declared: [
+                'semitexa/update' => '2026.05.10.1449',
+            ],
+            locked: [
+                'semitexa/update'           => '2026.05.10.1449',
+                'semitexa/platform-settings' => '2026.05.08.1640',
+            ],
+            installed: [
+                'semitexa/update'           => '2026.05.10.1449',
+                'semitexa/platform-settings' => '2026.05.08.1640',
+            ],
+        );
+
+        // The resolver knows nothing about the transitive package — exactly the
+        // state a network blip or an unpublished tag leaves it in.
+        $resolver = new FakeResolver([
+            'semitexa/update' => ['2026.05.12.0744', '2026.05.10.1449'],
+        ]);
+
+        $plan = (new ComposerUpdateRunner(new FakeExecutor(available: true), $resolver))
+            ->plan($this->projectRoot);
+
+        $transitive = $plan->entryByName('semitexa/platform-settings');
+        self::assertNotNull($transitive);
+        self::assertSame(ComposerUpdatePlanEntry::PIN_TRANSITIVE, $transitive->pinKind);
+        self::assertNull($transitive->targetVersion);
+        self::assertNotSame('', $transitive->skipReason, 'A skipped entry must say why it was skipped.');
+
+        self::assertSame(
+            [],
+            $plan->unresolvedEntries(),
+            'A dependency this project does not require must never block the update.',
+        );
+    }
+
     public function testPlanFallsBackToPackagesOwnLatestWhenAnchorTagMissing(): void
     {
         $this->writeProject(

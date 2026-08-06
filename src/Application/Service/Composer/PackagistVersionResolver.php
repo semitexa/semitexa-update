@@ -21,6 +21,12 @@ final class PackagistVersionResolver implements UpstreamVersionResolverInterface
 {
     private const ENDPOINT = 'https://repo.packagist.org/p2/%s.json';
 
+    /** Tries before calling Packagist unreachable — one blip must not decide an update. */
+    private const FETCH_ATTEMPTS = 3;
+
+    /** Multiplied by the attempt number, so waits grow: 0.25s, then 0.5s. */
+    private const RETRY_BACKOFF_MICROSECONDS = 250_000;
+
     /**
      * @var array<string, list<string>>
      */
@@ -56,7 +62,12 @@ final class PackagistVersionResolver implements UpstreamVersionResolverInterface
         $url = sprintf(self::ENDPOINT, $package);
         $body = $this->fetch($url);
         if ($body === null) {
-            return $this->cache[$package] = [];
+            // Unreachable, not absent. Deliberately NOT cached: caching it
+            // would turn one blip into "this package has no releases" for the
+            // rest of the process, and the caller reports that to the operator
+            // as missing Packagist metadata and blocks the update. A later call
+            // gets to ask again.
+            return [];
         }
         try {
             $data = json_decode($body, true, flags: JSON_THROW_ON_ERROR);
@@ -85,17 +96,65 @@ final class PackagistVersionResolver implements UpstreamVersionResolverInterface
         return $this->cache[$package] = $versions;
     }
 
+    /**
+     * The body, or null when Packagist could not be asked.
+     *
+     * A 404 is an answer — the package genuinely has no metadata — and returns
+     * an empty body rather than null, so the caller may cache it. Anything
+     * else (timeout, DNS, connection reset, 5xx) is not an answer, and one
+     * attempt is not enough to call it one: this used to make a single blip
+     * indistinguishable from a missing package, which then blocked the update
+     * with "no Packagist metadata" for a package that was on Packagist all
+     * along.
+     */
     private function fetch(string $url): ?string
     {
-        $ctx = stream_context_create([
-            'http' => [
-                'method' => 'GET',
-                'timeout' => $this->timeoutSeconds,
-                'header' => "User-Agent: Semitexa-Update/PackagistVersionResolver\r\n",
-                'ignore_errors' => false,
-            ],
-        ]);
-        $body = @file_get_contents($url, false, $ctx);
-        return $body !== false ? $body : null;
+        $attempts = 0;
+
+        while (true) {
+            $attempts++;
+            $ctx = stream_context_create([
+                'http' => [
+                    'method' => 'GET',
+                    'timeout' => $this->timeoutSeconds,
+                    'header' => "User-Agent: Semitexa-Update/PackagistVersionResolver\r\n",
+                    // Needed to see the status line at all: without it a 404
+                    // and a dead connection are both just `false`.
+                    'ignore_errors' => true,
+                ],
+            ]);
+
+            $http_response_header = [];
+            $body = @file_get_contents($url, false, $ctx);
+            $status = $this->statusFrom($http_response_header ?? []);
+
+            if ($status === 404) {
+                return '';
+            }
+
+            if ($body !== false && $status !== null && $status < 400) {
+                return $body;
+            }
+
+            if ($attempts >= self::FETCH_ATTEMPTS) {
+                return null;
+            }
+
+            usleep(self::RETRY_BACKOFF_MICROSECONDS * $attempts);
+        }
+    }
+
+    /**
+     * @param list<string> $headers
+     */
+    private function statusFrom(array $headers): ?int
+    {
+        foreach ($headers as $header) {
+            if (preg_match('#^HTTP/\S+\s+(\d{3})#', $header, $m) === 1) {
+                $status = (int) $m[1];
+            }
+        }
+
+        return $status ?? null;
     }
 }
