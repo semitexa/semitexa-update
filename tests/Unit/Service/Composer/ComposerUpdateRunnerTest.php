@@ -199,7 +199,7 @@ final class ComposerUpdateRunnerTest extends TestCase
             'semitexa/update' => ['2026.05.12.0744'],
             'semitexa/core'   => ['2026.05.12.0744'],
         ]);
-        $executor = new FakeExecutor(true, runReturns: ['exitCode' => 0, 'output' => 'ok']);
+        $executor = new ApplyingFakeExecutor(true, runReturns: ['exitCode' => 0, 'output' => 'ok']);
         $runner = new ComposerUpdateRunner($executor, $resolver);
 
         $result = $runner->execute($this->projectRoot, dryRun: false);
@@ -211,10 +211,15 @@ final class ComposerUpdateRunnerTest extends TestCase
         self::assertSame('2026.05.12.0744', $afterJson['require']['semitexa/update']);
         self::assertSame('2026.05.12.0744', $afterJson['require']['semitexa/core']);
 
-        // outcome depends on whether installed.json changed; we left it at the OLD version
-        // (a real composer would have updated it; the fake didn't), so the runner sees no
-        // installed version change → Updated, not UpdaterChanged.
-        self::assertSame(ComposerUpdateOutcome::Updated, $result->outcome);
+        // The anchor moved with everything else, so the run stops to be rerun on
+        // fresh code — and it reports the packages that actually changed version,
+        // which is the whole point: a summary built from our own pin rewrites
+        // would say the same thing whether or not composer did anything.
+        self::assertSame(ComposerUpdateOutcome::UpdaterChanged, $result->outcome);
+        self::assertSame(
+            ['from' => '2026.05.08.1640', 'to' => '2026.05.12.0744'],
+            $result->bumpedPackages['semitexa/core'],
+        );
     }
 
     public function testUpdaterChangedWhenInstalledJsonVersionShiftsAcrossComposerCall(): void
@@ -374,12 +379,14 @@ final class ComposerUpdateRunnerTest extends TestCase
             installed: ['semitexa/update' => '2026.05.10.1449', 'semitexa/core' => '2026.05.08.1640'],
         );
         $resolver = new FakeResolver(['semitexa/update' => ['2026.05.12.0744']]);
-        $executor = new FakeExecutor(true, runReturns: ['exitCode' => 0, 'output' => 'ok']);
+        $executor = new ApplyingFakeExecutor(true, runReturns: ['exitCode' => 0, 'output' => 'ok']);
 
         $result = (new ComposerUpdateRunner($executor, $resolver))
             ->execute($this->projectRoot, dryRun: false, allowPartial: true);
 
-        self::assertSame(ComposerUpdateOutcome::Updated, $result->outcome);
+        // The anchor itself is what moved, so the run stops for a rerun; the
+        // degraded tail must survive that path too.
+        self::assertSame(ComposerUpdateOutcome::UpdaterChanged, $result->outcome);
         self::assertSame(1, $executor->callCount, 'composer must be invoked under --allow-partial.');
         self::assertStringContainsString('DEGRADED', $result->message);
         self::assertStringContainsString('semitexa/core', $result->message);
@@ -467,13 +474,21 @@ final class ComposerUpdateRunnerTest extends TestCase
         // Resolver returns null for path-repo + dev names too — they must
         // not be classified as unresolved because we never tried to bump them.
         $resolver = new FakeResolver(['semitexa/update' => ['2026.05.12.0744']]);
-        $executor = new FakeExecutor(true, runReturns: ['exitCode' => 0, 'output' => '']);
+        $executor = new ApplyingFakeExecutor(true, runReturns: ['exitCode' => 0, 'output' => '']);
 
         $result = (new ComposerUpdateRunner($executor, $resolver))
             ->execute($this->projectRoot, dryRun: false);
 
-        self::assertSame(ComposerUpdateOutcome::Updated, $result->outcome, 'Path/dev packages must not block.');
+        // The anchor moved, so the outcome is UpdaterChanged rather than Updated —
+        // what this test is about is that the path-repo and @dev entries did not
+        // stop the phase, which the call count and a non-failure outcome show.
+        self::assertSame(ComposerUpdateOutcome::UpdaterChanged, $result->outcome, 'Path/dev packages must not block.');
         self::assertSame(1, $executor->callCount);
+        self::assertArrayNotHasKey(
+            'semitexa/platform-ui',
+            $result->bumpedPackages,
+            'A path repository has no version to move and must never appear as one that did.',
+        );
     }
 
     public function testCleanStateSkipsComposerInvocationEntirely(): void
@@ -576,6 +591,121 @@ final class ComposerUpdateRunnerTest extends TestCase
      * @param array<string, string> $installed
      * @param list<string> $pathRepoNames
      */
+    /**
+     * The case that started this: a project whose semitexa/* constraints are all
+     * "*". There are no pins to rewrite, so composer resolves the new versions on
+     * its own — and the phase used to describe that as "No release-pinned
+     * semitexa/* package needed a bump", outcome Clean, journalled as a noop.
+     * Seven packages had just moved. An operator reading that has no way to tell
+     * an update from nothing at all, and will do it again by hand.
+     */
+    public function testWildcardProjectReportsThePackagesComposerActuallyMoved(): void
+    {
+        $this->writeProject(
+            declared:  ['semitexa/update' => '*', 'semitexa/core' => '*'],
+            locked:    ['semitexa/update' => '2026.05.12.0744', 'semitexa/core' => '2026.05.08.1640'],
+            installed: ['semitexa/update' => '2026.05.12.0744', 'semitexa/core' => '2026.05.08.1640'],
+        );
+        $resolver = new FakeResolver(['semitexa/update' => ['2026.05.12.0744']]);
+
+        // Composer resolves core forward inside its wildcard, as it would upstream.
+        $executor = new class(true) extends FakeExecutor {
+            public function run(array $args, string $projectRoot): array
+            {
+                $this->callCount++;
+                $this->lastArgs = $args;
+                foreach (['/composer.lock', '/vendor/composer/installed.json'] as $file) {
+                    $data = json_decode((string) file_get_contents($projectRoot . $file), true);
+                    foreach ($data['packages'] as &$pkg) {
+                        if ($pkg['name'] === 'semitexa/core') {
+                            $pkg['version'] = '2026.05.12.0744';
+                        }
+                    }
+                    unset($pkg);
+                    file_put_contents($projectRoot . $file, json_encode($data));
+                }
+                return ['exitCode' => 0, 'output' => ''];
+            }
+        };
+
+        $result = (new ComposerUpdateRunner($executor, $resolver))
+            ->execute($this->projectRoot, dryRun: false, force: true);
+
+        self::assertSame(ComposerUpdateOutcome::Updated, $result->outcome, 'A move is not a clean no-op.');
+        self::assertSame(
+            ['semitexa/core' => ['from' => '2026.05.08.1640', 'to' => '2026.05.12.0744']],
+            $result->bumpedPackages,
+        );
+        self::assertStringContainsString('semitexa/core', $result->message);
+        self::assertStringNotContainsString('needed a bump', $result->message);
+    }
+
+    /** Composer ran and genuinely changed nothing — say so, do not claim a bump. */
+    public function testAForcedRunThatMovesNothingSaysNothingMoved(): void
+    {
+        $this->writeProject(
+            declared:  ['semitexa/update' => '*'],
+            locked:    ['semitexa/update' => '2026.05.12.0744'],
+            installed: ['semitexa/update' => '2026.05.12.0744'],
+        );
+        $resolver = new FakeResolver(['semitexa/update' => ['2026.05.12.0744']]);
+        $executor = new FakeExecutor(true);
+
+        $result = (new ComposerUpdateRunner($executor, $resolver))
+            ->execute($this->projectRoot, dryRun: false, force: true);
+
+        self::assertSame(ComposerUpdateOutcome::Clean, $result->outcome);
+        self::assertSame([], $result->bumpedPackages);
+        self::assertStringContainsString('no semitexa/* package changed version', $result->message);
+    }
+
+    /**
+     * The other half. A wildcard cannot disagree with a lock, so the lock/vendor
+     * drift check walks straight past it and a plain `bin/semitexa update` skips
+     * the composer phase forever — the packages sit where they are until someone
+     * runs composer by hand. A set spread across several release dates is the
+     * signal that does survive wildcards.
+     */
+    public function testAWildcardSetSpanningReleasesIsNotSkipped(): void
+    {
+        $this->writeProject(
+            declared:  ['semitexa/update' => '*', 'semitexa/core' => '*'],
+            locked:    ['semitexa/update' => '2026.05.12.0744', 'semitexa/core' => '2026.05.08.1640'],
+            installed: ['semitexa/update' => '2026.05.12.0744', 'semitexa/core' => '2026.05.08.1640'],
+        );
+        $resolver = new FakeResolver(['semitexa/update' => ['2026.05.12.0744']]);
+        $executor = new FakeExecutor(true);
+
+        // No force, no pins, no lock/vendor drift — the old guard skipped here.
+        $result = (new ComposerUpdateRunner($executor, $resolver))
+            ->execute($this->projectRoot, dryRun: false);
+
+        self::assertSame(1, $executor->callCount, 'A stale wildcard set must let composer look.');
+        // Clean is the honest answer once it HAS looked and this fake moved
+        // nothing; what the bug was is never looking. The two states used to be
+        // indistinguishable from the outside, which is why the message differs.
+        self::assertStringContainsString('no semitexa/* package changed version', $result->message);
+        self::assertStringNotContainsString('skipped', $result->message);
+    }
+
+    /** A coherent set still skips: this must not become "run composer every time". */
+    public function testACoherentWildcardSetStillSkips(): void
+    {
+        $this->writeProject(
+            declared:  ['semitexa/update' => '*', 'semitexa/core' => '*'],
+            locked:    ['semitexa/update' => '2026.05.12.0744', 'semitexa/core' => '2026.05.12.0744'],
+            installed: ['semitexa/update' => '2026.05.12.0744', 'semitexa/core' => '2026.05.12.0744'],
+        );
+        $resolver = new FakeResolver(['semitexa/update' => ['2026.05.12.0744']]);
+        $executor = new FakeExecutor(true);
+
+        $result = (new ComposerUpdateRunner($executor, $resolver))
+            ->execute($this->projectRoot, dryRun: false);
+
+        self::assertSame(0, $executor->callCount);
+        self::assertSame(ComposerUpdateOutcome::Clean, $result->outcome);
+    }
+
     private function writeProject(
         array $declared,
         array $locked,
@@ -660,6 +790,51 @@ class FakeExecutor implements ComposerExecutorInterface
     {
         $this->callCount++;
         $this->lastArgs = $args;
+        return $this->runReturns;
+    }
+}
+
+/**
+ * A fake that does what `composer update` does: brings composer.lock and
+ * vendor/composer/installed.json into line with the constraints in
+ * composer.json.
+ *
+ * The plain FakeExecutor returns an exit code and touches nothing, which was
+ * fine while the runner reported the pins IT rewrote. Now that the runner
+ * reports what actually moved, a fake that changes nothing means nothing
+ * moved — and a test asserting an update against it would be asserting the
+ * very fiction this class exists to remove.
+ */
+class ApplyingFakeExecutor extends FakeExecutor
+{
+    public function run(array $args, string $projectRoot): array
+    {
+        $this->callCount++;
+        $this->lastArgs = $args;
+
+        $declared = json_decode((string) file_get_contents($projectRoot . '/composer.json'), true)['require'] ?? [];
+
+        foreach (['/composer.lock' => ['packages', 'packages-dev'], '/vendor/composer/installed.json' => ['packages']] as $file => $buckets) {
+            $path = $projectRoot . $file;
+            $data = json_decode((string) file_get_contents($path), true);
+            foreach ($buckets as $bucket) {
+                if (!isset($data[$bucket]) || !is_array($data[$bucket])) {
+                    continue;
+                }
+                foreach ($data[$bucket] as &$pkg) {
+                    $want = $declared[$pkg['name']] ?? null;
+                    // Only concrete pins resolve to themselves; "*" and dev
+                    // constraints are left where they are, as composer would
+                    // when nothing newer is published.
+                    if (is_string($want) && preg_match('/^\d{4}\.\d{2}\.\d{2}\.\d{4}$/', $want) === 1) {
+                        $pkg['version'] = $want;
+                    }
+                }
+                unset($pkg);
+            }
+            file_put_contents($path, json_encode($data));
+        }
+
         return $this->runReturns;
     }
 }
