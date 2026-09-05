@@ -10,6 +10,7 @@ use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\Support\ProjectRoot;
 use Semitexa\Orm\Application\Service\Connection\ConnectionRegistry;
 use Semitexa\Update\Application\Service\Composer\ComposerUpdateRunner;
+use Semitexa\Update\Application\Service\PackageDriftInspector;
 use Semitexa\Update\Application\Service\Composer\InContainerComposerExecutor;
 use Semitexa\Update\Application\Service\Composer\PackagistVersionResolver;
 use Semitexa\Update\Application\Service\Scaffold\ScaffoldFileClassifier;
@@ -76,6 +77,10 @@ class UpdateRunnerFactory
             composerRunner: new ComposerUpdateRunner(
                 executor: new InContainerComposerExecutor(),
                 resolver: new PackagistVersionResolver(),
+                // The same inspector the read-only drift section renders from.
+                // The composer phase needs it to notice a wildcard set that has
+                // drifted across releases, which pin comparison cannot see.
+                drift: new PackageDriftInspector(),
             ),
             runJournal: $this->runJournal($connection),
             actor: self::defaultActor(),

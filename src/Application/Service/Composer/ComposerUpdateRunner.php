@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Update\Application\Service\Composer;
 
+use Semitexa\Update\Application\Service\PackageDriftInspector;
 use Semitexa\Update\Application\Service\Packaging\Releases\Support\SemitexaReleaseVersion;
 use Semitexa\Update\Domain\Enum\ComposerUpdateOutcome;
 use Semitexa\Update\Domain\Model\Composer\ComposerUpdatePlan;
@@ -34,12 +35,22 @@ use Semitexa\Update\Domain\Model\Composer\ComposerUpdateResult;
  *
  *   6. Shell out to `composer update "semitexa/*" -W` inside the container.
  *
- *   7. Compare installed.json semitexa/update version before vs after. If
- *      it changed, return UpdaterChanged so the orchestrator stops with a
- *      rerun message.
+ *   7. Snapshot the installed version of EVERY semitexa/* package on both
+ *      sides of the call and report what moved. Not what step 5 rewrote:
+ *      a project that declares its packages as "*" has nothing to rewrite,
+ *      composer resolves the versions itself, and a summary built from our
+ *      own pin edits would call that a no-op while seven packages moved.
+ *      If semitexa/update itself moved, return UpdaterChanged so the
+ *      orchestrator stops with a rerun message.
  *
  * Path-repo, @dev, dev-* and "*" pins are reported in the plan but never
- * mutated.
+ * mutated. They are still WATCHED — see step 7 — because composer moves them
+ * even when we do not.
+ *
+ * The phase is skipped entirely when there is nothing to do: no pins to bump,
+ * lock and vendor coherent, and the installed set sitting on one release date.
+ * That last condition is what a wildcard project has instead of pin drift;
+ * without it such a project is never updated by this command at all.
  */
 final class ComposerUpdateRunner
 {
@@ -49,6 +60,7 @@ final class ComposerUpdateRunner
     public function __construct(
         private readonly ComposerExecutorInterface $executor,
         private readonly UpstreamVersionResolverInterface $resolver,
+        private readonly ?PackageDriftInspector $drift = null,
     ) {
     }
 
@@ -150,7 +162,8 @@ final class ComposerUpdateRunner
         // content-hash field, producing noisy git diffs on every plain
         // `bin/semitexa update`. The `$force` flag (wired to --composer-only)
         // is the explicit operator override.
-        $driftReason = $this->lockOrVendorDriftReason($projectRoot);
+        $driftReason = $this->lockOrVendorDriftReason($projectRoot)
+            ?? $this->mixedReleaseSetReason($projectRoot);
         if ($bumps === [] && $driftReason === null && !$force) {
             return new ComposerUpdateResult(
                 outcome: ComposerUpdateOutcome::Clean,
@@ -211,15 +224,39 @@ final class ComposerUpdateRunner
         }
 
         // 2. Run composer
+        //
+        // Snapshot the WHOLE semitexa/* set on both sides of the call. Counting
+        // only the pins we rewrote answers "what did this runner change", which
+        // is not the question an operator is asking. A project that declares its
+        // packages as wildcards has no pins to rewrite, so composer resolves the
+        // new versions on its own and the runner used to report "No
+        // release-pinned semitexa/* package needed a bump" over an update that
+        // had just moved seven packages — and journal it as a noop. Reported that
+        // way, a real update is indistinguishable from nothing happening.
+        $versionsBefore = $this->semitexaVersions($projectRoot);
+
         $exec = $this->executor->run(
             ['update', self::PREFIX . '*', '-W', '--no-interaction'],
             $projectRoot,
         );
 
+        $versionsAfter = $this->semitexaVersions($projectRoot);
+
+        // What actually moved, whether we asked for it by name or composer
+        // resolved it within a wildcard.
         $bumpedSummary = [];
-        foreach ($bumps as $b) {
-            $bumpedSummary[$b->name] = ['from' => $b->declared, 'to' => (string) $b->targetVersion];
+        foreach ($versionsAfter as $name => $after) {
+            $before = $versionsBefore[$name] ?? null;
+            if ($before !== $after) {
+                $bumpedSummary[$name] = ['from' => $before, 'to' => $after];
+            }
         }
+        foreach ($versionsBefore as $name => $before) {
+            if (!isset($versionsAfter[$name])) {
+                $bumpedSummary[$name] = ['from' => $before, 'to' => null];
+            }
+        }
+        ksort($bumpedSummary);
 
         if ($exec['exitCode'] !== 0) {
             return new ComposerUpdateResult(
@@ -251,18 +288,24 @@ final class ComposerUpdateRunner
             : '';
 
         $message = match ($outcome) {
+            // The degraded tail rides along here too: a run that could not resolve
+            // part of the set is degraded whether or not the updater happened to
+            // move, and dropping the warning because of an unrelated coincidence
+            // is how a partial update comes to look like a complete one.
             ComposerUpdateOutcome::UpdaterChanged => sprintf(
                 'semitexa/update was upgraded (%s → %s). Stopping cleanly so the next stages run with fresh code. '
-                . 'Rerun `bin/semitexa update` to continue.',
+                . 'Rerun `bin/semitexa update` to continue.%s',
                 $installedBefore,
                 $installedAfter,
-            ),
-            ComposerUpdateOutcome::Updated => sprintf(
-                'Bumped %d pin(s); composer update succeeded.%s',
-                count($bumpedSummary),
                 $degradedTail,
             ),
-            default => 'No release-pinned semitexa/* package needed a bump.' . $degradedTail,
+            ComposerUpdateOutcome::Updated => sprintf(
+                'composer update moved %d semitexa/* package(s): %s.%s',
+                count($bumpedSummary),
+                $this->describeMoves($bumpedSummary),
+                $degradedTail,
+            ),
+            default => 'composer update ran; no semitexa/* package changed version.' . $degradedTail,
         };
 
         return new ComposerUpdateResult(
@@ -594,6 +637,75 @@ final class ComposerUpdateRunner
      * if they did, ``--no-composer`` would be the only sensible operator
      * response, and that's the operator's call to make.
      */
+    /**
+     * Concrete version of every non-path semitexa/* package, as installed.
+     *
+     * Installed rather than locked: the lock states an intention, vendor/ is
+     * what the application will actually load. Path repositories are excluded —
+     * their "version" is whatever the working copy happens to be.
+     *
+     * @return array<string, string>
+     */
+    private function semitexaVersions(string $projectRoot): array
+    {
+        [$installed, $installedPathRepos] = $this->readInstalled($projectRoot);
+        [$locked, $lockPathRepos] = $this->readLocked($projectRoot);
+        $pathRepos = $lockPathRepos + $installedPathRepos;
+
+        $out = [];
+        foreach ($installed as $name => $version) {
+            if (!isset($pathRepos[$name])) {
+                $out[$name] = $version;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * A short, readable account of what moved — three packages named, the rest counted.
+     *
+     * @param array<string, array{from: ?string, to: ?string}> $moves
+     */
+    private function describeMoves(array $moves): string
+    {
+        $parts = [];
+        foreach (array_slice($moves, 0, 3, true) as $name => $move) {
+            $parts[] = sprintf('%s %s → %s', $name, $move['from'] ?? 'absent', $move['to'] ?? 'removed');
+        }
+        $rest = count($moves) - count($parts);
+
+        return implode(', ', $parts) . ($rest > 0 ? sprintf(' and %d more', $rest) : '');
+    }
+
+    /**
+     * Is the installed semitexa/* set spread across several releases?
+     *
+     * The other drift check deliberately walks past wildcard constraints: a "*"
+     * cannot disagree with a lock, so by that measure a wildcard project is
+     * always coherent and the composer phase is always skipped. It is then
+     * impossible to update such a project with `bin/semitexa update` at all —
+     * the packages sit wherever they were until someone runs composer by hand.
+     *
+     * A set spanning several release dates is the signal that does survive
+     * wildcards, and it is already computed, offline, from the same three files.
+     * It is a reason to let composer look rather than a promise that anything
+     * will move: when nothing does, the phase now says exactly that.
+     */
+    private function mixedReleaseSetReason(string $projectRoot): ?string
+    {
+        $report = ($this->drift ?? new PackageDriftInspector())->inspect($projectRoot);
+        if ($report->releaseSetCoherent) {
+            return null;
+        }
+
+        return sprintf(
+            'the installed semitexa/* set spans %d release dates (%s)',
+            count($report->mixedReleaseDates),
+            implode(', ', $report->mixedReleaseDates),
+        );
+    }
+
     private function lockOrVendorDriftReason(string $projectRoot): ?string
     {
         $declared = $this->readDeclared($projectRoot);
