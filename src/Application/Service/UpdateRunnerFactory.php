@@ -11,6 +11,7 @@ use Semitexa\Core\Support\ProjectRoot;
 use Semitexa\Orm\Application\Service\Connection\ConnectionRegistry;
 use Semitexa\Update\Application\Service\Composer\ComposerUpdateRunner;
 use Semitexa\Update\Application\Service\PackageDriftInspector;
+use Semitexa\Update\Discovery\UpdateAdvisoryDiscovery;
 use Semitexa\Update\Application\Service\Composer\InContainerComposerExecutor;
 use Semitexa\Update\Application\Service\Composer\PackagistVersionResolver;
 use Semitexa\Update\Application\Service\Scaffold\ScaffoldFileClassifier;
@@ -68,6 +69,7 @@ class UpdateRunnerFactory
             migrationGateway: $this->migrationGateway,
             connection: $connection,
             driftInspector: new PackageDriftInspector(),
+            advisories: new UpdateAdvisoryDiscovery($this->classDiscovery),
             scaffoldLoader: new ScaffoldManifestLoader(),
             scaffoldClassifier: new ScaffoldFileClassifier($hasher),
             scaffoldEngine: new ScaffoldSyncEngine($hasher),

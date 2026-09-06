@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Update\Application\Service;
 
+use Semitexa\Update\Discovery\UpdateAdvisoryDiscovery;
 use Semitexa\Update\Application\Service\Composer\ComposerUpdateRunner;
 use Semitexa\Update\Application\Service\Scaffold\ScaffoldFileClassifier;
 use Semitexa\Update\Application\Service\Scaffold\ScaffoldManifestLoader;
@@ -51,6 +52,7 @@ final class UpdateOrchestrator
         private readonly OrmMigrationGatewayInterface $migrationGateway,
         private readonly string $connection,
         private readonly ?PackageDriftInspector $driftInspector = null,
+        private readonly ?UpdateAdvisoryDiscovery $advisories = null,
         private readonly ?ScaffoldManifestLoader $scaffoldLoader = null,
         private readonly ?ScaffoldFileClassifier $scaffoldClassifier = null,
         private readonly ?ScaffoldSyncEngine $scaffoldEngine = null,
@@ -368,6 +370,7 @@ final class UpdateOrchestrator
             packageDrift: $this->inspectPackageDrift(),
             scaffoldPlan: $this->planScaffoldSync($writeCandidates),
             composerPlan: $this->planComposerUpdate(),
+            advisories: $this->advisories?->collect() ?? [],
         );
     }
 
