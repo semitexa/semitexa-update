@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Update\Domain\Model;
 
+use Semitexa\Update\Domain\Model\Advisory\UpdateAdvisory;
 use Semitexa\Update\Domain\Model\Composer\ComposerUpdatePlan;
 use Semitexa\Update\Domain\Model\PackageDrift\PackageDriftReport;
 use Semitexa\Update\Domain\Model\Scaffold\ScaffoldSyncPlan;
@@ -26,6 +27,14 @@ final readonly class OrchestratorPlanReport
         public ?PackageDriftReport $packageDrift = null,
         public ?ScaffoldSyncPlan $scaffoldPlan = null,
         public ?ComposerUpdatePlan $composerPlan = null,
+        /**
+         * Read-only notes contributed by other packages. Empty means nothing
+         * was contributed; it does NOT mean nothing was wrong, which is why a
+         * failed advisory reports itself rather than dropping out.
+         *
+         * @var list<UpdateAdvisory>
+         */
+        public array $advisories = [],
     ) {
     }
 }

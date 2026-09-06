@@ -16,6 +16,7 @@ use Semitexa\Update\Domain\Enum\ScaffoldSyncStatus;
 use Semitexa\Update\Domain\Enum\UpdatePhase;
 use Semitexa\Update\Domain\Model\Composer\ComposerUpdatePlan;
 use Semitexa\Update\Domain\Model\Composer\ComposerUpdateResult;
+use Semitexa\Update\Domain\Model\Advisory\UpdateAdvisory;
 use Semitexa\Update\Domain\Model\PackageDrift\PackageDriftReport;
 use Semitexa\Update\Domain\Model\Scaffold\ScaffoldSyncPlan;
 use Semitexa\Update\Domain\Model\Scaffold\ScaffoldSyncReport;
@@ -155,6 +156,10 @@ final class UpdateCommand extends BaseCommand
 
         if ($planReport->composerPlan !== null) {
             $this->renderComposerPlan($io, $planReport->composerPlan);
+        }
+
+        if ($planReport->advisories !== []) {
+            $this->renderAdvisories($io, $planReport->advisories);
         }
 
         if ($planReport->packageDrift !== null) {
@@ -387,6 +392,32 @@ final class UpdateCommand extends BaseCommand
             ));
         }
         $io->writeln('  <comment>The current semitexa/ultimate skeleton ships these; nothing is installed automatically.</comment>');
+    }
+
+    /**
+     * What other packages want the operator to know, right after the update
+     * changed things underneath them.
+     *
+     * Rendered before the composer drift because it is about THIS install's
+     * content rather than its dependency graph, and because the thing it exists
+     * to catch — a prompt override left frozen on a rewritten prompt — is only
+     * interesting at this moment.
+     *
+     * @param list<UpdateAdvisory> $advisories
+     */
+    private function renderAdvisories(SymfonyStyle $io, array $advisories): void
+    {
+        $io->section('Package advisories (read-only)');
+
+        foreach ($advisories as $advisory) {
+            $io->writeln($advisory->actionable
+                ? sprintf('  <comment>%s</comment>', $advisory->title)
+                : sprintf('  %s', $advisory->title));
+
+            foreach ($advisory->lines as $line) {
+                $io->writeln('    ' . $line);
+            }
+        }
     }
 
     private function renderPackageDrift(SymfonyStyle $io, PackageDriftReport $drift): void
