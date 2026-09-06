@@ -9,6 +9,11 @@ services:
     environment:
       APP_ENV: dev
       APP_DEBUG: "1"
+      # Passed through from the host, empty by default. An environment that must
+      # not accept a skipped check sets it to 1 — the release preflight does —
+      # and RenderParityTest then FAILS on a missing node instead of skipping.
+      # Empty here keeps an ordinary local run exactly as it was.
+      SEMITEXA_PARITY_REQUIRED: ${SEMITEXA_PARITY_REQUIRED:-}
     volumes:
       - .:/var/www/html
     working_dir: /var/www/html
