@@ -1,6 +1,6 @@
 {
     "schema_version": "semitexa.scaffold-manifest/v1",
-    "generated_at": "2026-09-06T15:28:26+00:00",
+    "generated_at": "2026-09-08T18:03:06+00:00",
     "files": [
         {
             "path": ".env.default",
@@ -33,8 +33,9 @@
         },
         {
             "path": "Dockerfile",
-            "current_sha256": "de70575cf55d4e8766ff6baac6039c8a36051458a977bbcba8d0ae61a5abf81f",
+            "current_sha256": "4d08c73dc86172ee5cf50a3f697a57042570bd1fa31c565de326fddf5ef2b0eb",
             "previous_sha256": [
+                "de70575cf55d4e8766ff6baac6039c8a36051458a977bbcba8d0ae61a5abf81f",
                 "8065c5d7a372616fdf3f6fd047f8575e984622ec4446ccb1721a74d0935b944b",
                 "b93181147709f3b687de83f827cbf5a935809b857a2e82b4bce08dfefaf05998",
                 "28652cf6f597d2ca0828f81580f12da31fa1845965f6e1ffa83b036df1e263a0"
@@ -122,8 +123,11 @@
         },
         {
             "path": "docker-compose.test.yml",
-            "current_sha256": "7b84acd7b2ccfbea5dc2d347e1b1d74a6e2f9d494d6fe479b753bac678357a54",
+            "current_sha256": "9d9211fb322153ac398e616e267fa7f8d59569da5bbe0f05f2cb72748628453f",
             "previous_sha256": [
+                "68ab9e7ee02107c6de48ebd8881586e8c366e07232286a7b348b483eb90f7182",
+                "9f7d32e37214a7046b224439bc10bdbee0ed10ba8ef1088706d42f46357112a1",
+                "7b84acd7b2ccfbea5dc2d347e1b1d74a6e2f9d494d6fe479b753bac678357a54",
                 "85a7a1d4468b2162b3394b5d586b31caa398bc4493bc60360d444c19eebb91e3",
                 "b12d38acfcd5babd238a3dddd84df2a45aa8c5f08aa6542a49be962fda7c0c62"
             ],
@@ -145,6 +149,16 @@
             "auto_update": true,
             "preserve_executable": false,
             "notes": ""
+        },
+        {
+            "path": "docker/e2e-runner/Dockerfile",
+            "current_sha256": "a6f9e3899d17af132ca60e43cad6e72406558435c4384e6e8469be9d37ab339a",
+            "previous_sha256": [],
+            "category": "infrastructure",
+            "critical": false,
+            "auto_update": true,
+            "preserve_executable": false,
+            "notes": "Image for the e2e-runner service in docker-compose.test.yml. Its FROM tag and the pinned @playwright/test version move together."
         }
     ]
 }
