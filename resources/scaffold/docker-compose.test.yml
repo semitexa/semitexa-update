@@ -9,6 +9,23 @@ services:
     environment:
       APP_ENV: dev
       APP_DEBUG: "1"
+      # The app and scheduler get these from docker-compose.mysql.yml; this
+      # service is not in that file, so it has to say them itself.
+      #
+      # DB_PORT especially: `.env` carries 3307 because that is where MySQL is
+      # published ON THE HOST, and env_file hands that number straight to a
+      # container where MySQL is reachable on 3306 — so every test run died on
+      # "SQLSTATE[HY000] [2002] Connection refused" before running a single
+      # test. The value is per-network, not per-project, which is why it is
+      # pinned here rather than left to .env.
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      # A test run must never be able to destroy the database the developer is
+      # working in. Without this the suite drops and recreates tables in
+      # DB_DATABASE, which is the live one.
+      DB_DATABASE: ${DB_TEST_DATABASE:-semitexa_test}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
       # Passed through from the host, empty by default. An environment that must
       # not accept a skipped check sets it to 1 — the release preflight does —
       # and RenderParityTest then FAILS on a missing node instead of skipping.
@@ -25,6 +42,49 @@ services:
       - -d
       - swoole.blocking_threshold=${SWOOLE_BLOCKING_THRESHOLD:-100000}
       - vendor/bin/phpunit
+    # Only `setup`, deliberately. A health dependency on mysql/redis would read
+    # better, but those services live in docker-compose.mysql.yml and
+    # docker-compose.redis.yml, which bin/semitexa adds to the file set ONLY
+    # when DB_DRIVER / a Redis host is configured. Naming them here makes
+    # compose fail with an undefined service on every project that runs neither
+    # — a scaffold has to hold for those too. bin/semitexa already waits on both
+    # before it starts a suite.
     depends_on:
       setup:
         condition: service_completed_successfully
+
+  # Playwright execution engine for the E2E phase of `bin/semitexa test:run`,
+  # and for the browser smoke the release workflow runs against a clone.
+  #
+  # The image extends Microsoft's official Playwright image and pre-installs
+  # @playwright/test globally, so a fresh checkout needs no Node, npm or
+  # browsers on the host. Pin the FROM tag in docker/e2e-runner/Dockerfile and
+  # the version here together — bumping one without the other is a defect.
+  e2e-runner:
+    build:
+      context: .
+      dockerfile: docker/e2e-runner/Dockerfile
+    image: semitexa/e2e-runner:1.59.1
+    working_dir: /var/www/html
+    env_file:
+      - path: .env.default
+        required: true
+      - path: .env
+        required: false
+    environment:
+      CI: "1"
+      HOME: /tmp
+      # Sharing the app's network namespace puts the suite on localhost, which
+      # Chromium never auto-upgrades to HTTPS — so in-network test traffic does
+      # not have to fight HTTPS-First Mode.
+      PLAYWRIGHT_BASE_URL: ${PLAYWRIGHT_BASE_URL:-http://localhost:${SWOOLE_PORT:-9502}}
+      # Makes the globally installed @playwright/test resolvable from any cwd,
+      # including the project mount where node_modules does not exist.
+      NODE_PATH: /usr/lib/node_modules
+    network_mode: "service:app"
+    depends_on:
+      app:
+        condition: service_started
+    volumes:
+      - .:/var/www/html
+    command: ["npx", "--no-install", "playwright", "test", "--config=playwright.config.ts"]

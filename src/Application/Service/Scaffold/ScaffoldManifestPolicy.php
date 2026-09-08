@@ -99,6 +99,13 @@ final class ScaffoldManifestPolicy
                 'preserve_executable' => false,
                 'notes' => '',
             ],
+            'docker/e2e-runner/Dockerfile' => [
+                'category' => ScaffoldFileCategory::Infrastructure,
+                'critical' => false,
+                'auto_update' => true,
+                'preserve_executable' => false,
+                'notes' => 'Image for the e2e-runner service in docker-compose.test.yml. Its FROM tag and the pinned @playwright/test version move together.',
+            ],
             'docker-compose.override.yml.example' => [
                 'category' => ScaffoldFileCategory::Example,
                 'critical' => false,
