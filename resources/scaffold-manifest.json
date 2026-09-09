@@ -1,6 +1,6 @@
 {
     "schema_version": "semitexa.scaffold-manifest/v1",
-    "generated_at": "2026-09-08T19:07:09+00:00",
+    "generated_at": "2026-09-09T16:10:11+00:00",
     "files": [
         {
             "path": ".env.default",
@@ -21,8 +21,9 @@
         },
         {
             "path": ".gitignore",
-            "current_sha256": "8431b6a3fbb44e694dba008aa20c7333495c7a2c4ea57acdf5d833f13c522110",
+            "current_sha256": "918bfe7a713bc190dcc7b71da6fd1b7840a710df538ce7d60f5a8680e8c0ea08",
             "previous_sha256": [
+                "8431b6a3fbb44e694dba008aa20c7333495c7a2c4ea57acdf5d833f13c522110",
                 "4bd2128231cafcbdb8d1d25e8fb04836691bd11d9285a53067c5730350e7c1b6"
             ],
             "category": "vcs",
@@ -48,8 +49,10 @@
         },
         {
             "path": "bin/semitexa",
-            "current_sha256": "545bbc4d0e240dd267a74ded823a31ac793e8df169048f059a4c3a325719746f",
+            "current_sha256": "b9dd3b2a1a9214859e5c229b48471395c3b3cb21437de7e0e8a967c658b71e9f",
             "previous_sha256": [
+                "85699f677c488b880b7a3bc356fd636b5f7092913a4240c2b44f68c3bdd197ca",
+                "545bbc4d0e240dd267a74ded823a31ac793e8df169048f059a4c3a325719746f",
                 "0442d61909bc079a5939da912d6dfaf265dd960157e2bfe765eda994ae8f1b7e",
                 "a7bf77afb4546507b5b90e5883eb2588072e37f6be09108115685b9886346290",
                 "700ce26ae49926f9d9430784dc0dcd515e86390ac2ad6388241b11f42d38a892",
