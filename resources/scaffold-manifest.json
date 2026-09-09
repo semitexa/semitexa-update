@@ -1,6 +1,6 @@
 {
     "schema_version": "semitexa.scaffold-manifest/v1",
-    "generated_at": "2026-09-08T19:07:09+00:00",
+    "generated_at": "2026-09-09T15:27:59+00:00",
     "files": [
         {
             "path": ".env.default",
@@ -21,8 +21,9 @@
         },
         {
             "path": ".gitignore",
-            "current_sha256": "8431b6a3fbb44e694dba008aa20c7333495c7a2c4ea57acdf5d833f13c522110",
+            "current_sha256": "918bfe7a713bc190dcc7b71da6fd1b7840a710df538ce7d60f5a8680e8c0ea08",
             "previous_sha256": [
+                "8431b6a3fbb44e694dba008aa20c7333495c7a2c4ea57acdf5d833f13c522110",
                 "4bd2128231cafcbdb8d1d25e8fb04836691bd11d9285a53067c5730350e7c1b6"
             ],
             "category": "vcs",
