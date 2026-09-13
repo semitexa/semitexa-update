@@ -1,6 +1,6 @@
 {
     "schema_version": "semitexa.scaffold-manifest/v1",
-    "generated_at": "2026-09-11T20:22:11+00:00",
+    "generated_at": "2026-09-13T11:58:50+00:00",
     "files": [
         {
             "path": ".env.default",
@@ -167,6 +167,36 @@
             "auto_update": true,
             "preserve_executable": false,
             "notes": "Image for the e2e-runner service in docker-compose.test.yml. Its FROM tag and the pinned @playwright/test version move together."
+        },
+        {
+            "path": "phpstan-bootstrap.php",
+            "current_sha256": "b38b933bde8327110fb35f32b785ea68f98ba89e70e0db230907dccf065b59ef",
+            "previous_sha256": [],
+            "category": "analysis",
+            "critical": false,
+            "auto_update": true,
+            "preserve_executable": false,
+            "notes": "Registers local-module PSR-4 for the analyser. Framework-owned; named by phpstan.neon's bootstrapFiles, so PHPStan refuses to start without it."
+        },
+        {
+            "path": "phpstan-strict.neon",
+            "current_sha256": "51e6817545aa6ce6735909bcb13b91bf597c35512b483d6ff9ee61f84528f01a",
+            "previous_sha256": [],
+            "category": "analysis",
+            "critical": false,
+            "auto_update": true,
+            "preserve_executable": false,
+            "notes": "Two lines wrapping phpstan.neon with reportUnmatchedIgnoredErrors. Framework-owned."
+        },
+        {
+            "path": "phpstan.neon",
+            "current_sha256": "dd08944259b64148a326bc6a2f3179a3a1fa206a8ae86256f9c782c3ccdb99df",
+            "previous_sha256": [],
+            "category": "analysis",
+            "critical": false,
+            "auto_update": false,
+            "preserve_executable": false,
+            "notes": "The project owns this: it adds paths and uncomments its baseline include. An update offers a candidate as .new rather than replacing it."
         }
     ]
 }
