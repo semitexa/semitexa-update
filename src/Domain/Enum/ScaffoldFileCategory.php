@@ -30,4 +30,15 @@ enum ScaffoldFileCategory: string
 
     /** Template that the operator is expected to copy + edit (e.g. docker-compose.override.yml.example). */
     case Example = 'example';
+
+    /**
+     * Static-analysis configuration (phpstan.neon and the files it names).
+     *
+     * A category of its own because the sync policy genuinely differs: the
+     * shim and the strict wrapper are framework-owned and replace cleanly,
+     * while phpstan.neon is the one file a project is EXPECTED to edit — it
+     * adds paths and uncomments its baseline include — so it is offered as a
+     * candidate rather than written over.
+     */
+    case Analysis = 'analysis';
 }

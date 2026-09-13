@@ -43,6 +43,29 @@ final class ScaffoldManifestPolicy
                 'preserve_executable' => false,
                 'notes' => 'Template only. The project .env file is never touched by scaffold sync.',
             ],
+            'phpstan.neon' => [
+                'category' => ScaffoldFileCategory::Analysis,
+                'critical' => false,
+                'auto_update' => false,
+                'preserve_executable' => false,
+                'notes' => 'The project owns this: it adds paths and uncomments its baseline include. '
+                    . 'An update offers a candidate as .new rather than replacing it.',
+            ],
+            'phpstan-strict.neon' => [
+                'category' => ScaffoldFileCategory::Analysis,
+                'critical' => false,
+                'auto_update' => true,
+                'preserve_executable' => false,
+                'notes' => 'Two lines wrapping phpstan.neon with reportUnmatchedIgnoredErrors. Framework-owned.',
+            ],
+            'phpstan-bootstrap.php' => [
+                'category' => ScaffoldFileCategory::Analysis,
+                'critical' => false,
+                'auto_update' => true,
+                'preserve_executable' => false,
+                'notes' => 'Registers local-module PSR-4 for the analyser. Framework-owned; named by '
+                    . "phpstan.neon's bootstrapFiles, so PHPStan refuses to start without it.",
+            ],
             '.gitignore' => [
                 'category' => ScaffoldFileCategory::Vcs,
                 'critical' => false,
