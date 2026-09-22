@@ -104,6 +104,86 @@ final class InstalledSemitexaPackageReaderTest extends TestCase
         self::assertFalse($classified->hasLocalWorkspace());
     }
 
+    public function testVendorWinsOverTheLockWhenTheTwoDisagree(): void
+    {
+        // The exact shape that let semitexa.com report itself current for
+        // eight days: the lock advertised a release vendor/ had never
+        // received, because the install step failed after the resolve.
+        $projectRoot = $this->writeLock([
+            'packages' => [
+                ['name' => 'semitexa/core', 'version' => '2026.09.19.1020'],
+            ],
+        ]);
+        $this->writeInstalled($projectRoot, [
+            ['name' => 'semitexa/core', 'version' => '2026.09.14.0605'],
+        ]);
+
+        self::assertSame(
+            ['semitexa/core' => '2026.09.14.0605'],
+            (new InstalledSemitexaPackageReader())->read($projectRoot),
+        );
+    }
+
+    public function testInstalledJsonKeepsDevPackagesInOneBucket(): void
+    {
+        $projectRoot = $this->writeLock(['packages' => []]);
+        $this->writeInstalled($projectRoot, [
+            ['name' => 'semitexa/core', 'version' => '2026.09.19.1020'],
+            ['name' => 'semitexa/testing', 'version' => '2026.09.11.0529'],
+            ['name' => 'psr/container', 'version' => '2.0.2'],
+        ]);
+
+        self::assertSame([
+            'semitexa/core' => '2026.09.19.1020',
+            'semitexa/testing' => '2026.09.11.0529',
+        ], (new InstalledSemitexaPackageReader())->read($projectRoot));
+    }
+
+    public function testFallsBackToTheLockWhenVendorHasNotBeenInstalled(): void
+    {
+        $projectRoot = $this->writeLock([
+            'packages' => [
+                ['name' => 'semitexa/core', 'version' => '2026.09.19.1020'],
+            ],
+        ]);
+
+        self::assertSame(
+            ['semitexa/core' => '2026.09.19.1020'],
+            (new InstalledSemitexaPackageReader())->read($projectRoot),
+        );
+    }
+
+    public function testInstalledJsonStillHidesPathRepositories(): void
+    {
+        $projectRoot = $this->writeLock(['packages' => []]);
+        $this->writeInstalled($projectRoot, [
+            ['name' => 'semitexa/core', 'version' => '2026.09.19.1020'],
+            [
+                'name' => 'semitexa/demo',
+                'version' => 'dev-develop',
+                'dist' => ['type' => 'path', 'url' => 'packages/semitexa-demo'],
+            ],
+        ]);
+
+        $classified = (new InstalledSemitexaPackageReader())->classify($projectRoot);
+
+        self::assertSame(['semitexa/core'], $classified->vendorNames());
+        self::assertSame(['semitexa/demo'], $classified->localWorkspaceNames());
+    }
+
+    /**
+     * @param list<array<string, mixed>> $packages
+     */
+    private function writeInstalled(string $projectRoot, array $packages): void
+    {
+        mkdir($projectRoot . '/vendor/composer', 0777, true);
+
+        file_put_contents(
+            $projectRoot . '/vendor/composer/installed.json',
+            json_encode(['packages' => $packages, 'dev' => true], JSON_THROW_ON_ERROR),
+        );
+    }
+
     /**
      * @param array<string, mixed> $lockBody
      */

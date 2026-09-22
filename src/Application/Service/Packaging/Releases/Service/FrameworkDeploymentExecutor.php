@@ -6,6 +6,9 @@ namespace Semitexa\Update\Application\Service\Packaging\Releases\Service;
 
 use Semitexa\Core\Environment;
 use Semitexa\Update\Application\Service\HealthChecker;
+use Semitexa\Update\Application\Service\PackageDriftInspector;
+use Semitexa\Update\Domain\Enum\PackageDriftStatus;
+use Semitexa\Update\Domain\Model\PackageDrift\PackageDriftEntry;
 use Semitexa\Update\Application\Service\RunJournalRepository;
 use Semitexa\Update\Application\Service\UpdateLock;
 use Semitexa\Update\Domain\Enum\RunOutcome;
@@ -93,6 +96,8 @@ final class FrameworkDeploymentExecutor
             $this->run($this->composerUpdateCommand($projectRoot), $projectRoot);
             $composerUpdated = true;
 
+            $this->assertVendorMatchesLock($projectRoot);
+
             $this->run($this->projectCliCommand($projectRoot, 'orm:sync'), $projectRoot);
             $this->run($this->projectCliCommand($projectRoot, 'cache:clear'), $projectRoot);
 
@@ -123,6 +128,55 @@ final class FrameworkDeploymentExecutor
         } finally {
             $lock?->release();
         }
+    }
+
+    /**
+     * composer can rewrite composer.lock and leave vendor/ exactly as it was:
+     * a dist that 404s on a private repo, an expired token, a process killed
+     * mid-install. The command still exits, the lock still advertises the new
+     * release, and the workers keep loading the old one — which is how
+     * semitexa.com served an eight-day-old framework while every run logged a
+     * clean result.
+     *
+     * Only vendor/composer/installed.json settles it. A mixed release set is
+     * not checked here: production legitimately spans several release dates,
+     * and path repositories and dev constraints are somebody's working tree.
+     */
+    private function assertVendorMatchesLock(string $projectRoot): void
+    {
+        // No installed.json means Composer has never written this vendor tree.
+        // The inspector would read that as every package missing, so the check
+        // has nothing to say rather than everything.
+        if (!is_file($projectRoot . '/vendor/composer/installed.json')) {
+            return;
+        }
+
+        $stale = array_values(array_filter(
+            (new PackageDriftInspector())->inspect($projectRoot)->entries,
+            static fn (PackageDriftEntry $entry): bool => in_array($entry->status, [
+                PackageDriftStatus::VendorStale,
+                PackageDriftStatus::MissingFromVendor,
+                PackageDriftStatus::VersionMismatch,
+            ], true),
+        ));
+
+        if ($stale === []) {
+            return;
+        }
+
+        throw new \RuntimeException(sprintf(
+            'composer finished but vendor/ still disagrees with composer.lock for %d package(s): %s',
+            count($stale),
+            implode('; ', array_map(
+                static fn (PackageDriftEntry $entry): string => sprintf(
+                    '%s (lock %s, vendor %s)',
+                    $entry->name,
+                    $entry->locked ?? 'absent',
+                    $entry->installed ?? 'absent',
+                ),
+                array_slice($stale, 0, 5),
+            )),
+        ));
     }
 
     /**

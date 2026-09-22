@@ -8,8 +8,15 @@ use Semitexa\Update\Domain\Model\InstalledSemitexaPackages;
 use Semitexa\Update\Domain\Model\LocalWorkspacePackage;
 
 /**
- * Reads installed `semitexa/*` packages from composer.lock and classifies them
- * by Composer install source.
+ * Reads installed `semitexa/*` packages from `vendor/composer/installed.json`
+ * and classifies them by Composer install source.
+ *
+ * It reads vendor, not composer.lock, because the lock records an intention
+ * and vendor records what the autoloader will actually serve. The two diverge
+ * whenever an install was skipped, interrupted or failed — and planning
+ * against the intention is how a deployment reports "already current" while
+ * the workers keep running the previous release. composer.lock stays as the
+ * fallback for a project whose vendor has not been installed yet.
  *
  * The update lifecycle distinguishes two kinds of installs:
  *
@@ -44,7 +51,7 @@ final class InstalledSemitexaPackageReader
      */
     public function classify(string $projectRoot): InstalledSemitexaPackages
     {
-        $entries = $this->lockEntries($projectRoot);
+        $entries = $this->installedEntries($projectRoot);
 
         $vendor = [];
         $local = [];
@@ -90,25 +97,45 @@ final class InstalledSemitexaPackageReader
     /**
      * @return list<array<string, mixed>>
      */
-    private function lockEntries(string $projectRoot): array
+    private function installedEntries(string $projectRoot): array
     {
-        $lockPath = $projectRoot . '/composer.lock';
-        if (!is_file($lockPath)) {
-            return [];
+        // installed.json keeps dev and non-dev packages in one `packages`
+        // array; composer.lock splits them. Either shape carries the
+        // name/version/dist/source fields the classifier needs.
+        $vendor = $this->readPackages($projectRoot . '/vendor/composer/installed.json', ['packages']);
+        if ($vendor !== null) {
+            return $vendor;
         }
 
-        $json = file_get_contents($lockPath);
+        return $this->readPackages($projectRoot . '/composer.lock', ['packages', 'packages-dev']) ?? [];
+    }
+
+    /**
+     * Null means the file could not be read at all, which is what separates
+     * "nothing installed" from "no such file" — only the latter may fall
+     * through to the lock.
+     *
+     * @param  list<string> $buckets
+     * @return list<array<string, mixed>>|null
+     */
+    private function readPackages(string $path, array $buckets): ?array
+    {
+        if (!is_file($path)) {
+            return null;
+        }
+
+        $json = file_get_contents($path);
         if ($json === false) {
-            return [];
+            return null;
         }
 
         $data = json_decode($json, true);
         if (!is_array($data)) {
-            return [];
+            return null;
         }
 
         $entries = [];
-        foreach (['packages', 'packages-dev'] as $bucket) {
+        foreach ($buckets as $bucket) {
             $bucketEntries = $data[$bucket] ?? [];
             if (!is_array($bucketEntries)) {
                 continue;
