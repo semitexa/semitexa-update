@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace Semitexa\Update\Domain\Model\PackageDrift;
 
-use Semitexa\Update\Domain\Enum\PackageDriftStatus;
-
 /**
  * Aggregate result of PackageDriftInspector.
  *

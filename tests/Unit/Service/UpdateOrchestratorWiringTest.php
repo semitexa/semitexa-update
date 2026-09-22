@@ -13,7 +13,6 @@ use Semitexa\Update\Application\Service\LiveSchemaInspector;
 use Semitexa\Update\Application\Service\PackageDriftInspector;
 use Semitexa\Update\Application\Service\Scaffold\ScaffoldFileClassifier;
 use Semitexa\Update\Application\Service\Scaffold\ScaffoldHasher;
-use Semitexa\Update\Application\Service\Scaffold\ScaffoldManifestBuilder;
 use Semitexa\Update\Application\Service\Scaffold\ScaffoldManifestLoader;
 use Semitexa\Update\Application\Service\Scaffold\ScaffoldSyncEngine;
 use Semitexa\Update\Application\Service\SchemaCompatibilityChecker;

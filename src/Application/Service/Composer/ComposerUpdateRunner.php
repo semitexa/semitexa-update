@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Semitexa\Update\Application\Service\Composer;
 
 use Semitexa\Update\Application\Service\PackageDriftInspector;
-use Semitexa\Update\Application\Service\Packaging\Releases\Support\SemitexaReleaseVersion;
 use Semitexa\Update\Domain\Enum\ComposerUpdateOutcome;
 use Semitexa\Update\Domain\Model\Composer\ComposerUpdatePlan;
 use Semitexa\Update\Domain\Model\Composer\ComposerUpdatePlanEntry;
