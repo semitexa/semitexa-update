@@ -10,7 +10,6 @@ use Semitexa\Update\Application\Service\Scaffold\ScaffoldManifestBuilder;
 use Semitexa\Update\Application\Service\Scaffold\ScaffoldManifestLoader;
 use Semitexa\Update\Application\Service\Scaffold\ScaffoldManifestPolicy;
 use Semitexa\Update\Domain\Enum\ScaffoldFileCategory;
-use Semitexa\Update\Domain\Model\Scaffold\ScaffoldFileEntry;
 use Semitexa\Update\Domain\Model\Scaffold\ScaffoldManifest;
 
 final class ScaffoldManifestBuilderTest extends TestCase
