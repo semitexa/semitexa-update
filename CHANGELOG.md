@@ -5,7 +5,7 @@ All notable changes to `semitexa/update`. Sections are `## <version> — <date>`
 This file is machine-read by `update:changelog` and the OS "What's new"
 surface — keep entries short and operator-facing.
 
-## Unreleased
+## 2026.09.28.0838 — 2026-09-28
 
 ### Fixed
 - `update` no longer fails when a release does not re-tag `semitexa/update`. It used
