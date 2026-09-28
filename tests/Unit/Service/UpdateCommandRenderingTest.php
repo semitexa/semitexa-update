@@ -24,6 +24,9 @@ use Semitexa\Update\Discovery\DataPatchDiscovery;
 use Semitexa\Update\Domain\Contract\OrmMigrationGatewayInterface;
 use Semitexa\Update\Domain\Model\SchemaSyncResult;
 use Semitexa\Update\Domain\Model\SchemaSyncStatus;
+use Semitexa\Update\Application\Service\Composer\ComposerExecutorInterface;
+use Semitexa\Update\Application\Service\Composer\ComposerUpdateRunner;
+use Semitexa\Update\Application\Service\Composer\UpstreamVersionResolverInterface;
 use Symfony\Component\Console\Tester\CommandTester;
 
 /**
@@ -140,9 +143,34 @@ final class UpdateCommandRenderingTest extends TestCase
         self::assertNotSame(0, $tester->getStatusCode(), 'Integrity failure must surface as a non-zero exit code.');
     }
 
-    private function commandTester(): CommandTester
+    /**
+     * Review of #47: a dry run is a check that CI and scripts read by exit code.
+     * One whose composer stage would fail was rendered, then answered with 0.
+     */
+    public function testADryRunThatFindsAFailingStageExitsNonZero(): void
     {
-        $orchestrator = $this->buildOrchestrator();
+        $refusing = new ComposerUpdateRunner(
+            new class implements ComposerExecutorInterface {
+                public function isAvailable(): bool { return false; }
+                public function containerError(): string { return 'not in the container (test)'; }
+                public function run(array $args, string $projectRoot, array $env = []): array { return ['exitCode' => 0, 'output' => '']; }
+            },
+            new class implements UpstreamVersionResolverInterface {
+                public function stableVersions(string $package): ?array { return []; }
+                public function requiresOf(string $package, string $version): ?array { return null; }
+            },
+        );
+
+        $tester = $this->commandTester($refusing);
+        $tester->execute(['--dry-run' => true]);
+
+        self::assertSame(1, $tester->getStatusCode());
+        self::assertStringContainsString('Dry-run: stage "composer-update" would fail.', $tester->getDisplay());
+    }
+
+    private function commandTester(?ComposerUpdateRunner $composerRunner = null): CommandTester
+    {
+        $orchestrator = $this->buildOrchestrator($composerRunner);
 
         // UpdateCommand uses #[InjectAsReadonly] property injection. In a real
         // container the property is set after construction; in this test we
@@ -164,7 +192,7 @@ final class UpdateCommandRenderingTest extends TestCase
         return new CommandTester($cmd);
     }
 
-    private function buildOrchestrator(): UpdateOrchestrator
+    private function buildOrchestrator(?ComposerUpdateRunner $composerRunner = null): UpdateOrchestrator
     {
         $db = new SqliteAdapter('sqlite::memory:');
         $runner = new UpdateRunner(
@@ -199,6 +227,7 @@ final class UpdateCommandRenderingTest extends TestCase
             projectRoot: $this->projectRoot,
             scaffoldRoot: $this->scaffoldRoot,
             manifestPath: $this->manifestPath,
+            composerRunner: $composerRunner,
         );
     }
 

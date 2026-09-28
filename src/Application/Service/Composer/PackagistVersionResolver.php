@@ -32,9 +32,17 @@ final class PackagistVersionResolver implements UpstreamVersionResolverInterface
      */
     private array $rows = [];
 
+    /** @var \Closure(string): ?string */
+    private readonly \Closure $fetchBody;
+
+    /**
+     * @param (\Closure(string): ?string)|null $fetchBody Test seam: URL → body, '' for a 404, null when unreachable.
+     */
     public function __construct(
         private readonly int $timeoutSeconds = 8,
+        ?\Closure $fetchBody = null,
     ) {
+        $this->fetchBody = $fetchBody ?? $this->fetch(...);
     }
 
     public function stableVersions(string $package): ?array
@@ -94,21 +102,29 @@ final class PackagistVersionResolver implements UpstreamVersionResolverInterface
         if (isset($this->rows[$package])) {
             return $this->rows[$package];
         }
-        $body = $this->fetch(sprintf(self::ENDPOINT, $package));
+        $body = ($this->fetchBody)(sprintf(self::ENDPOINT, $package));
         if ($body === null) {
             // Unreachable, not absent. Deliberately NOT cached: caching it
             // would turn one blip into "this package has no releases" for the
             // rest of the process. A later call gets to ask again.
             return null;
         }
+        if ($body === '') {
+            // A 404: Packagist answered, and the package is not published there.
+            return $this->rows[$package] = [];
+        }
+        // Anything else that is not the package's metadata — a truncated body,
+        // a proxy's error page served with 200 — is not an answer either. Read
+        // as "absent", it let the planner leave an exact pin alone and carry
+        // on; it must block the way an unreachable registry does.
         try {
             $data = json_decode($body, true, flags: JSON_THROW_ON_ERROR);
         } catch (\JsonException) {
-            return $this->rows[$package] = [];
+            return null;
         }
         $raw = is_array($data) ? ($data['packages'][$package] ?? null) : null;
         if (!is_array($raw)) {
-            return $this->rows[$package] = [];
+            return null;
         }
 
         $typed = [];

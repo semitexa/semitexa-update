@@ -493,7 +493,8 @@ final class UpdateOrchestratorWiringTest extends TestCase
 
         $resolver = new class($anchor) implements \Semitexa\Update\Application\Service\Composer\UpstreamVersionResolverInterface {
             public function __construct(private readonly ?string $anchor) {}
-            public function stableVersions(string $package): ?array { return $this->anchor === null ? null : [$this->anchor]; }
+            // No release set here (ultimate unpublished): each pin targets its own latest.
+            public function stableVersions(string $package): ?array { return $package === 'semitexa/ultimate' ? [] : ($this->anchor === null ? null : [$this->anchor]); }
             public function requiresOf(string $package, string $version): ?array { return null; }
         };
 

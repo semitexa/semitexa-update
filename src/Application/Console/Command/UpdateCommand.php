@@ -121,6 +121,16 @@ final class UpdateCommand extends BaseCommand
             }
             $this->renderStages($io, $stages);
             $io->note('Dry-run: no patches and no DDL were executed.');
+
+            // A dry run is a check: CI and scripts read its exit code. A stage
+            // it found would fail — an unresolvable package set, a blocked
+            // upstream — used to be rendered and then answered with 0.
+            foreach ($stages as $stage) {
+                if (!$stage->isSuccess()) {
+                    $io->error(sprintf('Dry-run: stage "%s" would fail.', $stage->name));
+                    return Command::FAILURE;
+                }
+            }
             return Command::SUCCESS;
         }
 
@@ -369,7 +379,7 @@ final class UpdateCommand extends BaseCommand
         if ($result->bumpedPackages !== []) {
             $io->writeln(sprintf('  bumped %d pin(s):', count($result->bumpedPackages)));
             foreach ($result->bumpedPackages as $name => $change) {
-                $io->writeln(sprintf('    %s  %s → %s', $name, $change['from'] ?? '(none)', $change['to']));
+                $io->writeln(sprintf('    %s  %s → %s', $name, $change['from'] ?? '(none)', $change['to'] ?? '(removed)'));
             }
         }
 

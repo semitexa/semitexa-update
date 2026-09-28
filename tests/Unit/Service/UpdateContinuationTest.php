@@ -10,16 +10,23 @@ use Semitexa\Update\Application\Service\UpdateContinuation;
 final class UpdateContinuationTest extends TestCase
 {
     private string $dir;
+    private string|false $inheritedMarker;
 
     protected function setUp(): void
     {
+        // Start from a known environment, and give back the one we found.
+        $this->inheritedMarker = getenv(UpdateContinuation::MARKER);
+        putenv(UpdateContinuation::MARKER);
+
         $this->dir = sys_get_temp_dir() . '/semitexa-continuation-' . bin2hex(random_bytes(6));
         mkdir($this->dir);
     }
 
     protected function tearDown(): void
     {
-        putenv(UpdateContinuation::MARKER);
+        putenv($this->inheritedMarker === false
+            ? UpdateContinuation::MARKER
+            : UpdateContinuation::MARKER . '=' . $this->inheritedMarker);
         foreach (glob($this->dir . '/*') ?: [] as $file) {
             unlink($file);
         }

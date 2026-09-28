@@ -174,9 +174,6 @@ final class ComposerProjectState
             return null;
         }
         $packages = isset($data['packages']) && is_array($data['packages']) ? $data['packages'] : $data;
-        if (!is_array($packages)) {
-            return null;
-        }
         foreach ($packages as $entry) {
             if (!is_array($entry)) {
                 continue;

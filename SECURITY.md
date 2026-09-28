@@ -50,6 +50,12 @@ In scope: anything in `semitexa/update` that lets a request, a job or a message 
 something the application did not authorise, or read or change data it should
 not — including data belonging to another user or tenant.
 
+Also in scope: the updater itself. `bin/semitexa update` runs with an operator's
+rights and acts on what the registry tells it, so a flaw there counts even
+though no request is involved — for example, release or Composer metadata that
+makes it install something the project did not ask for, write outside the
+project, or leave the project in a state it reports as clean.
+
 Out of scope, and said explicitly so nobody spends an evening on it:
 
 - findings that require an attacker who already has code execution on the host,

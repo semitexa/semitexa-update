@@ -48,8 +48,12 @@ final class ComposerUpdateRunner
     /** Composer's exit code for "could not resolve": it fails before touching vendor/. */
     private const COMPOSER_RESOLUTION_FAILED = 2;
 
-    /** Scratch composer file the dry run rehearses against; the lock follows its name. */
-    private const REHEARSAL_FILE = 'composer.semitexa-update-plan.json';
+    /**
+     * Scratch composer file the dry run rehearses against; the lock follows its
+     * name. Each run gets its own: dry runs take no update lock, and a shared
+     * name let one run delete the other's files mid-rehearsal.
+     */
+    private const REHEARSAL_FILE = 'composer.semitexa-update-plan-%s.json';
 
     private readonly ComposerUpdatePlanner $planner;
 
@@ -146,7 +150,8 @@ final class ComposerUpdateRunner
             );
         }
 
-        $degradedTail = ($unresolved !== [] && $allowPartial)
+        // Past the early return above, unresolved entries mean --allow-partial.
+        $degradedTail = $unresolved !== []
             ? sprintf(
                 ' DEGRADED: %d package(s) had no upstream metadata and were left at their current pin: %s.',
                 count($unresolved),
@@ -282,11 +287,12 @@ final class ComposerUpdateRunner
             $bumpedSummary[$b->name] = ['from' => $b->declared, 'to' => (string) $b->targetVersion];
         }
 
-        $scratchJson = $projectRoot . '/' . self::REHEARSAL_FILE;
+        $scratchName = sprintf(self::REHEARSAL_FILE, bin2hex(random_bytes(6)));
+        $scratchJson = $projectRoot . '/' . $scratchName;
         $scratchLock = substr($scratchJson, 0, -strlen('.json')) . '.lock';
         try {
             if (!@copy($projectRoot . '/composer.json', $scratchJson)) {
-                throw new \RuntimeException('could not write ' . self::REHEARSAL_FILE);
+                throw new \RuntimeException('could not write ' . $scratchName);
             }
             if (is_file($projectRoot . '/composer.lock') && !@copy($projectRoot . '/composer.lock', $scratchLock)) {
                 throw new \RuntimeException('could not write the scratch lock');
@@ -297,7 +303,7 @@ final class ComposerUpdateRunner
             $exec = $this->executor->run(
                 ['update', self::PREFIX . '*', '-W', '--no-interaction', '--dry-run', '--no-scripts'],
                 $projectRoot,
-                ['COMPOSER' => self::REHEARSAL_FILE],
+                ['COMPOSER' => $scratchName],
             );
         } catch (\Throwable $e) {
             $exec = ['exitCode' => 1, 'output' => 'Could not rehearse the plan: ' . $e->getMessage()];
@@ -364,7 +370,14 @@ final class ComposerUpdateRunner
         $moved = $this->moves($versionsBefore, $this->state->semitexaVersions($projectRoot));
 
         $vendorNote = '';
-        if ($restored && ($exec['exitCode'] !== self::COMPOSER_RESOLUTION_FAILED || $moved !== [])) {
+        if (!$snapshot->hasLock()) {
+            // Nothing to reinstall FROM: `composer install` without a lock
+            // resolves a fresh set and writes one — a different project than
+            // the one this run started with.
+            if ($exec['exitCode'] !== self::COMPOSER_RESOLUTION_FAILED || $moved !== []) {
+                $vendorNote = ' There was no composer.lock before this run, so vendor/ cannot be put back; review it before rerunning.';
+            }
+        } elseif ($restored && ($exec['exitCode'] !== self::COMPOSER_RESOLUTION_FAILED || $moved !== [])) {
             $reinstall = $this->executor->run(['install', '--no-interaction'], $projectRoot);
             $moved = $this->moves($versionsBefore, $this->state->semitexaVersions($projectRoot));
             $vendorNote = $reinstall['exitCode'] === 0
@@ -493,9 +506,9 @@ final class ComposerUpdateRunner
      *   - declared but not present in lock                → "missing_from_lock"
      *   - locked but not present in vendor                → "missing_from_vendor"
      *
-     * Path-repo / dev / wildcard packages never contribute to drift here:
-     * if they did, ``--no-composer`` would be the only sensible operator
-     * response, and that's the operator's call to make.
+     * Path-repo packages never contribute. Dev and wildcard constraints
+     * contribute only through presence (missing from the lock or vendor):
+     * their versions cannot disagree with a lock.
      */
     private function lockOrVendorDriftReason(string $projectRoot): ?string
     {
@@ -512,14 +525,19 @@ final class ComposerUpdateRunner
             $d = $declared[$name] ?? null;
             $l = $locked[$name] ?? null;
             $i = $installed[$name] ?? null;
-            if ($this->state->isDevConstraint($d) || $this->state->isWildcardConstraint($d)) {
-                continue;
-            }
+            // Presence is checked for every constraint kind: a package just
+            // added as "*" is in neither the lock nor vendor, and skipping
+            // wildcards here reported that project clean without installing it.
             if ($d !== null && $l === null) {
                 return sprintf('%s declared but missing from composer.lock', $name);
             }
             if ($l !== null && $i === null) {
                 return sprintf('%s locked but missing from vendor', $name);
+            }
+            // Versions are compared only for exact pins: "*" or @dev cannot
+            // disagree with a lock.
+            if ($this->state->isDevConstraint($d) || $this->state->isWildcardConstraint($d)) {
+                continue;
             }
             if ($d !== null && $l !== null && $d !== $l) {
                 return sprintf('%s composer.json pin (%s) differs from composer.lock (%s)', $name, $d, $l);

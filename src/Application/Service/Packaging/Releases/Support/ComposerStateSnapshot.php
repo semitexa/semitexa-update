@@ -34,6 +34,12 @@ final class ComposerStateSnapshot
         return new self($projectRoot, $json, $lock === false ? null : $lock);
     }
 
+    /** Whether composer.lock existed when the snapshot was taken. */
+    public function hasLock(): bool
+    {
+        return $this->composerLock !== null;
+    }
+
     /**
      * Write the captured composer.json/lock back. When the snapshot had no
      * lock file, a lock created by the failed update is removed — otherwise

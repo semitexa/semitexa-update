@@ -13,6 +13,9 @@ use Semitexa\Update\Domain\Model\Composer\ComposerUpdatePlanEntry;
 
 final class ComposerUpdateRunnerTest extends TestCase
 {
+    /** The whole rehearsal command: dropping --no-scripts would run the project's scripts in a dry run. */
+    private const REHEARSAL_ARGS = ['update', 'semitexa/*', '-W', '--no-interaction', '--dry-run', '--no-scripts'];
+
     private string $projectRoot;
 
     protected function setUp(): void
@@ -171,7 +174,7 @@ final class ComposerUpdateRunnerTest extends TestCase
         self::assertSame(ComposerUpdateOutcome::WouldRun, $result->outcome);
         self::assertSame($beforeJson, file_get_contents($this->projectRoot . '/composer.json'));
         self::assertSame(1, $executor->callCount, 'Dry-run asks composer whether the plan resolves.');
-        self::assertContains('--dry-run', $executor->lastArgs, 'Dry-run may only invoke composer in --dry-run mode.');
+        self::assertSame(self::REHEARSAL_ARGS, $executor->lastArgs, 'Dry-run may only invoke composer in --dry-run mode.');
     }
 
     public function testNoComposerOptionSkipsPhase(): void
@@ -432,7 +435,7 @@ final class ComposerUpdateRunnerTest extends TestCase
         self::assertSame(ComposerUpdateOutcome::WouldRun, $result->outcome);
         self::assertStringContainsString('DEGRADED', $result->message);
         self::assertStringContainsString('semitexa/core', $result->message);
-        self::assertContains('--dry-run', $executor->lastArgs, 'Dry-run under --allow-partial still only rehearses.');
+        self::assertSame(self::REHEARSAL_ARGS, $executor->lastArgs, 'Dry-run under --allow-partial still only rehearses.');
     }
 
     public function testNoComposerStillSkipsCleanlyEvenWhenUpstreamWouldBlock(): void
@@ -948,7 +951,7 @@ final class ComposerUpdateRunnerTest extends TestCase
         $result = (new ComposerUpdateRunner($executor, $resolver))->execute($this->projectRoot, dryRun: true);
 
         self::assertSame(ComposerUpdateOutcome::WouldRun, $result->outcome);
-        self::assertContains('--dry-run', $executor->lastArgs);
+        self::assertSame(self::REHEARSAL_ARGS, $executor->lastArgs);
         self::assertArrayHasKey('COMPOSER', $executor->lastEnv);
         self::assertNotSame('composer.json', $executor->lastEnv['COMPOSER']);
         self::assertSame('2026.09.27.0404', $executor->scratch['require']['semitexa/core'], 'Composer must see the planned pins.');
@@ -974,6 +977,104 @@ final class ComposerUpdateRunnerTest extends TestCase
         self::assertStringContainsString('does not resolve', $result->message);
         self::assertStringContainsString('Problem 1', $result->message);
         self::assertSame(['composer.json', 'composer.lock', 'vendor'], $this->rootEntries());
+    }
+
+    /**
+     * Review of #47: with ultimate unreachable the plan fell back to each
+     * package's own latest — the stray tag the set exists to keep out — and
+     * "never lower" then held it there. Unreachable blocks, like any registry.
+     */
+    public function testAnUnreachableReleaseSetBlocksInsteadOfFallingBackToEachLatest(): void
+    {
+        $this->writeProject(
+            declared:  ['semitexa/core' => '2026.09.24.1147'],
+            locked:    ['semitexa/core' => '2026.09.24.1147'],
+            installed: ['semitexa/core' => '2026.09.24.1147'],
+        );
+        $resolver = new FakeResolver([
+            'semitexa/ultimate' => null,
+            'semitexa/core'     => ['2026.09.28.1200', '2026.09.27.0404'],
+        ]);
+        $executor = new FakeExecutor(true);
+
+        $result = (new ComposerUpdateRunner($executor, $resolver))->execute($this->projectRoot);
+
+        self::assertSame(ComposerUpdateOutcome::Failed, $result->outcome);
+        self::assertSame(0, $executor->callCount);
+        self::assertStringContainsString('semitexa/core', $result->message);
+        $after = json_decode((string) file_get_contents($this->projectRoot . '/composer.json'), true);
+        self::assertSame('2026.09.24.1147', $after['require']['semitexa/core']);
+    }
+
+    /**
+     * Review of #47: without a lock to restore, `composer install` resolves a
+     * fresh set — the rollback would itself change the project.
+     */
+    public function testAProjectWithoutALockIsNotReinstalledAfterAFailure(): void
+    {
+        $this->writeProject(
+            declared:  ['semitexa/core' => '2026.09.24.1147'],
+            locked:    [],
+            installed: ['semitexa/core' => '2026.09.24.1147'],
+        );
+        unlink($this->projectRoot . '/composer.lock');
+        $json = (string) file_get_contents($this->projectRoot . '/composer.json');
+        $resolver = FakeResolver::withReleaseSet('2026.09.28.0444', ['semitexa/core' => '2026.09.27.0404']);
+        $executor = new FakeExecutor(true, runReturns: ['exitCode' => 1, 'output' => 'download failed']);
+
+        $result = (new ComposerUpdateRunner($executor, $resolver))->execute($this->projectRoot);
+
+        self::assertSame(ComposerUpdateOutcome::Failed, $result->outcome);
+        self::assertSame(1, $executor->callCount, 'No composer install without a lock to install from.');
+        self::assertFileDoesNotExist($this->projectRoot . '/composer.lock');
+        self::assertSame($json, file_get_contents($this->projectRoot . '/composer.json'));
+        self::assertStringContainsString('There was no composer.lock before this run', $result->message);
+    }
+
+    /** Review of #47: a package just added as "*" is in neither lock nor vendor, and was reported clean. */
+    public function testANewlyDeclaredWildcardPackageRunsComposer(): void
+    {
+        $this->writeProject(
+            declared:  ['semitexa/core' => '2026.09.27.0404', 'semitexa/foo' => '*'],
+            locked:    ['semitexa/core' => '2026.09.27.0404'],
+            installed: ['semitexa/core' => '2026.09.27.0404'],
+        );
+        $resolver = FakeResolver::withReleaseSet('2026.09.28.0444', ['semitexa/core' => '2026.09.27.0404'], [
+            'semitexa/foo' => ['2026.09.27.0404'],
+        ]);
+        $executor = new FakeExecutor(true);
+
+        (new ComposerUpdateRunner($executor, $resolver))->execute($this->projectRoot);
+
+        self::assertSame(1, $executor->callCount);
+        self::assertSame(['update', 'semitexa/*', '-W', '--no-interaction'], $executor->lastArgs);
+    }
+
+    /**
+     * Review of #47: dry runs take no update lock, and one shared scratch name
+     * let concurrent runs delete each other's files — or a file of the
+     * project's own that happened to carry it.
+     */
+    public function testEachRehearsalOwnsItsScratchFiles(): void
+    {
+        $this->writeProject(
+            declared:  ['semitexa/core' => '2026.09.24.1147'],
+            locked:    ['semitexa/core' => '2026.09.24.1147'],
+            installed: ['semitexa/core' => '2026.09.24.1147'],
+        );
+        file_put_contents($this->projectRoot . '/composer.semitexa-update-plan.json', 'the project\'s own file');
+        $resolver = FakeResolver::withReleaseSet('2026.09.28.0444', ['semitexa/core' => '2026.09.27.0404']);
+        $executor = new FakeExecutor(true);
+        $runner = new ComposerUpdateRunner($executor, $resolver);
+
+        $runner->execute($this->projectRoot, dryRun: true);
+        $first = $executor->lastEnv['COMPOSER'] ?? '';
+        $runner->execute($this->projectRoot, dryRun: true);
+        $second = $executor->lastEnv['COMPOSER'] ?? '';
+
+        self::assertMatchesRegularExpression('/^composer\.semitexa-update-plan-[0-9a-f]{12}\.json$/', $first);
+        self::assertNotSame($first, $second);
+        self::assertSame('the project\'s own file', file_get_contents($this->projectRoot . '/composer.semitexa-update-plan.json'));
     }
 
     /**
@@ -1126,11 +1227,12 @@ class ApplyingFakeExecutor extends FakeExecutor
 /**
  * A package absent from `$versionsByPackage` is UNREACHABLE (null) — the state
  * that blocks. Map it to [] to say "the registry answered: nothing published".
+ * semitexa/ultimate is the exception: unconfigured, it is unpublished.
  */
 final class FakeResolver implements UpstreamVersionResolverInterface
 {
     /**
-     * @param array<string, list<string>> $versionsByPackage newest first
+     * @param array<string, list<string>|null> $versionsByPackage newest first; null = unreachable
      * @param array<string, array<string, array<string, string>>> $requires package → version → require map
      */
     public function __construct(
@@ -1141,7 +1243,14 @@ final class FakeResolver implements UpstreamVersionResolverInterface
 
     public function stableVersions(string $package): ?array
     {
-        return $this->versionsByPackage[$package] ?? null;
+        if (array_key_exists($package, $this->versionsByPackage)) {
+            return $this->versionsByPackage[$package];
+        }
+
+        // Ultimate unconfigured means "not published", so a test that is not
+        // about the release set falls back to each package's own latest.
+        // Map it to null to make the registry unreachable for it.
+        return $package === 'semitexa/ultimate' ? [] : null;
     }
 
     public function requiresOf(string $package, string $version): ?array

@@ -73,18 +73,28 @@ final class ComposerUpdatePlanner
     /**
      * The latest stable ultimate release and the semitexa/* versions it pins.
      *
-     * @return array{0: ?string, 1: array<string, string>|null} null set when it cannot be read
+     * The set is `false` when the registry could not be asked for ultimate.
+     * That must block like any unreachable registry: falling back to each
+     * package's own latest would pick exactly the tags the set exists to keep
+     * out, and "never lower" would then hold them there in every later run.
+     * Null — ultimate not published, or no stable release — is an answer, and
+     * each pin falls back to its own latest.
+     *
+     * @return array{0: ?string, 1: array<string, string>|false|null}
      */
     private function releaseSet(): array
     {
         $versions = $this->resolver->stableVersions(self::RELEASE_SET_PACKAGE);
-        $latest = $versions === null ? null : SemitexaReleaseVersion::latestStable($versions);
+        if ($versions === null) {
+            return [null, false];
+        }
+        $latest = SemitexaReleaseVersion::latestStable($versions);
         if ($latest === null) {
             return [null, null];
         }
         $require = $this->resolver->requiresOf(self::RELEASE_SET_PACKAGE, $latest);
         if ($require === null) {
-            return [null, null];
+            return [null, false];
         }
 
         $set = [];
@@ -102,10 +112,13 @@ final class ComposerUpdatePlanner
      * its own latest release. `false` when the registry could not be asked,
      * null when it answered that there is nothing.
      *
-     * @param array<string, string>|null $releaseSet
+     * @param array<string, string>|false|null $releaseSet
      */
-    private function upstreamVersion(string $name, ?array $releaseSet): string|false|null
+    private function upstreamVersion(string $name, array|false|null $releaseSet): string|false|null
     {
+        if ($releaseSet === false) {
+            return false;
+        }
         if (isset($releaseSet[$name])) {
             return $releaseSet[$name];
         }
@@ -118,7 +131,7 @@ final class ComposerUpdatePlanner
     }
 
     /**
-     * @param array<string, string>|null $releaseSet
+     * @param array<string, string>|false|null $releaseSet
      */
     private function planEntry(
         string $name,
@@ -126,7 +139,7 @@ final class ComposerUpdatePlanner
         ?string $locked,
         ?string $installed,
         bool $isPathRepo,
-        ?array $releaseSet,
+        array|false|null $releaseSet,
     ): ComposerUpdatePlanEntry {
         if ($isPathRepo) {
             return new ComposerUpdatePlanEntry(
@@ -178,7 +191,7 @@ final class ComposerUpdatePlanner
                 targetVersion: null,
                 pinKind: ComposerUpdatePlanEntry::PIN_TRANSITIVE,
                 skipReason: 'Not required by this project — composer resolves it for whoever does.',
-                upstreamVersion: $releaseSet[$name] ?? null,
+                upstreamVersion: is_array($releaseSet) ? ($releaseSet[$name] ?? null) : null,
             );
         }
 
