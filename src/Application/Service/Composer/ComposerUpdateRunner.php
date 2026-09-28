@@ -210,13 +210,18 @@ final class ComposerUpdateRunner
         // way, a real update is indistinguishable from nothing happening.
         $versionsBefore = $this->state->semitexaVersions($projectRoot);
 
+        // Read once, before composer runs: a failed update can leave
+        // installed.json missing or broken, and a rollback that re-read it
+        // would reinstall a --no-dev tree with dev packages.
+        $devMode = $this->devMode($projectRoot);
+
         $exec = $this->executor->run(
-            [...['update', self::PREFIX . '*', '-W', '--no-interaction'], ...$this->devMode($projectRoot)],
+            [...['update', self::PREFIX . '*', '-W', '--no-interaction'], ...$devMode],
             $projectRoot,
         );
 
         if ($exec['exitCode'] !== 0) {
-            return $this->rollBack($projectRoot, $snapshot, $exec, $versionsBefore, $installedBefore);
+            return $this->rollBack($projectRoot, $snapshot, $exec, $versionsBefore, $installedBefore, $devMode);
         }
 
         $bumpedSummary = $this->moves($versionsBefore, $this->state->semitexaVersions($projectRoot));
@@ -361,6 +366,7 @@ final class ComposerUpdateRunner
      *
      * @param array{exitCode: int, output: string} $exec
      * @param array<string, string> $versionsBefore
+     * @param list<string> $devMode the install mode as it was before composer ran
      */
     private function rollBack(
         string $projectRoot,
@@ -368,6 +374,7 @@ final class ComposerUpdateRunner
         array $exec,
         array $versionsBefore,
         ?string $installedBefore,
+        array $devMode,
     ): ComposerUpdateResult {
         $restored = $snapshot->restoreFiles();
         $moved = $this->moves($versionsBefore, $this->state->semitexaVersions($projectRoot));
@@ -381,7 +388,7 @@ final class ComposerUpdateRunner
                 $vendorNote = ' There was no composer.lock before this run, so vendor/ cannot be put back; review it before rerunning.';
             }
         } elseif ($restored && ($exec['exitCode'] !== self::COMPOSER_RESOLUTION_FAILED || $moved !== [])) {
-            $reinstall = $this->executor->run([...['install', '--no-interaction'], ...$this->devMode($projectRoot)], $projectRoot);
+            $reinstall = $this->executor->run([...['install', '--no-interaction'], ...$devMode], $projectRoot);
             $moved = $this->moves($versionsBefore, $this->state->semitexaVersions($projectRoot));
             $vendorNote = $reinstall['exitCode'] === 0
                 ? ' vendor/ was reinstalled from the restored lock.'

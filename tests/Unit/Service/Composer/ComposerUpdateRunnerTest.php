@@ -1128,6 +1128,41 @@ final class ComposerUpdateRunnerTest extends TestCase
     }
 
     /**
+     * Review of #47: a failed update can leave installed.json missing; reading
+     * the install mode again at rollback time reinstalled a --no-dev production
+     * tree with dev packages.
+     */
+    public function testARollbackKeepsTheInstallModeFromBeforeComposerRan(): void
+    {
+        $this->writeProject(
+            declared:  ['semitexa/core' => '2026.09.24.1147'],
+            locked:    ['semitexa/core' => '2026.09.24.1147'],
+            installed: ['semitexa/core' => '2026.09.24.1147'],
+        );
+        $installed = json_decode((string) file_get_contents($this->projectRoot . '/vendor/composer/installed.json'), true);
+        $installed['dev'] = false;
+        file_put_contents($this->projectRoot . '/vendor/composer/installed.json', json_encode($installed));
+        $resolver = FakeResolver::withReleaseSet('2026.09.28.0444', ['semitexa/core' => '2026.09.27.0404']);
+        $executor = new class(true) extends FakeExecutor {
+            /** @var list<list<string>> */
+            public array $calls = [];
+            public function run(array $args, string $projectRoot, array $env = []): array
+            {
+                $this->calls[] = $args;
+                if ($args[0] === 'update') {
+                    @unlink($projectRoot . '/vendor/composer/installed.json');
+                    return ['exitCode' => 1, 'output' => 'died mid-install'];
+                }
+                return ['exitCode' => 0, 'output' => ''];
+            }
+        };
+
+        (new ComposerUpdateRunner($executor, $resolver))->execute($this->projectRoot);
+
+        self::assertSame(['install', '--no-interaction', '--no-dev'], $executor->calls[1] ?? null);
+    }
+
+    /**
      * @return list<string>
      */
     private function rootEntries(): array
