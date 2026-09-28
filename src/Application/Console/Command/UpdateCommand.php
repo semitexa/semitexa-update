@@ -24,6 +24,7 @@ use Semitexa\Update\Exception\UpdateException;
 use Semitexa\Update\Domain\Model\OrchestratorPlanReport;
 use Semitexa\Update\Domain\Model\OrchestratorStage;
 use Semitexa\Update\Application\Service\Composer\SkeletonRequireDiff;
+use Semitexa\Update\Application\Service\UpdateContinuation;
 use Semitexa\Update\Application\Service\UpdateRunnerFactory;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -120,6 +121,16 @@ final class UpdateCommand extends BaseCommand
             }
             $this->renderStages($io, $stages);
             $io->note('Dry-run: no patches and no DDL were executed.');
+
+            // A dry run is a check: CI and scripts read its exit code. A stage
+            // it found would fail — an unresolvable package set, a blocked
+            // upstream — used to be rendered and then answered with 0.
+            foreach ($stages as $stage) {
+                if (!$stage->isSuccess()) {
+                    $io->error(sprintf('Dry-run: stage "%s" would fail.', $stage->name));
+                    return Command::FAILURE;
+                }
+            }
             return Command::SUCCESS;
         }
 
@@ -146,8 +157,38 @@ final class UpdateCommand extends BaseCommand
             }
         }
 
+        // The orchestrator stops right after composer when semitexa/update
+        // itself moved: the rest of the stages must not run on the old code.
+        // "Update completed." at this point was untrue — scaffold, schema and
+        // patches had not started.
+        if (!$composerOnly && $this->updaterChanged($stages)) {
+            $continuation = new UpdateContinuation();
+            if (!$continuation->isPossible()) {
+                $io->warning('semitexa/update was upgraded, and the remaining stages have not run yet. '
+                    . 'Rerun `bin/semitexa update` to finish.');
+                return Command::FAILURE;
+            }
+            $io->note('semitexa/update was upgraded. Continuing in a fresh process, on the new code.');
+
+            return $continuation->run();
+        }
+
         $io->success('Update completed.');
         return Command::SUCCESS;
+    }
+
+    /**
+     * @param list<OrchestratorStage> $stages
+     */
+    private function updaterChanged(array $stages): bool
+    {
+        foreach ($stages as $stage) {
+            if ($stage->composerResult?->outcome === ComposerUpdateOutcome::UpdaterChanged) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function renderPlan(SymfonyStyle $io, OrchestratorPlanReport $planReport): void
@@ -282,9 +323,11 @@ final class UpdateCommand extends BaseCommand
         }
 
         $io->writeln('  Command: ' . $plan->composerCommand);
-        if ($plan->targetReleaseSet !== null) {
-            $io->writeln('  Target release set anchor: ' . $plan->targetReleaseSet);
-        }
+        $io->writeln(match (true) {
+            $plan->releaseSetUnreachable => '  <error>Release set: semitexa/ultimate could not be reached — this blocks the update.</error>',
+            $plan->releaseSetVersion !== null => '  Release set: semitexa/ultimate ' . $plan->releaseSetVersion,
+            default => '  <comment>Release set: semitexa/ultimate has no stable release — each pin targets its own latest.</comment>',
+        });
 
         $bumps = $plan->entriesToBump();
         if ($bumps === []) {
@@ -317,7 +360,7 @@ final class UpdateCommand extends BaseCommand
             ));
             foreach ($unresolved as $entry) {
                 $io->writeln(sprintf(
-                    '    %s  (declared %s) — no release matched, or Packagist could not be reached',
+                    '    %s  (declared %s) — Packagist could not be reached',
                     $entry->name,
                     (string) $entry->declared,
                 ));
@@ -338,13 +381,13 @@ final class UpdateCommand extends BaseCommand
         if ($result->bumpedPackages !== []) {
             $io->writeln(sprintf('  bumped %d pin(s):', count($result->bumpedPackages)));
             foreach ($result->bumpedPackages as $name => $change) {
-                $io->writeln(sprintf('    %s  %s → %s', $name, $change['from'] ?? '(none)', $change['to']));
+                $io->writeln(sprintf('    %s  %s → %s', $name, $change['from'] ?? '(none)', $change['to'] ?? '(removed)'));
             }
         }
 
         if ($result->outcome === ComposerUpdateOutcome::UpdaterChanged) {
             $io->writeln(sprintf(
-                '  <comment>semitexa/update upgraded %s → %s. Rerun `bin/semitexa update` to continue with fresh code.</comment>',
+                '  <comment>semitexa/update upgraded %s → %s. The remaining stages run next, on the new code.</comment>',
                 (string) $result->installedBefore,
                 (string) $result->installedAfter,
             ));
@@ -424,9 +467,13 @@ final class UpdateCommand extends BaseCommand
     {
         $io->section('Composer package drift (read-only)');
 
+        // Several release dates is the normal shape of an up-to-date project:
+        // a release cut tags only the packages that changed. It is shown, not
+        // flagged — the composer plan below says whether anything is behind.
         if (!$drift->releaseSetCoherent) {
             $io->writeln(sprintf(
-                '  <comment>! semitexa/* set spans multiple release dates: %s</comment>',
+                '  semitexa/* set spans %d release dates: %s',
+                count($drift->mixedReleaseDates),
                 implode(', ', $drift->mixedReleaseDates),
             ));
         }

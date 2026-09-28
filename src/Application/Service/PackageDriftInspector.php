@@ -51,10 +51,11 @@ final class PackageDriftInspector
             );
         }
 
+        // Several release dates is reported, never flagged on a package: a
+        // release cut tags only the packages that changed, so an up-to-date
+        // project spans several dates by design. Every package used to carry
+        // "align to a single release" here — advice no release set can follow.
         [$coherent, $dates] = $this->releaseSetCoherence($entries);
-        if (!$coherent) {
-            $entries = $this->markMixedReleaseSet($entries, $dates);
-        }
 
         return new PackageDriftReport($entries, $coherent, $dates);
     }
@@ -181,33 +182,6 @@ final class PackageDriftInspector
         $distinct = array_keys($dates);
         sort($distinct);
         return [count($distinct) <= 1, $distinct];
-    }
-
-    /**
-     * @param list<PackageDriftEntry>  $entries
-     * @param list<string>             $mixedDates
-     * @return list<PackageDriftEntry>
-     */
-    private function markMixedReleaseSet(array $entries, array $mixedDates): array
-    {
-        $result = [];
-        foreach ($entries as $entry) {
-            if ($entry->status !== PackageDriftStatus::Clean) {
-                $result[] = $entry;
-                continue;
-            }
-            $result[] = new PackageDriftEntry(
-                name: $entry->name,
-                declared: $entry->declared,
-                locked: $entry->locked,
-                installed: $entry->installed,
-                upstream: $entry->upstream,
-                status: PackageDriftStatus::MixedReleaseSet,
-                actionHint: 'semitexa/* set spans multiple release dates (' . implode(', ', $mixedDates)
-                    . ') — align to a single release with composer update',
-            );
-        }
-        return $result;
     }
 
     private function extractReleaseDate(string $version): ?string

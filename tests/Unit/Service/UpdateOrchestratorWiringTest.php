@@ -270,7 +270,7 @@ final class UpdateOrchestratorWiringTest extends TestCase
     public function testMixedReleaseSetDoesNotAbortTheRun(): void
     {
         // semitexa/update at one date, an extra semitexa/* at a different date
-        // → the report flags mixed_release_set, but the run must complete.
+        // → the report records several dates, and the run must complete.
         $this->writeComposerFixture(
             installedVersion: '2026.05.11.1359',
             lockedVersion: '2026.05.11.1359',
@@ -290,7 +290,7 @@ final class UpdateOrchestratorWiringTest extends TestCase
         foreach ($stages as $stage) {
             self::assertTrue(
                 $stage->isSuccess(),
-                "Stage {$stage->name} unexpectedly failed under mixed_release_set; drift is informational only.",
+                "Stage {$stage->name} unexpectedly failed on a set spanning several release dates; that is informational only.",
             );
         }
     }
@@ -470,7 +470,7 @@ final class UpdateOrchestratorWiringTest extends TestCase
             ) {}
             public function isAvailable(): bool { return $this->available; }
             public function containerError(): string { return $this->available ? '' : 'fake: not in container'; }
-            public function run(array $args, string $projectRoot): array
+            public function run(array $args, string $projectRoot, array $env = []): array
             {
                 $data = json_decode((string) @file_get_contents($projectRoot . '/vendor/composer/installed.json'), true) ?? ['packages' => []];
                 foreach ($data['packages'] as &$p) {
@@ -493,8 +493,9 @@ final class UpdateOrchestratorWiringTest extends TestCase
 
         $resolver = new class($anchor) implements \Semitexa\Update\Application\Service\Composer\UpstreamVersionResolverInterface {
             public function __construct(private readonly ?string $anchor) {}
-            public function latestStable(string $package): ?string { return $this->anchor; }
-            public function hasVersion(string $package, string $version): bool { return $version === $this->anchor; }
+            // No release set here (ultimate unpublished): each pin targets its own latest.
+            public function stableVersions(string $package): ?array { return $package === 'semitexa/ultimate' ? [] : ($this->anchor === null ? null : [$this->anchor]); }
+            public function requiresOf(string $package, string $version): ?array { return null; }
         };
 
         $composerRunner = new \Semitexa\Update\Application\Service\Composer\ComposerUpdateRunner($executor, $resolver);

@@ -163,7 +163,12 @@ final class PackageDriftInspectorTest extends TestCase
         self::assertSame(PackageDriftStatus::VendorStale, $entry->status);
     }
 
-    public function testMixedReleaseSetFlagsEveryAlignedPackage(): void
+    /**
+     * A project that follows the release set spans several dates, because a cut
+     * tags only what changed. That is reported, and no package is told to
+     * "align to a single release" — no release set could.
+     */
+    public function testSeveralReleaseDatesAreReportedButFlagNoPackage(): void
     {
         $this->writeProject(
             declared: [
@@ -185,9 +190,9 @@ final class PackageDriftInspectorTest extends TestCase
         self::assertFalse($report->releaseSetCoherent);
         self::assertSame(['2026.05.08', '2026.05.11'], $report->mixedReleaseDates);
         foreach ($report->entries as $entry) {
-            self::assertSame(PackageDriftStatus::MixedReleaseSet, $entry->status, $entry->name);
-            self::assertStringContainsString('multiple release dates', $entry->actionHint);
+            self::assertSame(PackageDriftStatus::Clean, $entry->status, $entry->name);
         }
+        self::assertFalse($report->hasActionableDrift());
     }
 
     public function testNonSemitexaPackagesAreIgnored(): void

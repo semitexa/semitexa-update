@@ -12,14 +12,14 @@ use Semitexa\Update\Domain\Enum\RunOutcome;
  *
  *   $stages        — ordered stage summaries: list of
  *                    array{name: string, success: bool, ...stage-specific keys}.
- *   $packageDeltas — package => array{from: ?string, to: string} for every
+ *   $packageDeltas — package => array{from: ?string, to: ?string} for every
  *                    version pin that actually changed during the run.
  */
 final readonly class UpdateRunRecord
 {
     /**
      * @param list<array<string, mixed>>                       $stages
-     * @param array<string, array{from: ?string, to: string}>  $packageDeltas
+     * @param array<string, array{from: ?string, to: ?string}>  $packageDeltas
      */
     public function __construct(
         public string $id,

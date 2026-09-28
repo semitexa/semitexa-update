@@ -23,7 +23,7 @@ use Semitexa\Update\Domain\Enum\ComposerUpdateOutcome;
 final readonly class ComposerUpdateResult
 {
     /**
-     * @param array<string, array{from: ?string, to: string}> $bumpedPackages
+     * @param array<string, array{from: ?string, to: ?string}> $bumpedPackages
      */
     public function __construct(
         public ComposerUpdateOutcome $outcome,

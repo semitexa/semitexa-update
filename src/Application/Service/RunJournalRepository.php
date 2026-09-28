@@ -108,7 +108,7 @@ final class RunJournalRepository
 
     /**
      * @param list<array<string, mixed>>                      $stages
-     * @param array<string, array{from: ?string, to: string}> $packageDeltas
+     * @param array<string, array{from: ?string, to: ?string}> $packageDeltas
      */
     public function finish(
         string $id,

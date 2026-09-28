@@ -31,8 +31,12 @@ interface ComposerExecutorInterface
     /**
      * Execute `composer <args>` inside the current execution context.
      *
+     * `$env` is laid over the inherited environment — the dry run uses it to
+     * point composer at a scratch copy of composer.json (`COMPOSER=`).
+     *
      * @param list<string> $args
+     * @param array<string, string> $env
      * @return array{exitCode: int, output: string}
      */
-    public function run(array $args, string $projectRoot): array;
+    public function run(array $args, string $projectRoot, array $env = []): array;
 }

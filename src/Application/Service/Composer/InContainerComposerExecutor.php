@@ -47,9 +47,10 @@ final class InContainerComposerExecutor implements ComposerExecutorInterface
 
     /**
      * @param list<string> $args
+     * @param array<string, string> $env
      * @return array{exitCode: int, output: string}
      */
-    public function run(array $args, string $projectRoot): array
+    public function run(array $args, string $projectRoot, array $env = []): array
     {
         $composer = $this->locateComposer();
         if ($composer === null) {
@@ -61,8 +62,7 @@ final class InContainerComposerExecutor implements ComposerExecutorInterface
             1 => ['pipe', 'w'],
             2 => ['pipe', 'w'],
         ];
-        $env = $this->safeEnv();
-        $proc = @proc_open($cmd, $descriptors, $pipes, $projectRoot, $env);
+        $proc = @proc_open($cmd, $descriptors, $pipes, $projectRoot, $env + $this->safeEnv());
         if (!is_resource($proc)) {
             return ['exitCode' => 1, 'output' => 'Failed to spawn composer'];
         }
