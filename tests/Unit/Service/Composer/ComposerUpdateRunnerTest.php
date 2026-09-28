@@ -1078,6 +1078,56 @@ final class ComposerUpdateRunnerTest extends TestCase
     }
 
     /**
+     * Review of #47: a project whose pins are all "*" has no exact pin to mark
+     * unresolved, so an unreachable release set reported it Clean.
+     */
+    public function testAnUnreachableReleaseSetBlocksAWildcardOnlyProject(): void
+    {
+        $this->writeProject(
+            declared:  ['semitexa/core' => '*'],
+            locked:    ['semitexa/core' => '2026.09.24.1147'],
+            installed: ['semitexa/core' => '2026.09.24.1147'],
+        );
+        $executor = new FakeExecutor(true);
+
+        $result = (new ComposerUpdateRunner($executor, new FakeResolver(['semitexa/ultimate' => null])))
+            ->execute($this->projectRoot);
+
+        self::assertSame(ComposerUpdateOutcome::Failed, $result->outcome);
+        self::assertSame(0, $executor->callCount);
+        self::assertStringContainsString('semitexa/ultimate (the release set)', $result->message);
+    }
+
+    /**
+     * Review of #47: vendor installed with --no-dev lacks the lock's dev
+     * packages by design. That read as drift, so composer ran on every update —
+     * without --no-dev, installing dev packages into production.
+     */
+    public function testANoDevVendorIsNotDriftAndComposerKeepsNoDev(): void
+    {
+        $this->writeProject(
+            declared:  ['semitexa/core' => '2026.09.27.0404'],
+            locked:    ['semitexa/core' => '2026.09.27.0404'],
+            installed: ['semitexa/core' => '2026.09.27.0404'],
+        );
+        $lock = json_decode((string) file_get_contents($this->projectRoot . '/composer.lock'), true);
+        $lock['packages-dev'] = [['name' => 'semitexa/testing', 'version' => '2026.09.27.0404']];
+        file_put_contents($this->projectRoot . '/composer.lock', json_encode($lock));
+        $installed = json_decode((string) file_get_contents($this->projectRoot . '/vendor/composer/installed.json'), true);
+        $installed['dev'] = false;
+        file_put_contents($this->projectRoot . '/vendor/composer/installed.json', json_encode($installed));
+        $resolver = FakeResolver::withReleaseSet('2026.09.28.0444', ['semitexa/core' => '2026.09.27.0404']);
+        $executor = new FakeExecutor(true);
+
+        $clean = (new ComposerUpdateRunner($executor, $resolver))->execute($this->projectRoot);
+        self::assertSame(ComposerUpdateOutcome::Clean, $clean->outcome);
+        self::assertSame(0, $executor->callCount);
+
+        (new ComposerUpdateRunner($executor, $resolver))->execute($this->projectRoot, force: true);
+        self::assertSame(['update', 'semitexa/*', '-W', '--no-interaction', '--no-dev'], $executor->lastArgs);
+    }
+
+    /**
      * @return list<string>
      */
     private function rootEntries(): array

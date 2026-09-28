@@ -14,6 +14,11 @@ namespace Semitexa\Update\Domain\Model\Composer;
  * together; no other package is re-tagged every time, so none can stand in
  * for the set.
  *
+ * `releaseSetUnreachable` is true when the registry could not be asked for
+ * that release. It blocks the phase on its own: a project whose pins are all
+ * "*" has no exact pin to mark unresolved, and would otherwise be reported
+ * clean with nothing known about upstream.
+ *
  * `composerCommand` is the exact command line the runner intends to execute
  * inside the container after pin rewrites complete.
  */
@@ -28,6 +33,7 @@ final readonly class ComposerUpdatePlan
         public string $composerCommand,
         public bool $inContainer,
         public string $containerError,
+        public bool $releaseSetUnreachable = false,
     ) {
     }
 

@@ -67,6 +67,7 @@ final class ComposerUpdatePlanner
             composerCommand: self::COMPOSER_COMMAND,
             inContainer: $inContainer,
             containerError: $containerError,
+            releaseSetUnreachable: $releaseSet === false,
         );
     }
 

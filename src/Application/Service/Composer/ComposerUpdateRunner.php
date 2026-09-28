@@ -106,9 +106,12 @@ final class ComposerUpdateRunner
         // Unresolved upstream is a blocking failure by default. The operator
         // must explicitly opt in with --allow-partial-composer-update to
         // proceed with whatever bumps we could resolve.
-        $unresolved = $plan->unresolvedEntries();
+        $unresolved = array_map(static fn ($e) => $e->name, $plan->unresolvedEntries());
+        if ($plan->releaseSetUnreachable) {
+            array_unshift($unresolved, 'semitexa/ultimate (the release set)');
+        }
         if ($unresolved !== [] && !$allowPartial) {
-            $names = array_map(static fn ($e) => $e->name, $unresolved);
+            $names = $unresolved;
             $installedBefore = $this->state->installedVersion($projectRoot, self::UPDATER_PACKAGE);
             return new ComposerUpdateResult(
                 outcome: ComposerUpdateOutcome::Failed,
@@ -118,7 +121,7 @@ final class ComposerUpdateRunner
                 composerExitCode: 1,
                 composerOutput: '',
                 message: sprintf(
-                    'Composer-update phase blocked: upstream metadata could not be resolved for %d exact-pinned semitexa/* package(s): %s — the registry could not be reached. '
+                    'Composer-update phase blocked: upstream metadata could not be resolved for %d semitexa/* package(s): %s — the registry could not be reached. '
                     . 'Retry with network access, or rerun with --allow-partial-composer-update to proceed with only the packages that could be resolved.',
                     count($unresolved),
                     implode(', ', $names),
@@ -153,9 +156,9 @@ final class ComposerUpdateRunner
         // Past the early return above, unresolved entries mean --allow-partial.
         $degradedTail = $unresolved !== []
             ? sprintf(
-                ' DEGRADED: %d package(s) had no upstream metadata and were left at their current pin: %s.',
+                ' DEGRADED: upstream metadata could not be read for %d package(s); their pins were left alone: %s.',
                 count($unresolved),
-                implode(', ', array_map(static fn ($e) => $e->name, $unresolved)),
+                implode(', ', $unresolved),
             )
             : '';
 
@@ -208,7 +211,7 @@ final class ComposerUpdateRunner
         $versionsBefore = $this->state->semitexaVersions($projectRoot);
 
         $exec = $this->executor->run(
-            ['update', self::PREFIX . '*', '-W', '--no-interaction'],
+            [...['update', self::PREFIX . '*', '-W', '--no-interaction'], ...$this->devMode($projectRoot)],
             $projectRoot,
         );
 
@@ -301,7 +304,7 @@ final class ComposerUpdateRunner
                 $this->rewriteComposerJsonPins($scratchJson, $bumps);
             }
             $exec = $this->executor->run(
-                ['update', self::PREFIX . '*', '-W', '--no-interaction', '--dry-run', '--no-scripts'],
+                [...['update', self::PREFIX . '*', '-W', '--no-interaction', '--dry-run', '--no-scripts'], ...$this->devMode($projectRoot)],
                 $projectRoot,
                 ['COMPOSER' => $scratchName],
             );
@@ -378,7 +381,7 @@ final class ComposerUpdateRunner
                 $vendorNote = ' There was no composer.lock before this run, so vendor/ cannot be put back; review it before rerunning.';
             }
         } elseif ($restored && ($exec['exitCode'] !== self::COMPOSER_RESOLUTION_FAILED || $moved !== [])) {
-            $reinstall = $this->executor->run(['install', '--no-interaction'], $projectRoot);
+            $reinstall = $this->executor->run([...['install', '--no-interaction'], ...$this->devMode($projectRoot)], $projectRoot);
             $moved = $this->moves($versionsBefore, $this->state->semitexaVersions($projectRoot));
             $vendorNote = $reinstall['exitCode'] === 0
                 ? ' vendor/ was reinstalled from the restored lock.'
@@ -517,6 +520,9 @@ final class ComposerUpdateRunner
         [$installed, $installedPathRepos] = $this->state->readInstalled($projectRoot);
         $pathRepos = $lockPathRepos + $installedPathRepos;
 
+        $withoutDev = $this->state->installedWithoutDev($projectRoot);
+        $lockedDev = $withoutDev ? $this->state->readLockedDevNames($projectRoot) : [];
+
         $names = $this->state->collectSemitexaNames($declared, $locked, $installed);
         foreach ($names as $name) {
             if (isset($pathRepos[$name])) {
@@ -531,7 +537,10 @@ final class ComposerUpdateRunner
             if ($d !== null && $l === null) {
                 return sprintf('%s declared but missing from composer.lock', $name);
             }
-            if ($l !== null && $i === null) {
+            if ($l !== null && $i === null && !($withoutDev && isset($lockedDev[$name]))) {
+                // A dev package absent from a --no-dev vendor is the install
+                // mode working, not drift; counting it ran composer — without
+                // --no-dev — on every production update.
                 return sprintf('%s locked but missing from vendor', $name);
             }
             // Versions are compared only for exact pins: "*" or @dev cannot
@@ -547,6 +556,17 @@ final class ComposerUpdateRunner
             }
         }
         return null;
+    }
+
+    /**
+     * `--no-dev` when vendor/ was installed without dev packages: a composer
+     * call without it would install them into a production tree.
+     *
+     * @return list<string>
+     */
+    private function devMode(string $projectRoot): array
+    {
+        return $this->state->installedWithoutDev($projectRoot) ? ['--no-dev'] : [];
     }
 
     /**

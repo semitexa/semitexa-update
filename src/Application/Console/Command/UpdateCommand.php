@@ -323,9 +323,11 @@ final class UpdateCommand extends BaseCommand
         }
 
         $io->writeln('  Command: ' . $plan->composerCommand);
-        $io->writeln($plan->releaseSetVersion !== null
-            ? '  Release set: semitexa/ultimate ' . $plan->releaseSetVersion
-            : '  <comment>Release set: semitexa/ultimate could not be read — each pin targets its own latest release.</comment>');
+        $io->writeln(match (true) {
+            $plan->releaseSetUnreachable => '  <error>Release set: semitexa/ultimate could not be reached — this blocks the update.</error>',
+            $plan->releaseSetVersion !== null => '  Release set: semitexa/ultimate ' . $plan->releaseSetVersion,
+            default => '  <comment>Release set: semitexa/ultimate has no stable release — each pin targets its own latest.</comment>',
+        });
 
         $bumps = $plan->entriesToBump();
         if ($bumps === []) {

@@ -70,6 +70,37 @@ final class ComposerProjectState
     }
 
     /**
+     * Names in composer.lock's packages-dev.
+     *
+     * @return array<string, true>
+     */
+    public function readLockedDevNames(string $projectRoot): array
+    {
+        $data = $this->readJson($projectRoot . '/composer.lock');
+        $dev = is_array($data['packages-dev'] ?? null) ? $data['packages-dev'] : [];
+        $names = [];
+        foreach ($dev as $package) {
+            if (is_array($package) && is_string($package['name'] ?? null)) {
+                $names[$package['name']] = true;
+            }
+        }
+
+        return $names;
+    }
+
+    /**
+     * Was vendor/ installed with `--no-dev`? Composer records it as `"dev": false`
+     * in installed.json; production installs are, and every composer call the
+     * update makes must keep them that way.
+     */
+    public function installedWithoutDev(string $projectRoot): bool
+    {
+        $data = $this->readJson($projectRoot . '/vendor/composer/installed.json');
+
+        return is_array($data) && ($data['dev'] ?? null) === false;
+    }
+
+    /**
      * @return array{0: array<string, string>, 1: array<string, true>}
      */
     public function readInstalled(string $projectRoot): array
