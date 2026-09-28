@@ -14,6 +14,8 @@ use Semitexa\Core\Attribute\AsService;
 use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Attribute\SatisfiesServiceContract;
 use Semitexa\Orm\Application\Service\Connection\ConnectionRegistry;
+use Semitexa\Orm\Application\Service\Sync\SchemaSyncLock;
+use Semitexa\Orm\OrmManager;
 use Semitexa\Update\Exception\UpdateException;
 use Throwable;
 
@@ -75,50 +77,12 @@ final class DefaultOrmMigrationGateway implements OrmMigrationGatewayInterface
         try {
             $orm = $this->connections->manager($connection);
             $codeSchema = $orm->getSchemaCollector()->collect();
-            $diff = $orm->getSchemaComparator()->compare($codeSchema);
 
-            if ($diff->isEmpty()) {
-                return new SchemaSyncResult(
-                    executedOperations: 0,
-                    skippedDestructive: 0,
-                    dryRun: $dryRun,
-                    summary: 'Database is up to date. No changes needed.',
-                );
-            }
+            // Compare, plan and apply under the schema lock: nodes updating
+            // together must not run the same DDL twice. A dry run takes none.
+            $cycle = fn (): SchemaSyncResult => $this->compareAndApply($orm, $codeSchema, $allowDestructive, $dryRun);
 
-            $syncEngine = $orm->getSyncEngine();
-            $plan = $syncEngine->buildPlan($diff);
-            $destructive = count($plan->getDestructiveOperations());
-
-            if ($dryRun) {
-                $totalSafe = count($plan->getSafeOperations());
-                return new SchemaSyncResult(
-                    executedOperations: 0,
-                    skippedDestructive: $allowDestructive ? 0 : $destructive,
-                    dryRun: true,
-                    summary: sprintf(
-                        'Dry-run: would execute %d safe operation(s)%s. %s',
-                        $totalSafe,
-                        $allowDestructive ? sprintf(' + %d destructive', $destructive) : '',
-                        $plan->getSummary(),
-                    ),
-                );
-            }
-
-            $executed = $syncEngine->execute($plan, $allowDestructive);
-            $executedCount = count($executed);
-            $skipped = $allowDestructive ? 0 : $destructive;
-
-            return new SchemaSyncResult(
-                executedOperations: $executedCount,
-                skippedDestructive: $skipped,
-                dryRun: false,
-                summary: sprintf(
-                    'ORM applied %d operation(s)%s.',
-                    $executedCount,
-                    $skipped > 0 ? sprintf(' (%d destructive skipped — use --allow-destructive)', $skipped) : '',
-                ),
-            );
+            return $dryRun ? $cycle() : (new SchemaSyncLock($orm))->run($cycle);
         } catch (Throwable $e) {
             throw new UpdateException(
                 'OrmMigrationGateway::synchronize failed: ' . $e->getMessage(),
@@ -126,5 +90,60 @@ final class DefaultOrmMigrationGateway implements OrmMigrationGatewayInterface
                 $e,
             );
         }
+    }
+
+    /**
+     * @param array<string, \Semitexa\Orm\Domain\Model\TableDefinition> $codeSchema
+     */
+    private function compareAndApply(
+        OrmManager $orm,
+        array $codeSchema,
+        bool $allowDestructive,
+        bool $dryRun,
+    ): SchemaSyncResult {
+        $diff = $orm->getSchemaComparator()->compare($codeSchema);
+
+        if ($diff->isEmpty()) {
+            return new SchemaSyncResult(
+                executedOperations: 0,
+                skippedDestructive: 0,
+                dryRun: $dryRun,
+                summary: 'Database is up to date. No changes needed.',
+            );
+        }
+
+        $syncEngine = $orm->getSyncEngine();
+        $plan = $syncEngine->buildPlan($diff);
+        $destructive = count($plan->getDestructiveOperations());
+
+        if ($dryRun) {
+            $totalSafe = count($plan->getSafeOperations());
+            return new SchemaSyncResult(
+                executedOperations: 0,
+                skippedDestructive: $allowDestructive ? 0 : $destructive,
+                dryRun: true,
+                summary: sprintf(
+                    'Dry-run: would execute %d safe operation(s)%s. %s',
+                    $totalSafe,
+                    $allowDestructive ? sprintf(' + %d destructive', $destructive) : '',
+                    $plan->getSummary(),
+                ),
+            );
+        }
+
+        $executed = $syncEngine->execute($plan, $allowDestructive);
+        $executedCount = count($executed);
+        $skipped = $allowDestructive ? 0 : $destructive;
+
+        return new SchemaSyncResult(
+            executedOperations: $executedCount,
+            skippedDestructive: $skipped,
+            dryRun: false,
+            summary: sprintf(
+                'ORM applied %d operation(s)%s.',
+                $executedCount,
+                $skipped > 0 ? sprintf(' (%d destructive skipped — use --allow-destructive)', $skipped) : '',
+            ),
+        );
     }
 }
