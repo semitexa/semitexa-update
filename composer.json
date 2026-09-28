@@ -28,6 +28,11 @@
     "extra": {
         "semitexa-module": {
             "extends": null
+        },
+        "semitexa": {
+            "floors": {
+                "semitexa/orm": "next"
+            }
         }
     },
     "keywords": [
