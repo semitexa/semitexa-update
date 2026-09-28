@@ -5,29 +5,31 @@ declare(strict_types=1);
 namespace Semitexa\Update\Application\Service\Composer;
 
 /**
- * Resolves the latest released version for one or more composer packages.
+ * What the upstream registry publishes, read-only.
  *
- * Production implementation hits Packagist's `/p2/<pkg>.json` endpoint.
- * Tests inject a fake.
+ * Two answers that look alike must stay apart, because the update treats them
+ * oppositely:
  *
- * The runner uses this for two purposes:
- *  1. Pick the "anchor" version — the latest `semitexa/update` tag — to
- *     align all release-pinned semitexa/* packages to.
- *  2. Confirm a specific tag actually exists for a given package before
- *     bumping its pin to that tag.
+ *  - `null`  — the registry could not be asked (DNS, timeout, 5xx). Nothing is
+ *              known, and an update that acts on nothing known is a guess.
+ *  - `[]`    — the registry answered, and there is nothing: the package is not
+ *              published there (a private VCS package, a path package). That is
+ *              not a failure; composer resolves it from the project's own
+ *              repositories.
  */
 interface UpstreamVersionResolverInterface
 {
     /**
-     * Latest stable release version of `$package`, or null if the resolver
-     * can't determine one (network unavailable, package not found, only
-     * dev/branch versions exist, etc.). Production: ignores -beta / dev-*
-     * versions; only returns UTC YYYY.MM.DD.HHMM tags.
+     * Stable date-based release versions (`YYYY.MM.DD.HHMM`) of a package.
+     *
+     * @return list<string>|null null when the registry could not be asked
      */
-    public function latestStable(string $package): ?string;
+    public function stableVersions(string $package): ?array;
 
     /**
-     * True iff `$version` is a published stable tag for `$package`.
+     * The `require` map one published version declares.
+     *
+     * @return array<string, string>|null null when unknown or unreachable
      */
-    public function hasVersion(string $package, string $version): bool;
+    public function requiresOf(string $package, string $version): ?array;
 }

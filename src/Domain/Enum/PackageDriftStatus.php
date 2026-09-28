@@ -20,7 +20,6 @@ enum PackageDriftStatus: string
     case MissingFromVendor = 'missing_from_vendor';
     case MissingFromLock = 'missing_from_lock';
     case VersionMismatch = 'version_mismatch';
-    case MixedReleaseSet = 'mixed_release_set';
     case PathRepository = 'path_repository';
     case DevConstraint = 'dev_constraint';
 

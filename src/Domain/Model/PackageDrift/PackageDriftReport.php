@@ -8,9 +8,9 @@ namespace Semitexa\Update\Domain\Model\PackageDrift;
  * Aggregate result of PackageDriftInspector.
  *
  * `entries` is one record per inspected package. `releaseSetCoherent` is a
- * SET-level signal: when the installed `semitexa/*` packages span more than
- * one distinct YYYY.MM.DD release date the set is considered mixed and the
- * affected entries also carry the MixedReleaseSet status.
+ * SET-level fact: whether the installed `semitexa/*` packages share one
+ * YYYY.MM.DD release date. It is informational — a release cut tags only the
+ * packages that changed, so an up-to-date project normally spans several.
  *
  * `mixedReleaseDates` lists the distinct YYYY.MM.DD dates seen across the
  * installed semitexa/* set (empty when the set is coherent or empty).

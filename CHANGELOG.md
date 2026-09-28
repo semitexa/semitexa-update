@@ -7,6 +7,23 @@ surface — keep entries short and operator-facing.
 
 ## Unreleased
 
+### Fixed
+- `update` no longer fails when a release does not re-tag `semitexa/update`. It used
+  that package's latest tag as the "release set", aimed half the pins at a stale
+  version, and the set could not resolve. The set is now the pins of the latest
+  `semitexa/ultimate` release.
+- A pin is never lowered. An exact pin that is not on Packagist (a private
+  package) no longer blocks the update.
+- A failed `composer update` restores composer.json and composer.lock, and
+  vendor/ too if composer had already moved it. The project is left exactly as
+  it was.
+- `--dry-run` asks composer whether the plan resolves, instead of reporting
+  success for a set composer will refuse.
+- After upgrading itself, `update` continues in a fresh process instead of
+  stopping with "Update completed." while half the stages never ran.
+- A project spanning several release dates is no longer flagged, and no longer
+  runs composer on every update. That is the normal shape of an up-to-date set.
+
 ### Added
 - **Run journal** (`platform_update_run_journal`): every mutating `update` run and
   every auto-deploy attempt is recorded with stages, package version deltas,

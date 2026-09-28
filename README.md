@@ -105,6 +105,27 @@ in that case. Schema mutations belong to the ORM.
 
 Each accepts `--connection=<name>` and defaults to `default`.
 
+## How the composer phase picks versions
+
+The release set is the `require` map of the latest stable **`semitexa/ultimate`**.
+Every release cut republishes ultimate with the exact version of every package,
+tested together. A cut tags only the packages that changed, so no other package
+can stand in for the set. An up-to-date project normally spans several release
+dates, and that is not drift.
+
+- An exact pin moves to its version in the set. A package outside the set moves
+  to its own latest release. A pin is never moved lower than it is declared.
+- A package Packagist has never heard of (a private VCS or path package) keeps
+  its pin, and composer resolves it from the project's repositories. Only an
+  unreachable registry blocks the run (override: `--allow-partial-composer-update`).
+- `--dry-run` asks composer whether the plan resolves, against a scratch copy of
+  composer.json (`COMPOSER=composer.semitexa-update-plan.json`). The project's
+  files are never written.
+- If `composer update` fails, composer.json and composer.lock are restored byte
+  for byte. vendor/ is reinstalled from them if composer had already moved it.
+- When `semitexa/update` itself moves, the run continues in a fresh PHP process
+  on the new code. It does not ask you to rerun.
+
 ## Run journal & changelog
 
 Every mutating `update` run and every auto-deploy attempt writes one row to

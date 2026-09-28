@@ -4,7 +4,8 @@ declare(strict_types=1);
 
 namespace Semitexa\Update\Application\Service\Composer;
 
-use Semitexa\Update\Application\Service\PackageDriftInspector;
+use Semitexa\Update\Application\Service\Packaging\Releases\Support\ComposerStateSnapshot;
+use Semitexa\Update\Application\Service\Packaging\Releases\Support\SemitexaReleaseVersion;
 use Semitexa\Update\Domain\Enum\ComposerUpdateOutcome;
 use Semitexa\Update\Domain\Model\Composer\ComposerUpdatePlan;
 use Semitexa\Update\Domain\Model\Composer\ComposerUpdatePlanEntry;
@@ -15,85 +16,51 @@ use Semitexa\Update\Domain\Model\Composer\ComposerUpdateResult;
  *
  * Order of operations:
  *
- *   1. Read composer.json (declared), composer.lock (locked),
- *      vendor/composer/installed.json (installed) — same data sources as
- *      PackageDriftInspector, but now used to ACT instead of REPORT.
+ *   1. Plan (ComposerUpdatePlanner): classify every semitexa/* pin and
+ *      target each exact pin at the release set — the latest
+ *      `semitexa/ultimate` release's pins — never lower than declared.
  *
- *   2. For each `semitexa/*` package, classify the pin: exact / dev /
- *      path_repo / wildcard. The runner only rewrites exact pins.
+ *   2. Dry run: ask composer itself whether the plan resolves, against a
+ *      scratch copy of composer.json. Nothing of the project's is touched.
  *
- *   3. Use the upstream resolver to pick the latest stable
- *      `semitexa/update` tag — this is the anchor for the release set.
+ *   3. Real run: snapshot composer.json + composer.lock, rewrite the pins, run
+ *      `composer update "semitexa/*" -W`. If composer fails, both files are
+ *      put back byte for byte (and vendor/ reinstalled from them if composer
+ *      had already moved it) — a failed run leaves the project as it found it.
  *
- *   4. For every release-pinned semitexa/* package, target the anchor
- *      version when the upstream resolver confirms that version exists for
- *      that package; otherwise target its own latest stable.
- *
- *   5. Rewrite composer.json pin strings in-place (JSON re-pretty-printed;
- *      no other keys touched).
- *
- *   6. Shell out to `composer update "semitexa/*" -W` inside the container.
- *
- *   7. Snapshot the installed version of EVERY semitexa/* package on both
- *      sides of the call and report what moved. Not what step 5 rewrote:
- *      a project that declares its packages as "*" has nothing to rewrite,
- *      composer resolves the versions itself, and a summary built from our
- *      own pin edits would call that a no-op while seven packages moved.
- *      If semitexa/update itself moved, return UpdaterChanged so the
- *      orchestrator stops with a rerun message.
+ *   4. Report the installed semitexa/* versions that actually moved. If
+ *      semitexa/update itself moved, return UpdaterChanged so the next stages
+ *      run on fresh code.
  *
  * Path-repo, @dev, dev-* and "*" pins are reported in the plan but never
- * mutated. They are still WATCHED — see step 7 — because composer moves them
+ * mutated. They are still WATCHED — see step 4 — because composer moves them
  * even when we do not.
  *
  * The phase is skipped entirely when there is nothing to do: no pins to bump,
- * lock and vendor coherent, and the installed set sitting on one release date.
- * That last condition is what a wildcard project has instead of pin drift;
- * without it such a project is never updated by this command at all.
+ * lock and vendor coherent, and no wildcard package installed behind what the
+ * release set offers.
  */
 final class ComposerUpdateRunner
 {
     private const PREFIX = 'semitexa/';
-    private const ANCHOR_PACKAGE = 'semitexa/update';
+    private const UPDATER_PACKAGE = 'semitexa/update';
+
+    /** Scratch composer file the dry run rehearses against; the lock follows its name. */
+    private const REHEARSAL_FILE = 'composer.semitexa-update-plan.json';
+
+    private readonly ComposerUpdatePlanner $planner;
 
     public function __construct(
         private readonly ComposerExecutorInterface $executor,
-        private readonly UpstreamVersionResolverInterface $resolver,
-        private readonly ?PackageDriftInspector $drift = null,
+        UpstreamVersionResolverInterface $resolver,
+        private readonly ComposerProjectState $state = new ComposerProjectState(),
     ) {
+        $this->planner = new ComposerUpdatePlanner($resolver, $state);
     }
 
     public function plan(string $projectRoot): ComposerUpdatePlan
     {
-        $declared = $this->readDeclared($projectRoot);
-        [$locked, $lockPathRepos] = $this->readLocked($projectRoot);
-        [$installed, $installedPathRepos] = $this->readInstalled($projectRoot);
-
-        $names = $this->collectSemitexaNames($declared, $locked, $installed);
-        $pathRepos = $lockPathRepos + $installedPathRepos;
-
-        // Anchor: latest stable tag of semitexa/update.
-        $anchor = $this->resolver->latestStable(self::ANCHOR_PACKAGE);
-
-        $entries = [];
-        foreach ($names as $name) {
-            $entries[] = $this->planEntry(
-                $name,
-                $declared[$name] ?? null,
-                $locked[$name] ?? null,
-                $installed[$name] ?? null,
-                isset($pathRepos[$name]),
-                $anchor,
-            );
-        }
-
-        return new ComposerUpdatePlan(
-            entries: $entries,
-            targetReleaseSet: $anchor,
-            composerCommand: 'composer update "' . self::PREFIX . '*" -W --no-interaction',
-            inContainer: $this->executor->isAvailable(),
-            containerError: $this->executor->containerError(),
-        );
+        return $this->planner->plan($projectRoot, $this->executor->isAvailable(), $this->executor->containerError());
     }
 
     public function execute(
@@ -107,8 +74,8 @@ final class ComposerUpdateRunner
             return new ComposerUpdateResult(
                 outcome: ComposerUpdateOutcome::Skipped,
                 bumpedPackages: [],
-                installedBefore: $this->installedVersion($projectRoot, self::ANCHOR_PACKAGE),
-                installedAfter: $this->installedVersion($projectRoot, self::ANCHOR_PACKAGE),
+                installedBefore: $this->state->installedVersion($projectRoot, self::UPDATER_PACKAGE),
+                installedAfter: $this->state->installedVersion($projectRoot, self::UPDATER_PACKAGE),
                 composerExitCode: 0,
                 composerOutput: '',
                 message: 'Composer phase skipped via --no-composer.',
@@ -121,8 +88,8 @@ final class ComposerUpdateRunner
             return new ComposerUpdateResult(
                 outcome: ComposerUpdateOutcome::Failed,
                 bumpedPackages: [],
-                installedBefore: $this->installedVersion($projectRoot, self::ANCHOR_PACKAGE),
-                installedAfter: $this->installedVersion($projectRoot, self::ANCHOR_PACKAGE),
+                installedBefore: $this->state->installedVersion($projectRoot, self::UPDATER_PACKAGE),
+                installedAfter: $this->state->installedVersion($projectRoot, self::UPDATER_PACKAGE),
                 composerExitCode: 1,
                 composerOutput: $plan->containerError,
                 message: 'Composer phase refused to run: ' . $plan->containerError,
@@ -135,7 +102,7 @@ final class ComposerUpdateRunner
         $unresolved = $plan->unresolvedEntries();
         if ($unresolved !== [] && !$allowPartial) {
             $names = array_map(static fn ($e) => $e->name, $unresolved);
-            $installedBefore = $this->installedVersion($projectRoot, self::ANCHOR_PACKAGE);
+            $installedBefore = $this->state->installedVersion($projectRoot, self::UPDATER_PACKAGE);
             return new ComposerUpdateResult(
                 outcome: ComposerUpdateOutcome::Failed,
                 bumpedPackages: [],
@@ -144,7 +111,7 @@ final class ComposerUpdateRunner
                 composerExitCode: 1,
                 composerOutput: '',
                 message: sprintf(
-                    'Composer-update phase blocked: upstream metadata could not be resolved for %d exact-pinned semitexa/* package(s): %s. '
+                    'Composer-update phase blocked: upstream metadata could not be resolved for %d exact-pinned semitexa/* package(s): %s — the registry could not be reached. '
                     . 'Retry with network access, or rerun with --allow-partial-composer-update to proceed with only the packages that could be resolved.',
                     count($unresolved),
                     implode(', ', $names),
@@ -153,7 +120,7 @@ final class ComposerUpdateRunner
         }
 
         $bumps = $plan->entriesToBump();
-        $installedBefore = $this->installedVersion($projectRoot, self::ANCHOR_PACKAGE);
+        $installedBefore = $this->state->installedVersion($projectRoot, self::UPDATER_PACKAGE);
 
         // No bumps, no lock/vendor drift, no explicit force → skip the
         // composer call entirely. Invoking `composer update` in this state
@@ -162,7 +129,7 @@ final class ComposerUpdateRunner
         // `bin/semitexa update`. The `$force` flag (wired to --composer-only)
         // is the explicit operator override.
         $driftReason = $this->lockOrVendorDriftReason($projectRoot)
-            ?? $this->mixedReleaseSetReason($projectRoot);
+            ?? $this->wildcardBehindReason($plan);
         if ($bumps === [] && $driftReason === null && !$force) {
             return new ComposerUpdateResult(
                 outcome: ComposerUpdateOutcome::Clean,
@@ -176,40 +143,37 @@ final class ComposerUpdateRunner
             );
         }
 
+        $degradedTail = ($unresolved !== [] && $allowPartial)
+            ? sprintf(
+                ' DEGRADED: %d package(s) had no upstream metadata and were left at their current pin: %s.',
+                count($unresolved),
+                implode(', ', array_map(static fn ($e) => $e->name, $unresolved)),
+            )
+            : '';
+
         if ($dryRun) {
-            $bumpedSummary = [];
-            foreach ($bumps as $b) {
-                $bumpedSummary[$b->name] = ['from' => $b->declared, 'to' => (string) $b->targetVersion];
-            }
-            $degradedTail = ($unresolved !== [] && $allowPartial)
-                ? sprintf(' Composer phase will run DEGRADED — %d package(s) unresolved upstream: %s.',
-                    count($unresolved),
-                    implode(', ', array_map(static fn ($e) => $e->name, $unresolved)),
-                )
-                : '';
-            $reasonTail = $driftReason !== null
-                ? ' Reason: ' . $driftReason . '.'
-                : ($force ? ' Reason: --composer-only forces a composer run.' : '');
+            return $this->rehearse($projectRoot, $plan, $bumps, $installedBefore, $driftReason, $force, $degradedTail);
+        }
+
+        $snapshot = ComposerStateSnapshot::capture($projectRoot);
+        if ($snapshot === null) {
             return new ComposerUpdateResult(
-                outcome: ComposerUpdateOutcome::WouldRun,
-                bumpedPackages: $bumpedSummary,
+                outcome: ComposerUpdateOutcome::Failed,
+                bumpedPackages: [],
                 installedBefore: $installedBefore,
                 installedAfter: $installedBefore,
-                composerExitCode: 0,
+                composerExitCode: 1,
                 composerOutput: '',
-                message: ($bumps === []
-                    ? 'No release-pinned semitexa/* package needs a bump.'
-                    : sprintf('Would bump %d pin(s) and run: %s', count($bumps), $plan->composerCommand))
-                    . $reasonTail
-                    . $degradedTail,
+                message: 'Refusing to run composer — composer.json could not be read to take a restore point.',
             );
         }
 
         // 1. Rewrite pins
         if ($bumps !== []) {
             try {
-                $this->rewriteComposerJsonPins($projectRoot, $bumps);
+                $this->rewriteComposerJsonPins($projectRoot . '/composer.json', $bumps);
             } catch (\Throwable $e) {
+                $restored = $snapshot->restoreFiles();
                 return new ComposerUpdateResult(
                     outcome: ComposerUpdateOutcome::Failed,
                     bumpedPackages: [],
@@ -217,7 +181,8 @@ final class ComposerUpdateRunner
                     installedAfter: $installedBefore,
                     composerExitCode: 1,
                     composerOutput: $e->getMessage(),
-                    message: 'Refusing to run composer — pin rewrite failed: ' . $e->getMessage(),
+                    message: 'Refusing to run composer — pin rewrite failed: ' . $e->getMessage()
+                        . ($restored ? '' : ' composer.json could NOT be restored — check it before rerunning.'),
                 );
             }
         }
@@ -232,44 +197,20 @@ final class ComposerUpdateRunner
         // release-pinned semitexa/* package needed a bump" over an update that
         // had just moved seven packages — and journal it as a noop. Reported that
         // way, a real update is indistinguishable from nothing happening.
-        $versionsBefore = $this->semitexaVersions($projectRoot);
+        $versionsBefore = $this->state->semitexaVersions($projectRoot);
 
         $exec = $this->executor->run(
             ['update', self::PREFIX . '*', '-W', '--no-interaction'],
             $projectRoot,
         );
 
-        $versionsAfter = $this->semitexaVersions($projectRoot);
-
-        // What actually moved, whether we asked for it by name or composer
-        // resolved it within a wildcard.
-        $bumpedSummary = [];
-        foreach ($versionsAfter as $name => $after) {
-            $before = $versionsBefore[$name] ?? null;
-            if ($before !== $after) {
-                $bumpedSummary[$name] = ['from' => $before, 'to' => $after];
-            }
-        }
-        foreach ($versionsBefore as $name => $before) {
-            if (!isset($versionsAfter[$name])) {
-                $bumpedSummary[$name] = ['from' => $before, 'to' => null];
-            }
-        }
-        ksort($bumpedSummary);
-
         if ($exec['exitCode'] !== 0) {
-            return new ComposerUpdateResult(
-                outcome: ComposerUpdateOutcome::Failed,
-                bumpedPackages: $bumpedSummary,
-                installedBefore: $installedBefore,
-                installedAfter: $this->installedVersion($projectRoot, self::ANCHOR_PACKAGE),
-                composerExitCode: $exec['exitCode'],
-                composerOutput: $this->tail($exec['output'], 4096),
-                message: 'composer update exited with code ' . $exec['exitCode'] . '.',
-            );
+            return $this->rollBack($projectRoot, $snapshot, $exec, $versionsBefore, $installedBefore);
         }
 
-        $installedAfter = $this->installedVersion($projectRoot, self::ANCHOR_PACKAGE);
+        $bumpedSummary = $this->moves($versionsBefore, $this->state->semitexaVersions($projectRoot));
+
+        $installedAfter = $this->state->installedVersion($projectRoot, self::UPDATER_PACKAGE);
         $updaterChanged = $installedBefore !== $installedAfter
             && $installedBefore !== null
             && $installedAfter !== null;
@@ -277,14 +218,6 @@ final class ComposerUpdateRunner
         $outcome = $updaterChanged
             ? ComposerUpdateOutcome::UpdaterChanged
             : ($bumpedSummary !== [] ? ComposerUpdateOutcome::Updated : ComposerUpdateOutcome::Clean);
-
-        $degradedTail = ($unresolved !== [] && $allowPartial)
-            ? sprintf(
-                ' DEGRADED: %d package(s) had no upstream metadata and were left at their current pin: %s.',
-                count($unresolved),
-                implode(', ', array_map(static fn ($e) => $e->name, $unresolved)),
-            )
-            : '';
 
         $message = match ($outcome) {
             // The degraded tail rides along here too: a run that could not resolve
@@ -318,98 +251,142 @@ final class ComposerUpdateRunner
         );
     }
 
-    private function planEntry(
-        string $name,
-        ?string $declared,
-        ?string $locked,
-        ?string $installed,
-        bool $isPathRepo,
-        ?string $anchor,
-    ): ComposerUpdatePlanEntry {
-        if ($isPathRepo) {
-            return new ComposerUpdatePlanEntry(
-                name: $name,
-                declared: $declared,
-                locked: $locked,
-                installed: $installed,
-                targetVersion: null,
-                pinKind: ComposerUpdatePlanEntry::PIN_PATH_REPO,
-                skipReason: 'Path repository — composer update will not relocate to Packagist.',
-            );
-        }
-        if ($this->isDevConstraint($declared)) {
-            return new ComposerUpdatePlanEntry(
-                name: $name,
-                declared: $declared,
-                locked: $locked,
-                installed: $installed,
-                targetVersion: null,
-                pinKind: ComposerUpdatePlanEntry::PIN_DEV,
-                skipReason: 'Dev constraint — operator opted out of release pinning.',
-            );
-        }
-        if ($this->isWildcardConstraint($declared)) {
-            return new ComposerUpdatePlanEntry(
-                name: $name,
-                declared: $declared,
-                locked: $locked,
-                installed: $installed,
-                targetVersion: null,
-                pinKind: ComposerUpdatePlanEntry::PIN_WILDCARD,
-                skipReason: 'Wildcard constraint — composer update will resolve within it.',
-            );
-        }
-        if ($declared === null) {
-            // In the lock or vendor but not in composer.json: something else
-            // requires it. There is no pin here to rewrite and nothing for the
-            // operator to decide, so it cannot be "unresolvable" — it simply is
-            // not ours. Without this it fell through to the exact-pin branch
-            // below (both constraint helpers answer false for null) and a
-            // transitive dependency could block the whole update.
-            return new ComposerUpdatePlanEntry(
-                name: $name,
-                declared: $declared,
-                locked: $locked,
-                installed: $installed,
-                targetVersion: null,
-                pinKind: ComposerUpdatePlanEntry::PIN_TRANSITIVE,
-                skipReason: 'Not required by this project — composer resolves it for whoever does.',
-            );
+    /**
+     * Ask composer whether the plan resolves, without touching the project.
+     *
+     * The dry run used to print the plan and call it WouldRun without ever
+     * asking — so it announced success for runs that could not resolve, and
+     * the operator learned otherwise from a real run that had already
+     * rewritten composer.json. Composer is the only authority on what
+     * resolves (it alone knows the project's repositories, path packages and
+     * platform), so it is asked, against a scratch copy of composer.json and
+     * composer.lock named through `COMPOSER=`: the project's own files are
+     * never written, and relative paths still resolve from the project root.
+     *
+     * @param list<ComposerUpdatePlanEntry> $bumps
+     */
+    private function rehearse(
+        string $projectRoot,
+        ComposerUpdatePlan $plan,
+        array $bumps,
+        ?string $installedBefore,
+        ?string $driftReason,
+        bool $force,
+        string $degradedTail,
+    ): ComposerUpdateResult {
+        $bumpedSummary = [];
+        foreach ($bumps as $b) {
+            $bumpedSummary[$b->name] = ['from' => $b->declared, 'to' => (string) $b->targetVersion];
         }
 
-        // Release-pinned. Pick the target.
-        $target = null;
-        if ($anchor !== null && $this->resolver->hasVersion($name, $anchor)) {
-            $target = $anchor;
-        } else {
-            $latestForPackage = $this->resolver->latestStable($name);
-            if ($latestForPackage !== null) {
-                $target = $latestForPackage;
+        $scratchJson = $projectRoot . '/' . self::REHEARSAL_FILE;
+        $scratchLock = substr($scratchJson, 0, -strlen('.json')) . '.lock';
+        try {
+            if (!@copy($projectRoot . '/composer.json', $scratchJson)) {
+                throw new \RuntimeException('could not write ' . self::REHEARSAL_FILE);
             }
+            if (is_file($projectRoot . '/composer.lock') && !@copy($projectRoot . '/composer.lock', $scratchLock)) {
+                throw new \RuntimeException('could not write the scratch lock');
+            }
+            if ($bumps !== []) {
+                $this->rewriteComposerJsonPins($scratchJson, $bumps);
+            }
+            $exec = $this->executor->run(
+                ['update', self::PREFIX . '*', '-W', '--no-interaction', '--dry-run', '--no-scripts'],
+                $projectRoot,
+                ['COMPOSER' => self::REHEARSAL_FILE],
+            );
+        } catch (\Throwable $e) {
+            $exec = ['exitCode' => 1, 'output' => 'Could not rehearse the plan: ' . $e->getMessage()];
+        } finally {
+            @unlink($scratchJson);
+            @unlink($scratchLock);
         }
 
-        // Unresolved: pinKind=Exact, target=null, skipReason="". This
-        // signature is the blocking signal `unresolvedEntries()` looks for.
-        // We deliberately don't fill skipReason here — that's for entries
-        // we intentionally leave alone (path-repo / dev / wildcard).
+        if ($exec['exitCode'] !== 0) {
+            return new ComposerUpdateResult(
+                outcome: ComposerUpdateOutcome::Failed,
+                bumpedPackages: $bumpedSummary,
+                installedBefore: $installedBefore,
+                installedAfter: $installedBefore,
+                composerExitCode: $exec['exitCode'],
+                composerOutput: $this->tail($exec['output'], 4096),
+                message: 'The planned package set does not resolve — a real run would stop at composer. '
+                    . 'Nothing was changed. Composer says: ' . $this->reasonFrom($exec['output']),
+            );
+        }
 
-        return new ComposerUpdatePlanEntry(
-            name: $name,
-            declared: $declared,
-            locked: $locked,
-            installed: $installed,
-            targetVersion: $target,
-            pinKind: ComposerUpdatePlanEntry::PIN_EXACT,
-            skipReason: '',
+        $reasonTail = $driftReason !== null
+            ? ' Reason: ' . $driftReason . '.'
+            : ($force ? ' Reason: --composer-only forces a composer run.' : '');
+
+        return new ComposerUpdateResult(
+            outcome: ComposerUpdateOutcome::WouldRun,
+            bumpedPackages: $bumpedSummary,
+            installedBefore: $installedBefore,
+            installedAfter: $installedBefore,
+            composerExitCode: 0,
+            composerOutput: $this->tail($exec['output'], 4096),
+            message: ($bumps === []
+                ? 'No release-pinned semitexa/* package needs a bump.'
+                : sprintf('Would bump %d pin(s) and run: %s.', count($bumps), $plan->composerCommand))
+                . ' Composer confirmed the set resolves.'
+                . $reasonTail
+                . $degradedTail,
+        );
+    }
+
+    /**
+     * Composer failed: put composer.json and composer.lock back as they were.
+     *
+     * A resolver failure never reaches vendor/. A failure during install can
+     * (a download that dies halfway), and then vendor/ no longer matches the
+     * restored lock — so it is reinstalled from it. The result names what
+     * could not be put back rather than claiming a clean state it does not have.
+     *
+     * @param array{exitCode: int, output: string} $exec
+     * @param array<string, string> $versionsBefore
+     */
+    private function rollBack(
+        string $projectRoot,
+        ComposerStateSnapshot $snapshot,
+        array $exec,
+        array $versionsBefore,
+        ?string $installedBefore,
+    ): ComposerUpdateResult {
+        $restored = $snapshot->restoreFiles();
+        $moved = $this->moves($versionsBefore, $this->state->semitexaVersions($projectRoot));
+
+        $vendorNote = '';
+        if ($restored && $moved !== []) {
+            $reinstall = $this->executor->run(['install', '--no-interaction'], $projectRoot);
+            $moved = $this->moves($versionsBefore, $this->state->semitexaVersions($projectRoot));
+            $vendorNote = $reinstall['exitCode'] === 0
+                ? ' vendor/ had already moved and was reinstalled from the restored lock.'
+                : sprintf(' vendor/ had already moved and `composer install` failed (exit %d) — run it before anything else.', $reinstall['exitCode']);
+        }
+
+        $state = $restored
+            ? ' composer.json and composer.lock were restored.' . $vendorNote
+            : ' composer.json and composer.lock could NOT be restored — check both before rerunning.';
+
+        return new ComposerUpdateResult(
+            outcome: ComposerUpdateOutcome::Failed,
+            bumpedPackages: $moved,
+            installedBefore: $installedBefore,
+            installedAfter: $this->state->installedVersion($projectRoot, self::UPDATER_PACKAGE),
+            composerExitCode: $exec['exitCode'],
+            composerOutput: $this->tail($exec['output'], 4096),
+            message: 'composer update exited with code ' . $exec['exitCode'] . '.' . $state
+                . ' Composer says: ' . $this->reasonFrom($exec['output']),
         );
     }
 
     /**
      * @param list<ComposerUpdatePlanEntry> $bumps
      */
-    private function rewriteComposerJsonPins(string $projectRoot, array $bumps): void
+    private function rewriteComposerJsonPins(string $path, array $bumps): void
     {
-        $path = $projectRoot . '/composer.json';
         if (!is_file($path)) {
             throw new \RuntimeException("composer.json not found at {$path}");
         }
@@ -443,178 +420,56 @@ final class ComposerUpdateRunner
         }
     }
 
-    private function isDevConstraint(?string $declared): bool
+    /**
+     * A short, readable account of what moved — three packages named, the rest counted.
+     *
+     * @param array<string, array{from: ?string, to: ?string}> $moves
+     */
+    private function describeMoves(array $moves): string
     {
-        if ($declared === null) {
-            return false;
+        $parts = [];
+        foreach (array_slice($moves, 0, 3, true) as $name => $move) {
+            $parts[] = sprintf('%s %s → %s', $name, $move['from'] ?? 'absent', $move['to'] ?? 'removed');
         }
-        $d = strtolower(trim($declared));
-        return $d === '@dev' || str_starts_with($d, 'dev-');
-    }
+        $rest = count($moves) - count($parts);
 
-    private function isWildcardConstraint(?string $declared): bool
-    {
-        if ($declared === null) {
-            return false;
-        }
-        $d = trim($declared);
-        return $d === '' || $d === '*' || str_starts_with($d, '^') || str_starts_with($d, '~')
-            || str_contains($d, '||') || str_contains($d, ',') || str_contains($d, ' ')
-            || str_contains($d, '>') || str_contains($d, '<');
+        return implode(', ', $parts) . ($rest > 0 ? sprintf(' and %d more', $rest) : '');
     }
 
     /**
-     * @return array<string, string>
+     * Is a wildcard-declared package installed behind what upstream offers?
+     *
+     * The lock/vendor drift check deliberately walks past wildcard constraints:
+     * a "*" cannot disagree with a lock, so by that measure a wildcard project
+     * is always coherent and the composer phase is always skipped — the
+     * packages sit wherever they were until someone runs composer by hand.
+     *
+     * This used to be answered by "does the installed set span several release
+     * dates?". A release set does, by design — a cut tags only the packages that
+     * changed — so every correctly updated project looked stale and composer
+     * ran on every update. The question that matters is whether there is
+     * anything newer, and the plan already knows.
      */
-    private function readDeclared(string $projectRoot): array
+    private function wildcardBehindReason(ComposerUpdatePlan $plan): ?string
     {
-        $data = $this->readJson($projectRoot . '/composer.json');
-        if ($data === null) {
-            return [];
-        }
-        $declared = [];
-        foreach (['require', 'require-dev'] as $bucket) {
-            $entries = $data[$bucket] ?? [];
-            if (!is_array($entries)) {
+        foreach ($plan->entries as $entry) {
+            if ($entry->pinKind !== ComposerUpdatePlanEntry::PIN_WILDCARD
+                || $entry->installed === null
+                || $entry->upstreamVersion === null
+                || !SemitexaReleaseVersion::isValid($entry->installed)
+            ) {
                 continue;
             }
-            foreach ($entries as $name => $constraint) {
-                if (is_string($name) && is_string($constraint)) {
-                    $declared[$name] = $constraint;
-                }
+            if (SemitexaReleaseVersion::compare($entry->upstreamVersion, $entry->installed) > 0) {
+                return sprintf(
+                    '%s is installed at %s and upstream offers %s',
+                    $entry->name,
+                    $entry->installed,
+                    $entry->upstreamVersion,
+                );
             }
         }
-        return $declared;
-    }
 
-    /**
-     * @return array{0: array<string, string>, 1: array<string, true>}
-     */
-    private function readLocked(string $projectRoot): array
-    {
-        $data = $this->readJson($projectRoot . '/composer.lock');
-        if ($data === null) {
-            return [[], []];
-        }
-        return $this->scanInstalledShape($data, ['packages', 'packages-dev']);
-    }
-
-    /**
-     * @return array{0: array<string, string>, 1: array<string, true>}
-     */
-    private function readInstalled(string $projectRoot): array
-    {
-        $data = $this->readJson($projectRoot . '/vendor/composer/installed.json');
-        if ($data === null) {
-            return [[], []];
-        }
-        if (isset($data['packages']) && is_array($data['packages'])) {
-            return $this->scanInstalledShape($data, ['packages']);
-        }
-        return $this->scanInstalledShape(['packages' => $data], ['packages']);
-    }
-
-    /**
-     * @param array<mixed> $data
-     * @param list<string> $buckets
-     * @return array{0: array<string, string>, 1: array<string, true>}
-     */
-    private function scanInstalledShape(array $data, array $buckets): array
-    {
-        $versions = [];
-        $pathRepos = [];
-        foreach ($buckets as $bucket) {
-            $entries = $data[$bucket] ?? [];
-            if (!is_array($entries)) {
-                continue;
-            }
-            foreach ($entries as $package) {
-                if (!is_array($package)) {
-                    continue;
-                }
-                $name = (string) ($package['name'] ?? '');
-                if ($name === '') {
-                    continue;
-                }
-                if ($this->isPathRepoEntry($package)) {
-                    $pathRepos[$name] = true;
-                }
-                $version = ltrim((string) ($package['version'] ?? ''), 'v');
-                if ($version !== '') {
-                    $versions[$name] = $version;
-                }
-            }
-        }
-        return [$versions, $pathRepos];
-    }
-
-    /**
-     * @param array<string, mixed> $package
-     */
-    private function isPathRepoEntry(array $package): bool
-    {
-        foreach (['dist', 'source'] as $key) {
-            $section = $package[$key] ?? null;
-            if (is_array($section) && ($section['type'] ?? null) === 'path') {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
-     * @param array<string, string> $declared
-     * @param array<string, string> $locked
-     * @param array<string, string> $installed
-     * @return list<string>
-     */
-    private function collectSemitexaNames(array $declared, array $locked, array $installed): array
-    {
-        $names = [];
-        foreach (array_merge(array_keys($declared), array_keys($locked), array_keys($installed)) as $name) {
-            if (str_starts_with($name, self::PREFIX)) {
-                $names[$name] = true;
-            }
-        }
-        $list = array_keys($names);
-        sort($list);
-        return $list;
-    }
-
-    /**
-     * @return array<mixed>|null
-     */
-    private function readJson(string $path): ?array
-    {
-        if (!is_file($path)) {
-            return null;
-        }
-        $raw = @file_get_contents($path);
-        if ($raw === false) {
-            return null;
-        }
-        $data = json_decode($raw, true);
-        return is_array($data) ? $data : null;
-    }
-
-    private function installedVersion(string $projectRoot, string $package): ?string
-    {
-        $data = $this->readJson($projectRoot . '/vendor/composer/installed.json');
-        if ($data === null) {
-            return null;
-        }
-        $packages = isset($data['packages']) && is_array($data['packages']) ? $data['packages'] : $data;
-        if (!is_array($packages)) {
-            return null;
-        }
-        foreach ($packages as $entry) {
-            if (!is_array($entry)) {
-                continue;
-            }
-            if (($entry['name'] ?? null) === $package) {
-                return ltrim((string) ($entry['version'] ?? ''), 'v') ?: null;
-            }
-        }
         return null;
     }
 
@@ -636,83 +491,14 @@ final class ComposerUpdateRunner
      * if they did, ``--no-composer`` would be the only sensible operator
      * response, and that's the operator's call to make.
      */
-    /**
-     * Concrete version of every non-path semitexa/* package, as installed.
-     *
-     * Installed rather than locked: the lock states an intention, vendor/ is
-     * what the application will actually load. Path repositories are excluded —
-     * their "version" is whatever the working copy happens to be.
-     *
-     * @return array<string, string>
-     */
-    private function semitexaVersions(string $projectRoot): array
-    {
-        [$installed, $installedPathRepos] = $this->readInstalled($projectRoot);
-        [$locked, $lockPathRepos] = $this->readLocked($projectRoot);
-        $pathRepos = $lockPathRepos + $installedPathRepos;
-
-        $out = [];
-        foreach ($installed as $name => $version) {
-            if (!isset($pathRepos[$name])) {
-                $out[$name] = $version;
-            }
-        }
-
-        return $out;
-    }
-
-    /**
-     * A short, readable account of what moved — three packages named, the rest counted.
-     *
-     * @param array<string, array{from: ?string, to: ?string}> $moves
-     */
-    private function describeMoves(array $moves): string
-    {
-        $parts = [];
-        foreach (array_slice($moves, 0, 3, true) as $name => $move) {
-            $parts[] = sprintf('%s %s → %s', $name, $move['from'] ?? 'absent', $move['to'] ?? 'removed');
-        }
-        $rest = count($moves) - count($parts);
-
-        return implode(', ', $parts) . ($rest > 0 ? sprintf(' and %d more', $rest) : '');
-    }
-
-    /**
-     * Is the installed semitexa/* set spread across several releases?
-     *
-     * The other drift check deliberately walks past wildcard constraints: a "*"
-     * cannot disagree with a lock, so by that measure a wildcard project is
-     * always coherent and the composer phase is always skipped. It is then
-     * impossible to update such a project with `bin/semitexa update` at all —
-     * the packages sit wherever they were until someone runs composer by hand.
-     *
-     * A set spanning several release dates is the signal that does survive
-     * wildcards, and it is already computed, offline, from the same three files.
-     * It is a reason to let composer look rather than a promise that anything
-     * will move: when nothing does, the phase now says exactly that.
-     */
-    private function mixedReleaseSetReason(string $projectRoot): ?string
-    {
-        $report = ($this->drift ?? new PackageDriftInspector())->inspect($projectRoot);
-        if ($report->releaseSetCoherent) {
-            return null;
-        }
-
-        return sprintf(
-            'the installed semitexa/* set spans %d release dates (%s)',
-            count($report->mixedReleaseDates),
-            implode(', ', $report->mixedReleaseDates),
-        );
-    }
-
     private function lockOrVendorDriftReason(string $projectRoot): ?string
     {
-        $declared = $this->readDeclared($projectRoot);
-        [$locked, $lockPathRepos] = $this->readLocked($projectRoot);
-        [$installed, $installedPathRepos] = $this->readInstalled($projectRoot);
+        $declared = $this->state->readDeclared($projectRoot);
+        [$locked, $lockPathRepos] = $this->state->readLocked($projectRoot);
+        [$installed, $installedPathRepos] = $this->state->readInstalled($projectRoot);
         $pathRepos = $lockPathRepos + $installedPathRepos;
 
-        $names = $this->collectSemitexaNames($declared, $locked, $installed);
+        $names = $this->state->collectSemitexaNames($declared, $locked, $installed);
         foreach ($names as $name) {
             if (isset($pathRepos[$name])) {
                 continue;
@@ -720,7 +506,7 @@ final class ComposerUpdateRunner
             $d = $declared[$name] ?? null;
             $l = $locked[$name] ?? null;
             $i = $installed[$name] ?? null;
-            if ($this->isDevConstraint($d) || $this->isWildcardConstraint($d)) {
+            if ($this->state->isDevConstraint($d) || $this->state->isWildcardConstraint($d)) {
                 continue;
             }
             if ($d !== null && $l === null) {
@@ -737,6 +523,52 @@ final class ComposerUpdateRunner
             }
         }
         return null;
+    }
+
+    /**
+     * @param array<string, string> $before
+     * @param array<string, string> $after
+     * @return array<string, array{from: ?string, to: ?string}>
+     */
+    private function moves(array $before, array $after): array
+    {
+        $moves = [];
+        foreach ($after as $name => $version) {
+            if (($before[$name] ?? null) !== $version) {
+                $moves[$name] = ['from' => $before[$name] ?? null, 'to' => $version];
+            }
+        }
+        foreach ($before as $name => $version) {
+            if (!isset($after[$name])) {
+                $moves[$name] = ['from' => $version, 'to' => null];
+            }
+        }
+        ksort($moves);
+
+        return $moves;
+    }
+
+    /**
+     * The lines of composer's output that say why — its "Problem N" block when
+     * there is one — so the operator's summary carries the cause, not only an
+     * exit code.
+     */
+    private function reasonFrom(string $output): string
+    {
+        $lines = array_values(array_filter(
+            array_map('trim', preg_split('/\R/', $output) ?: []),
+            static fn (string $l): bool => $l !== '',
+        ));
+        $start = null;
+        foreach ($lines as $i => $line) {
+            if (preg_match('/^Problem \d+/', $line) === 1) {
+                $start = $i;
+                break;
+            }
+        }
+        $picked = $start !== null ? array_slice($lines, $start, 4) : array_slice($lines, -3);
+
+        return $picked === [] ? '(no output)' : implode(' ', $picked);
     }
 
     private function tail(string $output, int $maxBytes): string

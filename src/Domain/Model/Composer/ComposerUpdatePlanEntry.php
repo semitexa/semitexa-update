@@ -20,7 +20,14 @@ namespace Semitexa\Update\Domain\Model\Composer;
  *                           `path_repo` (lock or installed shows path), or
  *                           `wildcard` ("*"). `exact` is the only kind the
  *                           runner bumps.
- *  - `skipReason`         — non-empty when the runner won't touch this entry
+ *  - `skipReason`         — non-empty when the runner won't touch this entry;
+ *                           an exact pin carries one too when it is not
+ *                           published upstream at all
+ *  - `upstreamVersion`    — what the release set (or, outside it, the
+ *                           package's own latest release) offers, whatever
+ *                           the pin kind; null when nothing is known. For a
+ *                           wildcard this is the only way to tell that
+ *                           composer has something to move.
  */
 final readonly class ComposerUpdatePlanEntry
 {
@@ -45,6 +52,7 @@ final readonly class ComposerUpdatePlanEntry
         public ?string $targetVersion,
         public string $pinKind,
         public string $skipReason,
+        public ?string $upstreamVersion = null,
     ) {
     }
 
@@ -56,9 +64,10 @@ final readonly class ComposerUpdatePlanEntry
     }
 
     /**
-     * True when this entry was an exact-pinned release that the runner
-     * tried to resolve upstream but couldn't (no Packagist metadata, no
-     * date-based release tags published, network unreachable, etc.).
+     * True when this entry is an exact pin whose upstream could not be ASKED
+     * (network unreachable). A package the registry answered for with nothing
+     * is not unresolved — it carries a skip reason and composer resolves it
+     * from the project's own repositories.
      *
      * Distinct from `skipReason !== ''`, which means the entry was
      * intentionally left alone (path-repo / dev / wildcard).

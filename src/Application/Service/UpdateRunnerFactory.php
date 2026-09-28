@@ -79,10 +79,6 @@ class UpdateRunnerFactory
             composerRunner: new ComposerUpdateRunner(
                 executor: new InContainerComposerExecutor(),
                 resolver: new PackagistVersionResolver(),
-                // The same inspector the read-only drift section renders from.
-                // The composer phase needs it to notice a wildcard set that has
-                // drifted across releases, which pin comparison cannot see.
-                drift: new PackageDriftInspector(),
             ),
             runJournal: $this->runJournal($connection),
             actor: self::defaultActor(),
