@@ -258,7 +258,7 @@ final class ComposerUpdateRunnerTest extends TestCase
         self::assertSame(ComposerUpdateOutcome::UpdaterChanged, $result->outcome);
         self::assertSame('2026.05.10.1449', $result->installedBefore);
         self::assertSame('2026.05.12.0744', $result->installedAfter);
-        self::assertStringContainsString('Rerun', $result->message);
+        self::assertStringContainsString('fresh', $result->message);
     }
 
     public function testComposerNonZeroExitFailsTheRun(): void
@@ -885,6 +885,36 @@ final class ComposerUpdateRunnerTest extends TestCase
         self::assertSame($json, file_get_contents($this->projectRoot . '/composer.json'));
         self::assertSame([], $result->bumpedPackages, 'After the reinstall nothing is left moved.');
         self::assertStringContainsString('reinstalled', $result->message);
+    }
+
+    /**
+     * installed.json is written when the install finishes, so a download that
+     * dies halfway leaves it saying nothing moved while vendor/ has. Only a
+     * resolution failure (exit 2) is known to leave vendor/ alone.
+     */
+    public function testAFailureOtherThanResolutionReinstallsEvenWhenNothingLooksMoved(): void
+    {
+        $this->writeProject(
+            declared:  ['semitexa/core' => '2026.09.24.1147'],
+            locked:    ['semitexa/core' => '2026.09.24.1147'],
+            installed: ['semitexa/core' => '2026.09.24.1147'],
+        );
+        $resolver = FakeResolver::withReleaseSet('2026.09.28.0444', ['semitexa/core' => '2026.09.27.0404']);
+        $executor = new class(true) extends FakeExecutor {
+            /** @var list<list<string>> */
+            public array $calls = [];
+            public function run(array $args, string $projectRoot, array $env = []): array
+            {
+                $this->callCount++;
+                $this->calls[] = $args;
+                return ['exitCode' => $args[0] === 'update' ? 1 : 0, 'output' => 'The "https://..." file could not be downloaded'];
+            }
+        };
+
+        $result = (new ComposerUpdateRunner($executor, $resolver))->execute($this->projectRoot);
+
+        self::assertSame(ComposerUpdateOutcome::Failed, $result->outcome);
+        self::assertSame(['install', '--no-interaction'], $executor->calls[1] ?? null);
     }
 
     /**

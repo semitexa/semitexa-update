@@ -45,6 +45,9 @@ final class ComposerUpdateRunner
     private const PREFIX = 'semitexa/';
     private const UPDATER_PACKAGE = 'semitexa/update';
 
+    /** Composer's exit code for "could not resolve": it fails before touching vendor/. */
+    private const COMPOSER_RESOLUTION_FAILED = 2;
+
     /** Scratch composer file the dry run rehearses against; the lock follows its name. */
     private const REHEARSAL_FILE = 'composer.semitexa-update-plan.json';
 
@@ -225,8 +228,8 @@ final class ComposerUpdateRunner
             // move, and dropping the warning because of an unrelated coincidence
             // is how a partial update comes to look like a complete one.
             ComposerUpdateOutcome::UpdaterChanged => sprintf(
-                'semitexa/update was upgraded (%s → %s). Stopping cleanly so the next stages run with fresh code. '
-                . 'Rerun `bin/semitexa update` to continue.%s',
+                'semitexa/update was upgraded (%s → %s). The remaining stages must run on the new code, '
+                . 'so this process stops here and `bin/semitexa update` continues in a fresh one.%s',
                 $installedBefore,
                 $installedAfter,
                 $degradedTail,
@@ -339,10 +342,13 @@ final class ComposerUpdateRunner
     /**
      * Composer failed: put composer.json and composer.lock back as they were.
      *
-     * A resolver failure never reaches vendor/. A failure during install can
-     * (a download that dies halfway), and then vendor/ no longer matches the
-     * restored lock — so it is reinstalled from it. The result names what
-     * could not be put back rather than claiming a clean state it does not have.
+     * A resolver failure (composer exit code 2) never reaches vendor/. Any
+     * other failure may have: a download that dies halfway leaves some
+     * packages replaced, and installed.json — written only once the install
+     * finishes — cannot be trusted to say so. So unless composer failed while
+     * resolving, vendor/ is reinstalled from the restored lock. The result
+     * names what could not be put back rather than claiming a clean state it
+     * does not have.
      *
      * @param array{exitCode: int, output: string} $exec
      * @param array<string, string> $versionsBefore
@@ -358,12 +364,12 @@ final class ComposerUpdateRunner
         $moved = $this->moves($versionsBefore, $this->state->semitexaVersions($projectRoot));
 
         $vendorNote = '';
-        if ($restored && $moved !== []) {
+        if ($restored && ($exec['exitCode'] !== self::COMPOSER_RESOLUTION_FAILED || $moved !== [])) {
             $reinstall = $this->executor->run(['install', '--no-interaction'], $projectRoot);
             $moved = $this->moves($versionsBefore, $this->state->semitexaVersions($projectRoot));
             $vendorNote = $reinstall['exitCode'] === 0
-                ? ' vendor/ had already moved and was reinstalled from the restored lock.'
-                : sprintf(' vendor/ had already moved and `composer install` failed (exit %d) — run it before anything else.', $reinstall['exitCode']);
+                ? ' vendor/ was reinstalled from the restored lock.'
+                : sprintf(' vendor/ could not be reinstalled — `composer install` exited %d; run it before anything else.', $reinstall['exitCode']);
         }
 
         $state = $restored
