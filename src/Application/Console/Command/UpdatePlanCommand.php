@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Update\Application\Console\Command;
 
 use Semitexa\Core\Attribute\AsCommand;
+use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Console\BaseCommand;
 use Semitexa\Update\Discovery\DiscoveredPatch;
 use Semitexa\Update\Domain\Enum\UpdatePhase;
@@ -20,11 +21,8 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 #[AsCommand(name: 'update:plan', description: 'Compute the update plan without executing anything.')]
 final class UpdatePlanCommand extends BaseCommand
 {
-    public function __construct(
-        private readonly UpdateRunnerFactory $runnerFactory,
-    ) {
-        parent::__construct();
-    }
+    #[InjectAsReadonly]
+    protected UpdateRunnerFactory $runnerFactory;
 
     protected function configure(): void
     {
