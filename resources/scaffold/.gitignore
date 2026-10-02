@@ -15,6 +15,15 @@ var/lock/*
 var/sitemap/*
 var/storage/*
 var/uploads/*
+# Graph exports (ai:review-graph:show --format=html): a map of the codebase,
+# never source and never meant for a public commit.
+var/review-graph/
+# Review evidence (ai:evidence): private screenshots, traces and exports with
+# a passport and an expiry. Published one at a time, never by a commit.
+var/evidence/
+# Request traces (7 days) and scratch space: runtime output, never source.
+var/trace/
+var/tmp/
 !.gitkeep
 !var/docs/README.md
 
