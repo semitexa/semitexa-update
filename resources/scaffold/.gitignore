@@ -24,6 +24,10 @@ var/evidence/
 # Request traces (7 days) and scratch space: runtime output, never source.
 var/trace/
 var/tmp/
+# The Observatory's process journal and coroutine snapshots, and run-time
+# state (var/run holds the dev session cookie): written by the server.
+var/observatory/
+var/run/
 !.gitkeep
 !var/docs/README.md
 
