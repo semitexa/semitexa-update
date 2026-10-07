@@ -51,7 +51,7 @@ final class UpdatePackagesMaterializeCommand extends BaseCommand
             ];
 
             if ($input->getOption('json')) {
-                $output->writeln(json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+                $output->writeln(json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR), OutputInterface::OUTPUT_RAW);
                 return Command::SUCCESS;
             }
 
@@ -69,7 +69,7 @@ final class UpdatePackagesMaterializeCommand extends BaseCommand
                 $output->writeln(json_encode([
                     'status' => 'failed',
                     'reason' => $e->getMessage(),
-                ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+                ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR), OutputInterface::OUTPUT_RAW);
                 return Command::FAILURE;
             }
 

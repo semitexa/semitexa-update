@@ -73,7 +73,7 @@ final class UpdateLintPatchesCommand extends BaseCommand
                 'status'        => $issues === [] ? 'ok' : 'fail',
             ];
             try {
-                $output->writeln(json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR));
+                $output->writeln(json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR), OutputInterface::OUTPUT_RAW);
             } catch (JsonException $e) {
                 $output->writeln('<error>Failed to encode lint result as JSON: ' . $e->getMessage() . '</error>');
                 return Command::FAILURE;

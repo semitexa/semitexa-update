@@ -4,8 +4,9 @@
     "files": [
         {
             "path": ".env.default",
-            "current_sha256": "c2d7a94221d62854b9347bda8dcfea72ab51731aa0ea88b3f6c6378ff665058a",
+            "current_sha256": "c2d2c925d0457860b5f47a3fcf4ad88eb07eaaa0067fb5325a5634652dfb6c2a",
             "previous_sha256": [
+                "c2d7a94221d62854b9347bda8dcfea72ab51731aa0ea88b3f6c6378ff665058a",
                 "45bfaf8fe4ea04d7de5864a301ef65d94dccdb16c0ce65defd9db958ebf832ab",
                 "cba100bc74104fbb50e8aa43711d26bc707939bd3eb03a89758a67e792964f73",
                 "04f4afd7f05f8fac4647d37dfbd389538e341373e0a3b3377a43530e04b8f8bc",
@@ -143,8 +144,9 @@
         },
         {
             "path": "docker-compose.test.yml",
-            "current_sha256": "9d9211fb322153ac398e616e267fa7f8d59569da5bbe0f05f2cb72748628453f",
+            "current_sha256": "0abf92d394be61def61bf2aaf21ec76f7e3924e3ef67dd92f1460ac6b201b0c6",
             "previous_sha256": [
+                "9d9211fb322153ac398e616e267fa7f8d59569da5bbe0f05f2cb72748628453f",
                 "68ab9e7ee02107c6de48ebd8881586e8c366e07232286a7b348b483eb90f7182",
                 "9f7d32e37214a7046b224439bc10bdbee0ed10ba8ef1088706d42f46357112a1",
                 "7b84acd7b2ccfbea5dc2d347e1b1d74a6e2f9d494d6fe479b753bac678357a54",
@@ -172,8 +174,10 @@
         },
         {
             "path": "docker/e2e-runner/Dockerfile",
-            "current_sha256": "a6f9e3899d17af132ca60e43cad6e72406558435c4384e6e8469be9d37ab339a",
-            "previous_sha256": [],
+            "current_sha256": "30ec75400564bc6ce527a1c943a3c19f504b49adf7e4e2ca3bcb9cf428ad44db",
+            "previous_sha256": [
+                "a6f9e3899d17af132ca60e43cad6e72406558435c4384e6e8469be9d37ab339a"
+            ],
             "category": "infrastructure",
             "critical": false,
             "auto_update": true,

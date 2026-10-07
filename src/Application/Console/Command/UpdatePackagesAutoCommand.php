@@ -42,7 +42,7 @@ final class UpdatePackagesAutoCommand extends BaseCommand
         if ($input->getOption('json')) {
             try {
                 $compactJson = json_encode($result, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
-                $output->writeln($compactJson);
+                $output->writeln($compactJson, OutputInterface::OUTPUT_RAW);
                 return $result['status'] === 'failed' ? Command::FAILURE : Command::SUCCESS;
             } catch (JsonException $e) {
                 $output->writeln('<error>Failed to encode deployment result as JSON: ' . $e->getMessage() . '</error>');

@@ -64,7 +64,7 @@ services:
     build:
       context: .
       dockerfile: docker/e2e-runner/Dockerfile
-    image: semitexa/e2e-runner:1.59.1
+    image: semitexa/e2e-runner:1.59.1-axe4.13.0
     working_dir: /var/www/html
     env_file:
       - path: .env.default
