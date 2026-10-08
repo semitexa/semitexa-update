@@ -2,6 +2,12 @@
 Description=Run Semitexa automatic framework deployment poller
 
 [Timer]
+# OnActiveSec anchors the timer to its own start: OnBootSec is long past when the
+# timer is (re)started on a running host, and OnUnitActiveSec counts only from a
+# run of the service the timer has seen. With neither, systemd computes no next
+# elapse ("Trigger: n/a") and the timer never fires again. Measured on the
+# semitexa.com host: the install.sh refresh stood still from 2026-05-10 to 2026-10-08.
+OnActiveSec=1m
 OnBootSec=2m
 OnUnitActiveSec=@@INTERVAL@@
 RandomizedDelaySec=1m
