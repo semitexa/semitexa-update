@@ -1,6 +1,6 @@
 {
     "schema_version": "semitexa.scaffold-manifest/v1",
-    "generated_at": "2026-10-08T07:48:12+00:00",
+    "generated_at": "2026-10-08T07:52:17+00:00",
     "files": [
         {
             "path": ".env.default",
@@ -207,8 +207,10 @@
         },
         {
             "path": "phpstan.neon",
-            "current_sha256": "dd08944259b64148a326bc6a2f3179a3a1fa206a8ae86256f9c782c3ccdb99df",
-            "previous_sha256": [],
+            "current_sha256": "3a36ec88b5bc0ae6391c276b7a5721b6df237d4ea97fcde598871fe0981f1069",
+            "previous_sha256": [
+                "dd08944259b64148a326bc6a2f3179a3a1fa206a8ae86256f9c782c3ccdb99df"
+            ],
             "category": "analysis",
             "critical": false,
             "auto_update": false,
