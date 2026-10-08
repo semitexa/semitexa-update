@@ -62,7 +62,7 @@ final class UpdateHistoryCommand extends BaseCommand
             $output->writeln((string) json_encode(
                 array_map($this->recordToArray(...), $records),
                 JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
-            ));
+            ), OutputInterface::OUTPUT_RAW);
             return Command::SUCCESS;
         }
 
@@ -95,7 +95,7 @@ final class UpdateHistoryCommand extends BaseCommand
     private function renderDetail(InputInterface $input, OutputInterface $output, SymfonyStyle $io, UpdateRunRecord $record): int
     {
         if ($input->getOption('json')) {
-            $output->writeln((string) json_encode($this->recordToArray($record), JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+            $output->writeln((string) json_encode($this->recordToArray($record), JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR), OutputInterface::OUTPUT_RAW);
             return Command::SUCCESS;
         }
 

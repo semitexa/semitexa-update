@@ -81,7 +81,7 @@ final class UpdateChangelogCommand extends BaseCommand
                     'journal_error' => $journalError,
                 ],
                 JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
-            ));
+            ), OutputInterface::OUTPUT_RAW);
             return Command::SUCCESS;
         }
 
@@ -149,7 +149,7 @@ final class UpdateChangelogCommand extends BaseCommand
             $output->writeln((string) json_encode(
                 array_map($this->noteToArray(...), $notes),
                 JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
-            ));
+            ), OutputInterface::OUTPUT_RAW);
             return Command::SUCCESS;
         }
 

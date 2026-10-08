@@ -149,7 +149,7 @@ final class UpdateScaffoldRebuildCommand extends BaseCommand
             ];
 
             if ($asJson) {
-                $output->writeln(json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+                $output->writeln(json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR), OutputInterface::OUTPUT_RAW);
                 return ($check && $drift) ? Command::FAILURE : Command::SUCCESS;
             }
 
@@ -173,7 +173,7 @@ final class UpdateScaffoldRebuildCommand extends BaseCommand
             return Command::SUCCESS;
         } catch (\Throwable $e) {
             if ($asJson) {
-                $output->writeln(json_encode(['status' => 'failed', 'reason' => $e->getMessage()], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+                $output->writeln(json_encode(['status' => 'failed', 'reason' => $e->getMessage()], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR), OutputInterface::OUTPUT_RAW);
                 return Command::FAILURE;
             }
             (new SymfonyStyle($input, $output))->error($e->getMessage());

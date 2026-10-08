@@ -60,7 +60,7 @@ final class UpdatePackagesCheckCommand extends BaseCommand
                 ];
 
                 $compactJson = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
-                $output->writeln($compactJson);
+                $output->writeln($compactJson, OutputInterface::OUTPUT_RAW);
                 return Command::SUCCESS;
             } catch (JsonException $e) {
                 $output->writeln('<error>Failed to encode deployment status as JSON: ' . $e->getMessage() . '</error>');
