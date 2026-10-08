@@ -2,6 +2,10 @@
 
 `semitexa/update` owns the **update lifecycle** of a Semitexa application — package version detection, plan building, ORM schema synchronization, and post-schema **data patches**. It is **not** a schema migration system.
 
+## Install
+
+Included in every project created by the installer (https://semitexa.com/install.sh).
+
 ## Ownership boundary
 
 | Layer | Owner | Tools |
@@ -192,10 +196,10 @@ SEMITEXA_REMOTE_DEPLOY_USE_PASSWORD=false
 Production polling install:
 
 ```bash
-sudo SEMITEXA_AUTO_DEPLOY_ENABLE=1 packages/semitexa-update/tools/install-auto-deploy-systemd.sh /srv/semitexa/my-project
+sudo SEMITEXA_AUTO_DEPLOY_ENABLE=1 vendor/semitexa/update/tools/install-auto-deploy-systemd.sh /srv/semitexa/my-project
 ```
 
-The systemd wrapper (`packages/semitexa-update/tools/run-auto-deploy-systemd.sh`) calls `update:packages:auto` and reruns `bin/semitexa server:start` when `restart_required=true`, then performs the configured HTTP healthcheck.
+Run it from the project root (`/srv/semitexa/my-project`). The systemd wrapper (`vendor/semitexa/update/tools/run-auto-deploy-systemd.sh`, copied into the project's `tools/`) calls `update:packages:auto` and reruns `bin/semitexa server:start` when `restart_required=true`, then performs the configured HTTP healthcheck.
 
 ### Production deploy systemd units
 
@@ -205,22 +209,24 @@ The installer above provisions **two independent unit pairs**, decoupled on purp
 |---|---|
 | `semitexa-auto-deploy.service` | Composer-updates `semitexa/*` and restarts the runtime when needed. |
 | `semitexa-auto-deploy.timer` | Periodic poll (default `15m`, `RandomizedDelaySec=1m`). `update:packages:auto` short-circuits when nothing's new, so polling is cheap. |
-| `semitexa-refresh-install-sh.service` | Atomically refreshes `packages/semitexa-ultimate/install.sh` from upstream `master`. |
-| `semitexa-refresh-install-sh.timer` | Periodic refresh (default `10m`). **Independent of the deploy** — install.sh stays current even when the application deploy is failing. |
+| `semitexa-refresh-install-sh.service` | **semitexa.com hosting only.** Atomically refreshes `packages/semitexa-ultimate/install.sh` (the public installer served by semitexa.com) from upstream `master`. |
+| `semitexa-refresh-install-sh.timer` | **semitexa.com hosting only.** Periodic refresh (default `10m`), independent of the deploy. |
+
+The refresh pair only applies to the host that serves the public installer. On any other project the refresh script refuses to run (there is no `packages/semitexa-ultimate` checkout), so disable it after installing the units: `sudo systemctl disable --now semitexa-refresh-install-sh.timer`.
 
 `semitexa-auto-deploy.service` runs `composer update 'semitexa/*' --with-all-dependencies --prefer-dist --no-dev --no-interaction --optimize-autoloader`. The `--prefer-dist` flag is mandatory: production `vendor/semitexa/*` is shipped as dist (no `.git/`), so without it composer may pick source mode for some packages and fail with `GitDownloader.php line 155: The .git directory is missing`.
 
 #### Install / update on production
 
 ```bash
-# Repo files come from packages/semitexa-update/{tools,resources}
+# Unit templates and scripts come from vendor/semitexa/update/{tools,resources}
 sudo SEMITEXA_AUTO_DEPLOY_ENABLE=1 \
-     packages/semitexa-update/tools/install-auto-deploy-systemd.sh /srv/semitexa/my-project
+     vendor/semitexa/update/tools/install-auto-deploy-systemd.sh /srv/semitexa/my-project
 
 # After unit changes:
 sudo systemctl daemon-reload
 sudo systemctl enable --now semitexa-auto-deploy.timer
-sudo systemctl enable --now semitexa-refresh-install-sh.timer
+sudo systemctl enable --now semitexa-refresh-install-sh.timer   # semitexa.com hosting only
 ```
 
 #### Verify
@@ -237,7 +243,7 @@ systemctl status semitexa-refresh-install-sh.timer --no-pager
 # Run a deploy now (will no-op if nothing's new):
 sudo systemctl start semitexa-auto-deploy.service
 
-# Refresh install.sh now:
+# Refresh install.sh now (semitexa.com hosting only):
 sudo systemctl start semitexa-refresh-install-sh.service
 ```
 
