@@ -1,4 +1,6 @@
 /vendor/
+# Composer's cache when it runs in the app container as your user (HOME is the project).
+/.composer/
 .env
 var/cache/*
 var/log/*
