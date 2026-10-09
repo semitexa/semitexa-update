@@ -91,10 +91,21 @@ final class InstalledReleaseSetRecorderTest extends TestCase
         self::assertSame('2026.10.08.0620', $this->recorded());
     }
 
-    private function recorder(bool $reachable = true): InstalledReleaseSetRecorder
+    #[Test]
+    public function a_release_listed_without_its_pins_leaves_the_record_alone(): void
     {
-        $resolver = new class (self::RELEASES, $reachable) implements UpstreamVersionResolverInterface {
-            /** @param array<string, array<string, string>> $releases */
+        FrameworkVersion::record('2026.10.08.0620', $this->root);
+        $this->install(['semitexa/core' => '2026.10.08.0620']);
+
+        self::assertFalse($this->recorder(releases: ['2026.10.10.0000' => null] + self::RELEASES)->record($this->root));
+        self::assertSame('2026.10.08.0620', $this->recorded());
+    }
+
+    /** @param array<string, array<string, string>|null> $releases */
+    private function recorder(bool $reachable = true, array $releases = self::RELEASES): InstalledReleaseSetRecorder
+    {
+        $resolver = new class ($releases, $reachable) implements UpstreamVersionResolverInterface {
+            /** @param array<string, array<string, string>|null> $releases */
             public function __construct(private readonly array $releases, private readonly bool $reachable)
             {
             }

@@ -76,7 +76,12 @@ final class InstalledReleaseSetRecorder
 
         foreach ($versions as $version) {
             $require = $this->resolver->requiresOf(self::RELEASE_SET_PACKAGE, $version);
-            if ($require !== null && $this->isMet($require, $installed)) {
+            // A release listed without its pins is unknown, not unmet: walking
+            // past it would record an older one, or drop a record that is right.
+            if ($require === null) {
+                return false;
+            }
+            if ($this->isMet($require, $installed)) {
                 return $version;
             }
         }

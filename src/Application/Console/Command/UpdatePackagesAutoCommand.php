@@ -63,7 +63,11 @@ final class UpdatePackagesAutoCommand extends BaseCommand
             ['Selected version' => (string) ($result['selected_version'] ?? 'none')],
             ['Source mode' => (string) ($result['source_mode'] ?? 'unknown')],
             ['Release channel' => (string) ($result['release_channel'] ?? 'unknown')],
-            ['Installed release' => (string) ($result['release_set'] ?? 'unknown')],
+            ['Installed release' => match ($result['release_set']) {
+                false => 'unknown (not recorded)',
+                null => 'none',
+                default => (string) $result['release_set'],
+            }],
         );
 
         if (($result['restart_status'] ?? null) !== null) {
@@ -78,18 +82,17 @@ final class UpdatePackagesAutoCommand extends BaseCommand
     }
 
     /**
-     * The release the footer names. Never fails the deployment: a record that
-     * cannot be written leaves the footer on core's tag, as before.
+     * The release the footer names: the version, null when vendor/ holds no
+     * whole release, false when it could not be found out or written. Never
+     * fails the deployment: without a record the footer stays on core's tag.
      */
-    private function recordReleaseSet(string $projectRoot): ?string
+    private function recordReleaseSet(string $projectRoot): string|false|null
     {
         try {
-            $release = (new InstalledReleaseSetRecorder())->record($projectRoot);
+            return (new InstalledReleaseSetRecorder())->record($projectRoot);
         } catch (\Throwable) {
-            return null;
+            return false;
         }
-
-        return is_string($release) ? $release : null;
     }
 
     /**
