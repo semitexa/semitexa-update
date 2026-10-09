@@ -8,6 +8,7 @@ use JsonException;
 use Semitexa\Core\Attribute\AsCommand;
 use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Console\BaseCommand;
+use Semitexa\Update\Application\Service\Composer\InstalledReleaseSetRecorder;
 use Semitexa\Update\Application\Service\Packaging\Releases\Service\FrameworkDeploymentExecutor;
 use Semitexa\Update\Application\Service\Packaging\Releases\Service\FrameworkDeploymentPlanner;
 use Semitexa\Update\Application\Service\Packaging\Releases\Support\DeploymentLogWriter;
@@ -38,6 +39,10 @@ final class UpdatePackagesAutoCommand extends BaseCommand
 
         $plan = $planner->plan($projectRoot);
         $result = $executor->execute($projectRoot, $plan);
+        // Every run, not only one that deployed: a noop still finds the
+        // release a deploy before this code existed installed, and a
+        // rolled-back one must not keep naming the release it backed out.
+        $result['release_set'] = $this->recordReleaseSet($projectRoot);
 
         if ($input->getOption('json')) {
             try {
@@ -58,6 +63,11 @@ final class UpdatePackagesAutoCommand extends BaseCommand
             ['Selected version' => (string) ($result['selected_version'] ?? 'none')],
             ['Source mode' => (string) ($result['source_mode'] ?? 'unknown')],
             ['Release channel' => (string) ($result['release_channel'] ?? 'unknown')],
+            ['Installed release' => match ($result['release_set']) {
+                false => 'unknown (not recorded)',
+                null => 'none',
+                default => (string) $result['release_set'],
+            }],
         );
 
         if (($result['restart_status'] ?? null) !== null) {
@@ -69,6 +79,20 @@ final class UpdatePackagesAutoCommand extends BaseCommand
         }
 
         return $result['status'] === 'failed' ? Command::FAILURE : Command::SUCCESS;
+    }
+
+    /**
+     * The release the footer names: the version, null when vendor/ holds no
+     * whole release, false when it could not be found out or written. Never
+     * fails the deployment: without a record the footer stays on core's tag.
+     */
+    private function recordReleaseSet(string $projectRoot): string|false|null
+    {
+        try {
+            return (new InstalledReleaseSetRecorder())->record($projectRoot);
+        } catch (\Throwable) {
+            return false;
+        }
     }
 
     /**

@@ -23,6 +23,7 @@ use Semitexa\Update\Domain\Model\Scaffold\ScaffoldSyncReport;
 use Semitexa\Update\Exception\UpdateException;
 use Semitexa\Update\Domain\Model\OrchestratorPlanReport;
 use Semitexa\Update\Domain\Model\OrchestratorStage;
+use Semitexa\Update\Application\Service\Composer\InstalledReleaseSetRecorder;
 use Semitexa\Update\Application\Service\Composer\SkeletonRequireDiff;
 use Semitexa\Update\Application\Service\UpdateContinuation;
 use Semitexa\Update\Application\Service\UpdateRunnerFactory;
@@ -149,6 +150,7 @@ final class UpdateCommand extends BaseCommand
         }
 
         $this->renderStages($io, $stages);
+        $this->recordReleaseSet($io);
 
         foreach ($stages as $stage) {
             if (!$stage->isSuccess()) {
@@ -175,6 +177,27 @@ final class UpdateCommand extends BaseCommand
 
         $io->success('Update completed.');
         return Command::SUCCESS;
+    }
+
+    /**
+     * Record the release vendor/ now holds, for the footer. Whatever the
+     * stages did: a failed composer stage restores vendor/, and the record
+     * must follow it back.
+     */
+    private function recordReleaseSet(SymfonyStyle $io): void
+    {
+        try {
+            $release = (new InstalledReleaseSetRecorder())->record($this->getProjectRoot());
+        } catch (\Throwable $e) {
+            $io->text('  <comment>Installed release not recorded: ' . $e->getMessage() . '</comment>');
+            return;
+        }
+
+        $io->text(match (true) {
+            is_string($release) => '  Installed release: semitexa/ultimate ' . $release,
+            $release === false => '  <comment>Installed release not recorded: Packagist could not be asked.</comment>',
+            default => '  Installed release: none (vendor/ holds no whole semitexa/ultimate release).',
+        });
     }
 
     /**
