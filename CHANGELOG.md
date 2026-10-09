@@ -5,7 +5,7 @@ All notable changes to `semitexa/update`. Sections are `## <version> — <date>`
 This file is machine-read by `update:changelog` and the OS "What's new"
 surface — keep entries short and operator-facing.
 
-## Unreleased
+## 2026.10.09.0942 — 2026-10-09
 
 ### Added
 - **`update` and `update:packages:auto` record the installed release**: the
