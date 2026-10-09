@@ -71,7 +71,16 @@ final class PackagistReleaseSource
             ],
         ]);
 
-        $json = @file_get_contents($url, false, $context);
+        // One more try when nothing answered at all. The first lookup of a run
+        // pays for a cold DNS and TLS handshake, and on the semitexa.com host
+        // (2026-10-08) it alone timed out — for whichever package sorts first —
+        // while composer then fetched that very package fine. An HTTP answer,
+        // even an error, is not retried: it is the registry's answer.
+        $json = false;
+        for ($attempt = 0; $attempt < 2 && $json === false; $attempt++) {
+            $http_response_header = [];
+            $json = @file_get_contents($url, false, $context);
+        }
         $statusCode = 0;
         if (isset($http_response_header[0]) && preg_match('/\s(\d{3})\s/', $http_response_header[0], $m) === 1) {
             $statusCode = (int) $m[1];
