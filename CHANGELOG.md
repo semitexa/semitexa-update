@@ -5,6 +5,16 @@ All notable changes to `semitexa/update`. Sections are `## <version> — <date>`
 This file is machine-read by `update:changelog` and the OS "What's new"
 surface — keep entries short and operator-facing.
 
+## Unreleased
+
+### Added
+- **`update` and `update:packages:auto` record the installed release**: the
+  newest `semitexa/ultimate` release whose pins vendor/ meets, read from
+  vendor/ rather than the lock. Footers name it through
+  `semitexa_version()`. The record is dropped when vendor/ holds no whole
+  release and kept when Packagist cannot be asked. `update:packages:auto
+  --json` reports it as `release_set`.
+
 ## 2026.09.28.0838 — 2026-09-28
 
 ### Fixed

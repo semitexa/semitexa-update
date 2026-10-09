@@ -8,6 +8,7 @@ use JsonException;
 use Semitexa\Core\Attribute\AsCommand;
 use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Console\BaseCommand;
+use Semitexa\Update\Application\Service\Composer\InstalledReleaseSetRecorder;
 use Semitexa\Update\Application\Service\Packaging\Releases\Service\FrameworkDeploymentExecutor;
 use Semitexa\Update\Application\Service\Packaging\Releases\Service\FrameworkDeploymentPlanner;
 use Semitexa\Update\Application\Service\Packaging\Releases\Support\DeploymentLogWriter;
@@ -38,6 +39,10 @@ final class UpdatePackagesAutoCommand extends BaseCommand
 
         $plan = $planner->plan($projectRoot);
         $result = $executor->execute($projectRoot, $plan);
+        // Every run, not only one that deployed: a noop still finds the
+        // release a deploy before this code existed installed, and a
+        // rolled-back one must not keep naming the release it backed out.
+        $result['release_set'] = $this->recordReleaseSet($projectRoot);
 
         if ($input->getOption('json')) {
             try {
@@ -58,6 +63,7 @@ final class UpdatePackagesAutoCommand extends BaseCommand
             ['Selected version' => (string) ($result['selected_version'] ?? 'none')],
             ['Source mode' => (string) ($result['source_mode'] ?? 'unknown')],
             ['Release channel' => (string) ($result['release_channel'] ?? 'unknown')],
+            ['Installed release' => (string) ($result['release_set'] ?? 'unknown')],
         );
 
         if (($result['restart_status'] ?? null) !== null) {
@@ -69,6 +75,21 @@ final class UpdatePackagesAutoCommand extends BaseCommand
         }
 
         return $result['status'] === 'failed' ? Command::FAILURE : Command::SUCCESS;
+    }
+
+    /**
+     * The release the footer names. Never fails the deployment: a record that
+     * cannot be written leaves the footer on core's tag, as before.
+     */
+    private function recordReleaseSet(string $projectRoot): ?string
+    {
+        try {
+            $release = (new InstalledReleaseSetRecorder())->record($projectRoot);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        return is_string($release) ? $release : null;
     }
 
     /**
