@@ -65,6 +65,10 @@ services:
       context: .
       dockerfile: docker/e2e-runner/Dockerfile
     image: semitexa/e2e-runner:1.59.1-axe4.13.0
+    # The host user, like the app (bin/semitexa exports these): the runner
+    # writes test-results into the bind-mounted project, and as root those
+    # files were the developer's to sudo away.
+    user: "${SEMITEXA_UID:-0}:${SEMITEXA_GID:-0}"
     working_dir: /var/www/html
     env_file:
       - path: .env.default
