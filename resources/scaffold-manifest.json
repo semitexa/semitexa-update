@@ -1,6 +1,6 @@
 {
     "schema_version": "semitexa.scaffold-manifest/v1",
-    "generated_at": "2026-10-15T22:48:31+00:00",
+    "generated_at": "2026-10-15T22:57:17+00:00",
     "files": [
         {
             "path": ".env.default",
@@ -61,8 +61,9 @@
         },
         {
             "path": "bin/semitexa",
-            "current_sha256": "589fbf23a650324bcd6ddec26f1e04e33dd58a57c14b38050409f2c5fdfe4eea",
+            "current_sha256": "f74c501019e4e43a503fa28d5f3f2e1db9ee06a2f3e6ce9c97ec328a7e8e43d4",
             "previous_sha256": [
+                "589fbf23a650324bcd6ddec26f1e04e33dd58a57c14b38050409f2c5fdfe4eea",
                 "ef6196fbdb6cc026b23416de06fccea7a798e929c9aded7fbd4051435e35b855",
                 "2c6996e61f508ea935aee146a39520e409a4f0b908e24e39fe19825ef63ff2e3",
                 "d2d0c7993bd031235394cba94be8a2e7286b94b831d9483c541c93eb4a2eff12",
@@ -156,8 +157,9 @@
         },
         {
             "path": "docker-compose.test.yml",
-            "current_sha256": "5ba23c4502ddde62c8d24ccdb92ec0aa34d23176d925fe48defda1abc5bf1576",
+            "current_sha256": "177ab27c7235c12632412b865fa5045e88b679373e922a3a1206be81030d7936",
             "previous_sha256": [
+                "5ba23c4502ddde62c8d24ccdb92ec0aa34d23176d925fe48defda1abc5bf1576",
                 "0abf92d394be61def61bf2aaf21ec76f7e3924e3ef67dd92f1460ac6b201b0c6",
                 "9d9211fb322153ac398e616e267fa7f8d59569da5bbe0f05f2cb72748628453f",
                 "68ab9e7ee02107c6de48ebd8881586e8c366e07232286a7b348b483eb90f7182",
@@ -174,8 +176,9 @@
         },
         {
             "path": "docker-compose.yml",
-            "current_sha256": "c2c6f2ba8f331d28e9411e182ddc4895eb1b21be1d2a91e43051367af57a598d",
+            "current_sha256": "9e198b38ba1ad146b0beff15234c740cc50bd023a63c68bcecaaa365c95cf9d5",
             "previous_sha256": [
+                "c2c6f2ba8f331d28e9411e182ddc4895eb1b21be1d2a91e43051367af57a598d",
                 "0a91663e5328c6e422e0f09c823f23b97bd62ca14737980b3651d9f47992942c",
                 "dfe1b31161bab479518985fa5209982fe9398ed28d3fa02327bcb971ee1a8979",
                 "7255bd63b4c0e11129b4555f457fc6e3eae7ab8365927bf13968b15bb2c2a0fe"

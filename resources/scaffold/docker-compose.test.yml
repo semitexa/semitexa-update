@@ -1,6 +1,9 @@
 services:
   phpunit:
     build: .
+    # The same user as the app (bin/semitexa exports these), so the test run
+    # and the server can write each other's files in var/.
+    user: "${SEMITEXA_UID:-1000}:${SEMITEXA_GID:-1000}"
     env_file:
       - path: .env.default
         required: true
