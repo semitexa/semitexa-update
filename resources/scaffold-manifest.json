@@ -1,11 +1,12 @@
 {
     "schema_version": "semitexa.scaffold-manifest/v1",
-    "generated_at": "2026-10-08T09:33:30+00:00",
+    "generated_at": "2026-10-15T19:53:04+00:00",
     "files": [
         {
             "path": ".env.default",
-            "current_sha256": "c2d2c925d0457860b5f47a3fcf4ad88eb07eaaa0067fb5325a5634652dfb6c2a",
+            "current_sha256": "c618c804941d70ab5c1cde4b3c7c6083ee53750ec7772bfb88c25a148ac5fb30",
             "previous_sha256": [
+                "c2d2c925d0457860b5f47a3fcf4ad88eb07eaaa0067fb5325a5634652dfb6c2a",
                 "c2d7a94221d62854b9347bda8dcfea72ab51731aa0ea88b3f6c6378ff665058a",
                 "45bfaf8fe4ea04d7de5864a301ef65d94dccdb16c0ce65defd9db958ebf832ab",
                 "cba100bc74104fbb50e8aa43711d26bc707939bd3eb03a89758a67e792964f73",
@@ -60,8 +61,9 @@
         },
         {
             "path": "bin/semitexa",
-            "current_sha256": "a097d24611f54fd458a71383cf6e2676b471ad7dae3f17713d5aa07f35088f43",
+            "current_sha256": "029575a4caace3205e432d8526ea87eebeadb09bbb01c266edba5629daf32df7",
             "previous_sha256": [
+                "a097d24611f54fd458a71383cf6e2676b471ad7dae3f17713d5aa07f35088f43",
                 "053d2145050724ee860750835bfc15a8c0d010a1e20475d5e499afe369a4edc1",
                 "095f241eebcabfd72b50dd800d1d88dc8662a9632945c498046ccdcd0914872d",
                 "10d9cf05bb1c096c68b17e0c0d6d65fac58bb0f72ac9dc6fe72ae4d1770ce0b4",
@@ -164,8 +166,9 @@
         },
         {
             "path": "docker-compose.yml",
-            "current_sha256": "0a91663e5328c6e422e0f09c823f23b97bd62ca14737980b3651d9f47992942c",
+            "current_sha256": "c2c6f2ba8f331d28e9411e182ddc4895eb1b21be1d2a91e43051367af57a598d",
             "previous_sha256": [
+                "0a91663e5328c6e422e0f09c823f23b97bd62ca14737980b3651d9f47992942c",
                 "dfe1b31161bab479518985fa5209982fe9398ed28d3fa02327bcb971ee1a8979",
                 "7255bd63b4c0e11129b4555f457fc6e3eae7ab8365927bf13968b15bb2c2a0fe"
             ],
