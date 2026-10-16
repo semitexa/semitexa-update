@@ -17,6 +17,20 @@ var/lock/*
 var/sitemap/*
 var/storage/*
 var/uploads/*
+# Hashed SSR templates and asset bundles (semitexa-ssr) are rebuilt by the
+# server on start: runtime output, never source.
+/public/assets/ssr/
+
+# Test and report output: PHPUnit's result cache and ai:report drafts.
+.phpunit.result.cache
+var/ai-report/
+
+# Editor and OS files: a folder opened in Finder or an IDE before the first
+# start would otherwise put them into the initial commit.
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
 # Graph exports (ai:review-graph:show --format=html): a map of the codebase,
 # never source and never meant for a public commit.
 var/review-graph/

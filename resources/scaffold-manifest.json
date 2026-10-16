@@ -1,11 +1,12 @@
 {
     "schema_version": "semitexa.scaffold-manifest/v1",
-    "generated_at": "2026-10-15T22:59:13+00:00",
+    "generated_at": "2026-10-16T12:52:36+00:00",
     "files": [
         {
             "path": ".env.default",
-            "current_sha256": "c618c804941d70ab5c1cde4b3c7c6083ee53750ec7772bfb88c25a148ac5fb30",
+            "current_sha256": "d1dfe01ce8d8d4b068b11a33836c4ba3c765cf4a6579f3feaf890f384f495736",
             "previous_sha256": [
+                "c618c804941d70ab5c1cde4b3c7c6083ee53750ec7772bfb88c25a148ac5fb30",
                 "c2d2c925d0457860b5f47a3fcf4ad88eb07eaaa0067fb5325a5634652dfb6c2a",
                 "c2d7a94221d62854b9347bda8dcfea72ab51731aa0ea88b3f6c6378ff665058a",
                 "45bfaf8fe4ea04d7de5864a301ef65d94dccdb16c0ce65defd9db958ebf832ab",
@@ -26,8 +27,9 @@
         },
         {
             "path": ".gitignore",
-            "current_sha256": "b2b2b5c2e644e9acec6664d35ff0b86e1342b9c2d19a190d47af6ff37a919d16",
+            "current_sha256": "2a1a6399052acdf6d527c5c762736a327d2c1b81cd6c197c7c2d0a1e2dfc5b8f",
             "previous_sha256": [
+                "b2b2b5c2e644e9acec6664d35ff0b86e1342b9c2d19a190d47af6ff37a919d16",
                 "a324b654c3d56d5a29a92568a510a260b390d0b89efae84fb9a800c5da4acb37",
                 "f5d3e4788f49b933a90ba173e6990000812e43b999a228e7d7e15ab764e0534f",
                 "fd48271021a4b846ce43c83be0dde7f17c5bd0844403d532f0a427c27b0a3dbf",
@@ -177,8 +179,9 @@
         },
         {
             "path": "docker-compose.yml",
-            "current_sha256": "9e198b38ba1ad146b0beff15234c740cc50bd023a63c68bcecaaa365c95cf9d5",
+            "current_sha256": "742f914ec0fa0f85b98bdb17827cc97386c5fa9e1277fb18ed22009ad634e5e1",
             "previous_sha256": [
+                "9e198b38ba1ad146b0beff15234c740cc50bd023a63c68bcecaaa365c95cf9d5",
                 "c2c6f2ba8f331d28e9411e182ddc4895eb1b21be1d2a91e43051367af57a598d",
                 "0a91663e5328c6e422e0f09c823f23b97bd62ca14737980b3651d9f47992942c",
                 "dfe1b31161bab479518985fa5209982fe9398ed28d3fa02327bcb971ee1a8979",
