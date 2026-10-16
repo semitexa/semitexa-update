@@ -1,6 +1,9 @@
 services:
   phpunit:
     build: .
+    # The same user as the app (bin/semitexa exports these), so the test run
+    # and the server can write each other's files in var/.
+    user: "${SEMITEXA_UID:-1000}:${SEMITEXA_GID:-1000}"
     env_file:
       - path: .env.default
         required: true
@@ -65,6 +68,10 @@ services:
       context: .
       dockerfile: docker/e2e-runner/Dockerfile
     image: semitexa/e2e-runner:1.59.1-axe4.13.0
+    # The host user, like the app (bin/semitexa exports these): the runner
+    # writes test-results into the bind-mounted project, and as root those
+    # files were the developer's to sudo away.
+    user: "${SEMITEXA_UID:-0}:${SEMITEXA_GID:-0}"
     working_dir: /var/www/html
     env_file:
       - path: .env.default

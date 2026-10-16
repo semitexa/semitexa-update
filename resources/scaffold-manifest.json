@@ -1,11 +1,12 @@
 {
     "schema_version": "semitexa.scaffold-manifest/v1",
-    "generated_at": "2026-10-08T09:33:30+00:00",
+    "generated_at": "2026-10-15T22:59:13+00:00",
     "files": [
         {
             "path": ".env.default",
-            "current_sha256": "c2d2c925d0457860b5f47a3fcf4ad88eb07eaaa0067fb5325a5634652dfb6c2a",
+            "current_sha256": "c618c804941d70ab5c1cde4b3c7c6083ee53750ec7772bfb88c25a148ac5fb30",
             "previous_sha256": [
+                "c2d2c925d0457860b5f47a3fcf4ad88eb07eaaa0067fb5325a5634652dfb6c2a",
                 "c2d7a94221d62854b9347bda8dcfea72ab51731aa0ea88b3f6c6378ff665058a",
                 "45bfaf8fe4ea04d7de5864a301ef65d94dccdb16c0ce65defd9db958ebf832ab",
                 "cba100bc74104fbb50e8aa43711d26bc707939bd3eb03a89758a67e792964f73",
@@ -60,8 +61,18 @@
         },
         {
             "path": "bin/semitexa",
-            "current_sha256": "a097d24611f54fd458a71383cf6e2676b471ad7dae3f17713d5aa07f35088f43",
+            "current_sha256": "21c9b1a915fd58ee87eece84bed98006a6e55c2ae9ed40629facf431af0e1289",
             "previous_sha256": [
+                "f74c501019e4e43a503fa28d5f3f2e1db9ee06a2f3e6ce9c97ec328a7e8e43d4",
+                "589fbf23a650324bcd6ddec26f1e04e33dd58a57c14b38050409f2c5fdfe4eea",
+                "ef6196fbdb6cc026b23416de06fccea7a798e929c9aded7fbd4051435e35b855",
+                "2c6996e61f508ea935aee146a39520e409a4f0b908e24e39fe19825ef63ff2e3",
+                "d2d0c7993bd031235394cba94be8a2e7286b94b831d9483c541c93eb4a2eff12",
+                "7a2db458ac1897659f8250a3c17b3d2b8bfe1f2508e33ef4e32473019a8555d8",
+                "550064864068db6e24e32c31bb55461665fb762bfc8c0bb7560fff7fb0feea13",
+                "e39351d1e9f0574d4d478269a3fd35b2fe5f86958b1cfb59cdf5775817b5e80c",
+                "029575a4caace3205e432d8526ea87eebeadb09bbb01c266edba5629daf32df7",
+                "a097d24611f54fd458a71383cf6e2676b471ad7dae3f17713d5aa07f35088f43",
                 "053d2145050724ee860750835bfc15a8c0d010a1e20475d5e499afe369a4edc1",
                 "095f241eebcabfd72b50dd800d1d88dc8662a9632945c498046ccdcd0914872d",
                 "10d9cf05bb1c096c68b17e0c0d6d65fac58bb0f72ac9dc6fe72ae4d1770ce0b4",
@@ -147,8 +158,10 @@
         },
         {
             "path": "docker-compose.test.yml",
-            "current_sha256": "0abf92d394be61def61bf2aaf21ec76f7e3924e3ef67dd92f1460ac6b201b0c6",
+            "current_sha256": "177ab27c7235c12632412b865fa5045e88b679373e922a3a1206be81030d7936",
             "previous_sha256": [
+                "5ba23c4502ddde62c8d24ccdb92ec0aa34d23176d925fe48defda1abc5bf1576",
+                "0abf92d394be61def61bf2aaf21ec76f7e3924e3ef67dd92f1460ac6b201b0c6",
                 "9d9211fb322153ac398e616e267fa7f8d59569da5bbe0f05f2cb72748628453f",
                 "68ab9e7ee02107c6de48ebd8881586e8c366e07232286a7b348b483eb90f7182",
                 "9f7d32e37214a7046b224439bc10bdbee0ed10ba8ef1088706d42f46357112a1",
@@ -164,8 +177,10 @@
         },
         {
             "path": "docker-compose.yml",
-            "current_sha256": "0a91663e5328c6e422e0f09c823f23b97bd62ca14737980b3651d9f47992942c",
+            "current_sha256": "9e198b38ba1ad146b0beff15234c740cc50bd023a63c68bcecaaa365c95cf9d5",
             "previous_sha256": [
+                "c2c6f2ba8f331d28e9411e182ddc4895eb1b21be1d2a91e43051367af57a598d",
+                "0a91663e5328c6e422e0f09c823f23b97bd62ca14737980b3651d9f47992942c",
                 "dfe1b31161bab479518985fa5209982fe9398ed28d3fa02327bcb971ee1a8979",
                 "7255bd63b4c0e11129b4555f457fc6e3eae7ab8365927bf13968b15bb2c2a0fe"
             ],
