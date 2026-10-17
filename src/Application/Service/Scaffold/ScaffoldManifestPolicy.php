@@ -17,6 +17,9 @@ use Semitexa\Update\Domain\Enum\ScaffoldFileCategory;
  */
 final class ScaffoldManifestPolicy
 {
+    private const AGENT_DOCS_NOTE = 'Agent operating manual from semitexa/ultimate. Replaced while it matches a '
+        . 'released version; a project that edited it gets the new version as .new to merge.';
+
     /**
      * @return array<string, array{
      *     category: ScaffoldFileCategory,
@@ -135,6 +138,48 @@ final class ScaffoldManifestPolicy
                 'auto_update' => true,
                 'preserve_executable' => false,
                 'notes' => 'Template only. The project-managed docker-compose.override.yml is never touched.',
+            ],
+            'AGENTS.md' => [
+                'category' => ScaffoldFileCategory::AgentDocs,
+                'critical' => false,
+                'auto_update' => true,
+                'preserve_executable' => false,
+                'notes' => self::AGENT_DOCS_NOTE,
+            ],
+            'AGENTS_DOCTRINE.md' => [
+                'category' => ScaffoldFileCategory::AgentDocs,
+                'critical' => false,
+                'auto_update' => true,
+                'preserve_executable' => false,
+                'notes' => self::AGENT_DOCS_NOTE,
+            ],
+            'AI_CONTEXT.md' => [
+                'category' => ScaffoldFileCategory::AgentDocs,
+                'critical' => false,
+                'auto_update' => true,
+                'preserve_executable' => false,
+                'notes' => self::AGENT_DOCS_NOTE,
+            ],
+            'AI_ENTRY.md' => [
+                'category' => ScaffoldFileCategory::AgentDocs,
+                'critical' => false,
+                'auto_update' => true,
+                'preserve_executable' => false,
+                'notes' => self::AGENT_DOCS_NOTE,
+            ],
+            'AI_REFERENCE.md' => [
+                'category' => ScaffoldFileCategory::AgentDocs,
+                'critical' => false,
+                'auto_update' => true,
+                'preserve_executable' => false,
+                'notes' => self::AGENT_DOCS_NOTE,
+            ],
+            'CLAUDE.md' => [
+                'category' => ScaffoldFileCategory::AgentDocs,
+                'critical' => false,
+                'auto_update' => true,
+                'preserve_executable' => false,
+                'notes' => self::AGENT_DOCS_NOTE,
             ],
         ];
     }

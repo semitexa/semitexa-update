@@ -125,10 +125,10 @@ final class ScaffoldManifestBuilderTest extends TestCase
 
     public function testShippedManifestMatchesRealScaffoldContent(): void
     {
-        $scaffoldRoot = dirname(__DIR__, 5) . '/semitexa-installer/scaffold';
-        if (!is_dir($scaffoldRoot)) {
-            self::markTestSkipped('scaffold source dir not available in this checkout');
-        }
+        // The shipped copy: since the agent docs joined it, it has two sources
+        // (the installer scaffold, semitexa/ultimate), each pinned to it by
+        // ScaffoldSourceParityTest. The manifest must describe this copy.
+        $scaffoldRoot = dirname(__DIR__, 4) . '/resources/scaffold';
 
         $shipped = (new ScaffoldManifestLoader())->load(
             dirname(__DIR__, 4) . '/resources/scaffold-manifest.json'

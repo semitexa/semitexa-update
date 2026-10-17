@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Update\Tests\Unit\Service\Scaffold;
 
 use PHPUnit\Framework\TestCase;
+use Semitexa\Update\Application\Console\Command\UpdateScaffoldRebuildCommand;
 
 /**
  * uw-4 introduced an intentional duplication of the scaffold source:
@@ -44,7 +45,8 @@ final class ScaffoldSourceParityTest extends TestCase
     public function testInstallerAndUpdateScaffoldHaveIdenticalFileSets(): void
     {
         $installerFiles = $this->listFiles($this->installerRoot);
-        $updateFiles    = $this->listFiles($this->updateRoot);
+        // The agent docs have their own source, semitexa/ultimate: pinned below.
+        $updateFiles    = array_values(array_diff($this->listFiles($this->updateRoot), UpdateScaffoldRebuildCommand::AGENT_DOCS));
 
         $onlyInInstaller = array_diff($installerFiles, $updateFiles);
         $onlyInUpdate    = array_diff($updateFiles, $installerFiles);
@@ -84,6 +86,20 @@ final class ScaffoldSourceParityTest extends TestCase
             . "Re-sync them and rebuild scaffold-manifest.json. Drift detail: "
             . json_encode($mismatched, JSON_UNESCAPED_SLASHES),
         );
+    }
+
+    public function testTheAgentDocsMatchSemitexaUltimate(): void
+    {
+        // Beside the installer (setUp skips without it) ultimate is there too.
+        $ultimate = $this->repoRoot() . '/packages/semitexa-ultimate';
+        self::assertFileExists($ultimate . '/AGENTS.md', 'the agent docs have no source beside this package');
+        $mismatched = [];
+        foreach (UpdateScaffoldRebuildCommand::AGENT_DOCS as $doc) {
+            if (!is_file($this->updateRoot . '/' . $doc) || hash_file('sha256', $ultimate . '/' . $doc) !== hash_file('sha256', $this->updateRoot . '/' . $doc)) {
+                $mismatched[] = $doc;
+            }
+        }
+        self::assertSame([], $mismatched, 'Agent docs diverged from semitexa-ultimate: run bin/semitexa update:scaffold:rebuild.');
     }
 
     public function testBinSemitexaExistsInBothCopies(): void

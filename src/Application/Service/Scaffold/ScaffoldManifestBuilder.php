@@ -32,7 +32,24 @@ final class ScaffoldManifestBuilder
             throw new \RuntimeException("Scaffold root not found: {$scaffoldRoot}");
         }
 
-        $files = $this->listScaffoldFiles($scaffoldRoot);
+        $files = [];
+        foreach ($this->listScaffoldFiles($scaffoldRoot) as $relativePath) {
+            $files[$relativePath] = $scaffoldRoot . DIRECTORY_SEPARATOR . $relativePath;
+        }
+
+        return $this->buildFromFiles($files, $prior, $generatedAt);
+    }
+
+    /**
+     * The same, from files that need not share a directory: the scaffold has
+     * two sources (the installer's, and the agent docs of semitexa/ultimate).
+     *
+     * @param array<string, string> $sources project-relative path => file to hash
+     */
+    public function buildFromFiles(array $sources, ?ScaffoldManifest $prior = null, ?string $generatedAt = null): ScaffoldManifest
+    {
+        $files = array_keys($sources);
+        sort($files);
         $defaults = $this->policy->defaults();
         $unknown = array_values(array_filter($files, static fn (string $p) => !array_key_exists($p, $defaults)));
         if ($unknown !== []) {
@@ -44,8 +61,7 @@ final class ScaffoldManifestBuilder
 
         $entries = [];
         foreach ($files as $relativePath) {
-            $absolute = $scaffoldRoot . DIRECTORY_SEPARATOR . $relativePath;
-            $currentHash = $this->hasher->hashFile($absolute);
+            $currentHash = $this->hasher->hashFile($sources[$relativePath]);
             $policy = $defaults[$relativePath];
 
             $previous = $this->mergePreviousHashes($prior, $relativePath, $currentHash);

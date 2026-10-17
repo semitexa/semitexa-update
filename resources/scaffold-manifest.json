@@ -1,6 +1,6 @@
 {
     "schema_version": "semitexa.scaffold-manifest/v1",
-    "generated_at": "2026-10-17T06:09:59+00:00",
+    "generated_at": "2026-10-17T06:23:26+00:00",
     "files": [
         {
             "path": ".env.default",
@@ -44,6 +44,135 @@
             "auto_update": true,
             "preserve_executable": false,
             "notes": ""
+        },
+        {
+            "path": "AGENTS.md",
+            "current_sha256": "adbe5fdf10bfebff4e67ed70856406d600d7a42360e1ca3e9eed990df9ab18ab",
+            "previous_sha256": [
+                "92b4174b9dc8a34122daf1400a1893d13655ed828fb7b7043194c3257cd4eed5",
+                "932a060d0068fe648c1618ea855d11662cc9da201fb932bcea2e64228eab7511",
+                "fab8eef0e1e43533c910b1a6753979919d9f62be5542a001431a1007dfdbaf8c",
+                "67e363241df68cdde3aa6d1ae1959950dad5a9928547049f76db89728dcc290b",
+                "9002d7803e64fa26c17fc0b5cf920c1a7b8911b786a53580b34b3de18dc30653",
+                "497c15f127a266d21e62c9ea9bcaa3b88d7f60d559faa5c4346b41cefad0e969",
+                "af5d47e7721322209df7cd3968050a99fa6a9897985656a8c691e9577f50a95c",
+                "73e99ffb8fc7c3248c5f4852a97e11a2ff1d36398967e375b6e03337f7966935",
+                "1fda726c4568dd98e0d370669a799033b95b2785361d28d8e55f010e643eb442",
+                "1a6c7de9c4188bc8d4c047a1391d54657a2398aada2815898adb6c6a16215c9f",
+                "04f9a89d26bb0e1df30f42ee22b92c34f8ca3236bb390e4a975502c345fa3827",
+                "3feaa1ecd1329a22cc084592e15c25ac5f49bb43f5eace69cbbd883f75eb7568",
+                "95bd44ebc8de1a4cf96bc09b87c1fbfa0432204911f0888644b5c04fd3a7a542",
+                "774a3e641909ad7dd4bea2076b04ed8d0aebf0ccee7a0a7be6d5ec0a7aedfb14",
+                "3258adc697a4eb16d54ba8770a885585b843c53eeb948eb7835f0623654bf56d",
+                "fcb476977867c8c2c2d4ddc9d249acc9a5a823020bb6a773bda2fff55b3a867b",
+                "9b87cbb56c7fd9f09d2168f433560e39c151c916bd0adb8402b9d137f90a0509",
+                "1ee1b3ce92e21a3874ca1b97d43acfe6b506b88ba6fdac33e410b1782e44c879",
+                "202454a83f1fd48a7b47f1944b787daffb7ca18ed021c2aee1d5a6616eb15504",
+                "6eaae032253319d34961eb8863bbff8975813028e940c30ba1941f946aa1ed2f",
+                "4cc3982a2662e5fd1e6ea201752e0f0a62729b46738030d0042b247d876f59cf",
+                "617f1629b4a3649ade055b930154c0492bfa9472d5e8ef850b0205af57abdde0",
+                "ca038f1c6fc7fb5db477eedf7d3d1e040d5e3842595c9c7c4f559f2d304dd981",
+                "b9a460d4c0b25955f536dbb3bd18ba979559ec271d48044dce59e75560b4eb4d",
+                "501d2ebacd0b1cda34ba5427383881b01697390a9cdc526781490f2508621456",
+                "906adb10349b6d79bc9c40479c1444c92147dbcecc92558b19a56c219aeebba3",
+                "8521d8da5757a1e8bb593e256ee5935637e4f2d38b6f6a5306d4ddd6be80aaa4",
+                "4cc1ec2f6e05a794573936387609660878a86785c398ad21abf3376dd34efcfb",
+                "6a868b2f5def6ec56da3b0e01d847c518bc6a20217f70c6378306038ef7fe81d",
+                "5bc404caf7cfba7c91d04c3a361b82f580f81b8148c87ef2452325f2633aae19",
+                "6cc49a0948f7da25d66f9ee3c2a6e3f57a83d2e757843b66c90d754dc13710a3",
+                "3979770021d9b1bdd80b6bac541bdb27456f235a97fe34181e80ef9a9fa1277b"
+            ],
+            "category": "agent_docs",
+            "critical": false,
+            "auto_update": true,
+            "preserve_executable": false,
+            "notes": "Agent operating manual from semitexa/ultimate. Replaced while it matches a released version; a project that edited it gets the new version as .new to merge."
+        },
+        {
+            "path": "AGENTS_DOCTRINE.md",
+            "current_sha256": "9c6b610f61ceed4e7c9a713c353ccaaff9f0dce2d0fbae74571f54ba6dd1cbf5",
+            "previous_sha256": [
+                "2ebe086d5ab0b4352ff5bbbc53fdac27d9b37584898acdcc0db558f761578324",
+                "5d9b961e34dc6cea2b68b880d5e66c3c130ab2de32fbd63bd0c8264669445030"
+            ],
+            "category": "agent_docs",
+            "critical": false,
+            "auto_update": true,
+            "preserve_executable": false,
+            "notes": "Agent operating manual from semitexa/ultimate. Replaced while it matches a released version; a project that edited it gets the new version as .new to merge."
+        },
+        {
+            "path": "AI_CONTEXT.md",
+            "current_sha256": "4de22e2ba2ef609867e74ab4787b0cced0693ba1288096292150596d6cc10163",
+            "previous_sha256": [
+                "163790bed789dd36184a5be2f1de9c9d6394b44dc669bec719a985b91b58238f",
+                "01c6224fe7b271e920cfd3735063fb00b091f11170edc667a3d9386904e8b23f",
+                "3d00ca5fe5d8891eb2fd1b23e5646bb540c498e6157a910c5e0d9e398dc67ac2",
+                "bd4f4c0aa93841261c34c38d29b7d3716f42d126578dd70ef9bc3daa4fab6be6"
+            ],
+            "category": "agent_docs",
+            "critical": false,
+            "auto_update": true,
+            "preserve_executable": false,
+            "notes": "Agent operating manual from semitexa/ultimate. Replaced while it matches a released version; a project that edited it gets the new version as .new to merge."
+        },
+        {
+            "path": "AI_ENTRY.md",
+            "current_sha256": "4b9d38cdf16c6345074e65fb6895c831751705f1a2d78e0cea06db796b5cc7ec",
+            "previous_sha256": [
+                "dd12c052d7857289479b4895bb65fbfa1437e9c71f74511a070ba80317ddb73f",
+                "ad1d57c159fc3e8308499aa1a8a22c74888ee1da5b86af56387236ce50a92882",
+                "33b036f5e5bdbb09759448ba97b09833b9dcb6a1da4c850db751aa39ed4ca713",
+                "8b1913827eb874248021cb7edbe88980b972a24746a45d0631ffdfdece51be7c",
+                "ca089853aec2061e7a22339d3ebcc684bd5da8e141efcf0d77922b38686c8df4",
+                "a670c21adad18dfba663418150951c5e29510a5076a2be7e5914961160be820b",
+                "30e5b332834c07bb018aa0cce4fcdbb610a7113e1262b3caed4a3cb4d117896d",
+                "d8cdddc856d6da07913d9b137425d009334553041b7f947aa1940b739609fb1b",
+                "753046db7a861701f223629ff0b3cf76c38783ddfafcba85198ac4a89c996d79",
+                "b4adff3d156865818339bbfd5ee3d945eb98064dc04382e1a514097892a05efb",
+                "3634e7fbcabc6c7d2df3c1c59a4bb4a437e01838323995818f0ad15c9a4627db",
+                "5474be4e7ba45ced18462cdb13bf477462e8ec4a2ec79f420085cb02515da4a6",
+                "ddf905fd02173fd923c9f4cc171d5f65353aedf13c51e67685044facbd5bd612",
+                "6b62bd7423fcc9514ad0bf5abc00b7fcd7f5e89c616f4a80eb6159d67b1607e2",
+                "62df046189ba8c0e10cff7964627690094890c45bad8f04eb896e22ee0fc4e2a",
+                "e2c1703600217bdca54edd0e68dc8c731ad2f8b5ec1290113652a9d19a31f7df",
+                "5b916c6fc25d9c38969879cd9341665797ecddd412bf67c7409e83c992e1f457",
+                "2daff27643a6773f724710b76f01889815ee24d8b0d0610b980722a5eccbd573",
+                "47748888db432ecbea50d4366273879dafba51da716f57fe957a2f19f645883f",
+                "f59facb682bd6a25fbe8477b328091db8c038bca262f26b5737b7b99ad832df9",
+                "079a924316fe59996a5074e5b746e9587b9135e206caf7602343f0b556f0b566"
+            ],
+            "category": "agent_docs",
+            "critical": false,
+            "auto_update": true,
+            "preserve_executable": false,
+            "notes": "Agent operating manual from semitexa/ultimate. Replaced while it matches a released version; a project that edited it gets the new version as .new to merge."
+        },
+        {
+            "path": "AI_REFERENCE.md",
+            "current_sha256": "d4ee3881ab7d9c72533dda42cac29216c9ac56436bf106f6d9b4f3a8cd400ddf",
+            "previous_sha256": [
+                "7475a00b80787341263818e154efab1fcda8a0a6093ce06101c59ba1903a2d1d",
+                "01cb3edbe787a3b0f8ce4da796a16cd3a51ad5d7fa665c05b9fb9614382dfdaf"
+            ],
+            "category": "agent_docs",
+            "critical": false,
+            "auto_update": true,
+            "preserve_executable": false,
+            "notes": "Agent operating manual from semitexa/ultimate. Replaced while it matches a released version; a project that edited it gets the new version as .new to merge."
+        },
+        {
+            "path": "CLAUDE.md",
+            "current_sha256": "405820308e20eea35acfb53493d8be034c78e2f0678fa6ffb3a2407c893209e6",
+            "previous_sha256": [
+                "e79532ea04f4e87d8706795508b17b857e701e128134169f3860454deafcb295",
+                "2c8287f0a9844bd8ce8ce83daf6edc19412fc596d1a2e7dc7f83ef0808789756"
+            ],
+            "category": "agent_docs",
+            "critical": false,
+            "auto_update": true,
+            "preserve_executable": false,
+            "notes": "Agent operating manual from semitexa/ultimate. Replaced while it matches a released version; a project that edited it gets the new version as .new to merge."
         },
         {
             "path": "Dockerfile",
