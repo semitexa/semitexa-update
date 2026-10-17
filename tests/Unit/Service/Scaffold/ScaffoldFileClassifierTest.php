@@ -250,9 +250,6 @@ final class ScaffoldFileClassifierTest extends TestCase
         return $this->manifest([$this->binEntry(currentBytes: $scaffoldBytes, autoUpdate: true)]);
     }
 
-    /**
-     * @param list<ScaffoldFileEntry> $entries
-     */
     public function testAnEditedAgentDocGetsTheNewManualAsDotNewWithoutTheFlag(): void
     {
         // The docs promise .new for an edited manual; without the flag every
@@ -293,6 +290,9 @@ final class ScaffoldFileClassifierTest extends TestCase
         );
     }
 
+    /**
+     * @param list<ScaffoldFileEntry> $entries
+     */
     private function manifest(array $entries): ScaffoldManifest
     {
         $byPath = [];

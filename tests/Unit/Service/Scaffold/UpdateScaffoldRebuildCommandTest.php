@@ -183,7 +183,7 @@ final class UpdateScaffoldRebuildCommandTest extends TestCase
     }
 
     /**
-     * @return array{path: string, current_sha256: string, previous_sha256: list<string>}
+     * @return array{path: string, current_sha256: string, previous_sha256: list<string>, category?: string}
      */
     private function manifestEntry(string $path): array
     {

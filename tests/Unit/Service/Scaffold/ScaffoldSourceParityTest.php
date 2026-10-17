@@ -88,20 +88,7 @@ final class ScaffoldSourceParityTest extends TestCase
         );
     }
 
-    public function testTheAgentDocsMatchSemitexaUltimate(): void
-    {
-        // Beside the installer (setUp skips without it) ultimate is there too.
-        $ultimate = $this->repoRoot() . '/packages/semitexa-ultimate';
-        self::assertFileExists($ultimate . '/AGENTS.md', 'the agent docs have no source beside this package');
-        $mismatched = [];
-        foreach (UpdateScaffoldRebuildCommand::AGENT_DOCS as $doc) {
-            if (!is_file($this->updateRoot . '/' . $doc) || hash_file('sha256', $ultimate . '/' . $doc) !== hash_file('sha256', $this->updateRoot . '/' . $doc)) {
-                $mismatched[] = $doc;
-            }
-        }
-        self::assertSame([], $mismatched, 'Agent docs diverged from semitexa-ultimate: run bin/semitexa update:scaffold:rebuild.');
-    }
-
+    // verify:accept-test-change the agent-docs parity moved to AgentDocsParityTest, out of this class's installer skip, and now fails on an unreadable doc
     public function testBinSemitexaExistsInBothCopies(): void
     {
         self::assertFileExists(
