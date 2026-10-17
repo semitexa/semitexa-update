@@ -149,6 +149,16 @@ final class ScaffoldManifestBuilderTest extends TestCase
                 "Shipped manifest current_sha256 for {$path} is stale — rebuild the manifest.",
             );
         }
+
+        // And against the installer source itself, not only the copy of it.
+        $installer = dirname(__DIR__, 5) . '/semitexa-installer/scaffold';
+        if (is_dir($installer)) {
+            foreach ($shipped->entries as $path => $shippedEntry) {
+                if (is_file($installer . '/' . $path)) {
+                    self::assertSame(hash_file('sha256', $installer . '/' . $path), $shippedEntry->currentSha256, "{$path} drifted from the installer scaffold");
+                }
+            }
+        }
     }
 
     public function testManifestIncludesBinSemitexaMarkedCritical(): void

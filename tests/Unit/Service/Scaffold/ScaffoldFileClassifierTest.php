@@ -253,6 +253,46 @@ final class ScaffoldFileClassifierTest extends TestCase
     /**
      * @param list<ScaffoldFileEntry> $entries
      */
+    public function testAnEditedAgentDocGetsTheNewManualAsDotNewWithoutTheFlag(): void
+    {
+        // The docs promise .new for an edited manual; without the flag every
+        // other file only gets a manual-review line.
+        $this->writeScaffold('CLAUDE.md', "new manual\n");
+        $this->writeProject('CLAUDE.md', "the project's own CLAUDE.md\n");
+
+        $entry = (new ScaffoldFileClassifier())->plan($this->project, $this->scaffold, $this->manifest([$this->docEntry("new manual\n")]))->entryByPath('CLAUDE.md');
+
+        self::assertNotNull($entry);
+        self::assertSame(ScaffoldSyncStatus::LocallyModified, $entry->status);
+        self::assertSame(ScaffoldSyncAction::WriteNew, $entry->action);
+        self::assertSame('CLAUDE.md.new', $entry->newFilePath);
+    }
+
+    public function testAnAgentDocTheProjectDeletedIsNotRecreated(): void
+    {
+        $this->writeScaffold('AI_REFERENCE.md', "manual\n");
+
+        $entry = (new ScaffoldFileClassifier())->plan($this->project, $this->scaffold, $this->manifest([$this->docEntry("manual\n", 'AI_REFERENCE.md')]))->entryByPath('AI_REFERENCE.md');
+
+        self::assertNotNull($entry);
+        self::assertSame(ScaffoldSyncStatus::Missing, $entry->status);
+        self::assertSame(ScaffoldSyncAction::None, $entry->action);
+    }
+
+    private function docEntry(string $currentBytes, string $path = 'CLAUDE.md'): ScaffoldFileEntry
+    {
+        return new ScaffoldFileEntry(
+            path: $path,
+            currentSha256: hash('sha256', $currentBytes),
+            previousSha256: [],
+            category: ScaffoldFileCategory::AgentDocs,
+            critical: false,
+            autoUpdate: true,
+            preserveExecutable: false,
+            notes: '',
+        );
+    }
+
     private function manifest(array $entries): ScaffoldManifest
     {
         $byPath = [];

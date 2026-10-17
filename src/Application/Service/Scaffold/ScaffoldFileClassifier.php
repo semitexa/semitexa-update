@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Update\Application\Service\Scaffold;
 
+use Semitexa\Update\Domain\Enum\ScaffoldFileCategory;
 use Semitexa\Update\Domain\Enum\ScaffoldFileHashMatch;
 use Semitexa\Update\Domain\Enum\ScaffoldSyncAction;
 use Semitexa\Update\Domain\Enum\ScaffoldSyncStatus;
@@ -82,6 +83,22 @@ final class ScaffoldFileClassifier
         $projectFile = $projectRoot . '/' . $manifestEntry->path;
 
         if (!file_exists($projectFile)) {
+            // A project that deleted an agent doc (AI_REFERENCE.md, a CLAUDE.md it
+            // does not want) meant it: bringing it back on every update is noise.
+            if ($manifestEntry->category === ScaffoldFileCategory::AgentDocs) {
+                return new ScaffoldSyncPlanEntry(
+                    path: $manifestEntry->path,
+                    status: ScaffoldSyncStatus::Missing,
+                    action: ScaffoldSyncAction::None,
+                    oldHash: null,
+                    newHash: $manifestEntry->currentSha256,
+                    backupPath: null,
+                    newFilePath: null,
+                    preserveExecutable: $manifestEntry->preserveExecutable,
+                    critical: $manifestEntry->critical,
+                    reason: 'Agent doc absent in project — not recreated; the project removed it.',
+                );
+            }
             if ($manifestEntry->autoUpdate) {
                 return new ScaffoldSyncPlanEntry(
                     path: $manifestEntry->path,
@@ -157,7 +174,9 @@ final class ScaffoldFileClassifier
             manifestEntry: $manifestEntry,
             status: ScaffoldSyncStatus::LocallyModified,
             projectHash: $projectHash,
-            writeCandidates: $writeCandidates,
+            // An edited manual still has to learn the new rules: the new version
+            // always lands beside it as .new, never over the project's edits.
+            writeCandidates: $writeCandidates || $manifestEntry->category === ScaffoldFileCategory::AgentDocs,
             manualReason: 'Project file is locally modified — live file untouched. '
                 . 'Run `bin/semitexa update --write-scaffold-candidates` to generate '
                 . $manifestEntry->path . '.new.',
