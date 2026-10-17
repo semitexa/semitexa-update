@@ -29,6 +29,10 @@ use Symfony\Component\Console\Style\SymfonyStyle;
  * prepends the prior hash into previous_sha256 so downstream projects on the
  * previous pristine version stay eligible for safe auto-update.
  *
+ * The agents' operating manual ({@see self::AGENT_DOCS}) is mirrored too, but
+ * from semitexa/ultimate, where `scaffold:sync-docs` puts it: nothing else ever
+ * updated it in a project (2026-10-17).
+ *
  * Only meaningful in a checkout where the installer package sits beside this
  * one (the dev monorepo). In a downstream vendor/ install there is nothing to
  * rebuild from; the command fails clearly instead of guessing.
@@ -36,6 +40,9 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 #[AsCommand(name: 'update:scaffold:rebuild', description: 'Mirror the installer scaffold into this package and regenerate scaffold-manifest.json')]
 final class UpdateScaffoldRebuildCommand extends BaseCommand
 {
+    /** semitexa-dev's ScaffoldSyncDocsCommand::MIRRORED_FILES minus README.md, which a project owns; checked on every rebuild. */
+    public const AGENT_DOCS = ['AGENTS.md', 'AGENTS_DOCTRINE.md', 'AI_CONTEXT.md', 'AI_ENTRY.md', 'AI_REFERENCE.md', 'CLAUDE.md'];
+
     /** Fixture package root injected by tests via overridePackageRoot(); null in production. */
     private ?string $packageRootOverride = null;
 
@@ -59,6 +66,12 @@ final class UpdateScaffoldRebuildCommand extends BaseCommand
                 'Path to the canonical installer scaffold dir (defaults to the sibling semitexa-installer package)',
             )
             ->addOption(
+                'agent-docs-root',
+                null,
+                InputOption::VALUE_REQUIRED,
+                'Directory holding the agent docs (defaults to the sibling semitexa-ultimate package)',
+            )
+            ->addOption(
                 'check',
                 null,
                 InputOption::VALUE_NONE,
@@ -78,11 +91,29 @@ final class UpdateScaffoldRebuildCommand extends BaseCommand
 
         try {
             $installerScaffold = $this->resolveInstallerScaffold($input, $packageRoot);
+            $docsRoot = $this->resolveAgentDocsRoot($input, $packageRoot);
+            $this->assertDocListMatchesSyncDocs();
 
-            $sourceFiles = $this->listFiles($installerScaffold);
-            if ($sourceFiles === []) {
+            $installerFiles = $this->listFiles($installerScaffold);
+            if ($installerFiles === []) {
                 throw new \RuntimeException("Installer scaffold has no files: {$installerScaffold}");
             }
+            /** @var array<string, string> $sources relative path => source file */
+            $sources = [];
+            foreach ($installerFiles as $relative) {
+                $sources[$relative] = $installerScaffold . '/' . $relative;
+            }
+            foreach (self::AGENT_DOCS as $doc) {
+                if (isset($sources[$doc])) {
+                    throw new \RuntimeException("{$doc} is in the installer scaffold too; the agent docs have one source, {$docsRoot}");
+                }
+                if (!is_file($docsRoot . '/' . $doc)) {
+                    throw new \RuntimeException("Agent doc missing from {$docsRoot}: {$doc}");
+                }
+                $sources[$doc] = $docsRoot . '/' . $doc;
+            }
+            ksort($sources);
+            $sourceFiles = array_keys($sources);
             $targetFiles = is_dir($updateScaffold) ? $this->listFiles($updateScaffold) : [];
 
             $hasher = new ScaffoldHasher();
@@ -95,8 +126,7 @@ final class UpdateScaffoldRebuildCommand extends BaseCommand
             // materialization via the manifest's preserve_executable policy, so a
             // mode difference between the SSoT and this template copy is harmless
             // and must not be reported as drift.
-            foreach ($sourceFiles as $relative) {
-                $src = $installerScaffold . '/' . $relative;
+            foreach ($sources as $relative => $src) {
                 $dst = $updateScaffold . '/' . $relative;
                 if (!is_file($dst) || $hasher->hashFile($src) !== $hasher->hashFile($dst)) {
                     $changed[] = $relative;
@@ -125,8 +155,10 @@ final class UpdateScaffoldRebuildCommand extends BaseCommand
             // the file on every run. A rewrite (with a fresh timestamp) happens
             // only when a file's hash registry actually changed.
             $prior = is_file($manifestPath) ? (new ScaffoldManifestLoader())->load($manifestPath) : null;
-            $manifestSource = $check ? $installerScaffold : $updateScaffold;
-            $new = (new ScaffoldManifestBuilder())->build($manifestSource, $prior);
+            $manifestSources = $check
+                ? $sources
+                : array_combine($sourceFiles, array_map(static fn (string $r): string => $updateScaffold . '/' . $r, $sourceFiles));
+            $new = (new ScaffoldManifestBuilder())->buildFromFiles($manifestSources, $prior);
             $priorFiles = $prior?->toArray()['files'] ?? null;
             $manifestChanged = $priorFiles !== $new->toArray()['files'];
 
@@ -140,6 +172,7 @@ final class UpdateScaffoldRebuildCommand extends BaseCommand
                 'status' => 'ok',
                 'mode' => $check ? 'check' : 'rebuild',
                 'installer_scaffold' => $installerScaffold,
+                'agent_docs_root' => $docsRoot,
                 'update_scaffold' => $updateScaffold,
                 'manifest_path' => $manifestPath,
                 'files_changed' => $changed,
@@ -220,6 +253,52 @@ final class UpdateScaffoldRebuildCommand extends BaseCommand
             'Could not locate the installer scaffold (SSoT). This authoring command needs the '
             . 'semitexa-installer package beside this one. Tried: ' . implode(', ', $candidates)
             . '. Pass --installer-scaffold=<path> to override.',
+        );
+    }
+
+    /**
+     * A doc scaffold:sync-docs starts mirroring into ultimate would otherwise
+     * never reach a project. Only checkable where semitexa/dev is installed,
+     * which is where this authoring command runs.
+     */
+    private function assertDocListMatchesSyncDocs(): void
+    {
+        $syncDocs = 'Semitexa\\Dev\\Application\\Console\\Command\\ScaffoldSyncDocsCommand';
+        if (!class_exists($syncDocs) || !defined($syncDocs . '::MIRRORED_FILES')) {
+            return;
+        }
+        $mirrored = array_values(array_diff((array) constant($syncDocs . '::MIRRORED_FILES'), ['README.md']));
+        sort($mirrored);
+        if ($mirrored !== self::AGENT_DOCS) {
+            throw new \RuntimeException(
+                'scaffold:sync-docs mirrors ' . implode(', ', $mirrored) . ' but the update scaffold carries '
+                . implode(', ', self::AGENT_DOCS) . ': update UpdateScaffoldRebuildCommand::AGENT_DOCS and its policy.',
+            );
+        }
+    }
+
+    private function resolveAgentDocsRoot(InputInterface $input, string $packageRoot): string
+    {
+        $override = $input->getOption('agent-docs-root');
+        if (is_string($override) && $override !== '') {
+            $real = realpath($override);
+            if ($real === false || !is_dir($real)) {
+                throw new \RuntimeException("--agent-docs-root path is not a directory: {$override}");
+            }
+            return $real;
+        }
+
+        // dev monorepo: packages/semitexa-ultimate; vendor: semitexa/ultimate
+        $candidates = [dirname($packageRoot) . '/semitexa-ultimate', dirname($packageRoot) . '/ultimate'];
+        foreach ($candidates as $candidate) {
+            if (is_file($candidate . '/AGENTS.md')) {
+                return $candidate;
+            }
+        }
+
+        throw new \RuntimeException(
+            'Could not locate the agent docs (semitexa/ultimate). Tried: ' . implode(', ', $candidates)
+            . '. Pass --agent-docs-root=<path> to override.',
         );
     }
 

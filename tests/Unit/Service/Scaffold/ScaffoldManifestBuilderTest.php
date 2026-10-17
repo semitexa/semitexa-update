@@ -125,10 +125,10 @@ final class ScaffoldManifestBuilderTest extends TestCase
 
     public function testShippedManifestMatchesRealScaffoldContent(): void
     {
-        $scaffoldRoot = dirname(__DIR__, 5) . '/semitexa-installer/scaffold';
-        if (!is_dir($scaffoldRoot)) {
-            self::markTestSkipped('scaffold source dir not available in this checkout');
-        }
+        // The shipped copy: since the agent docs joined it, it has two sources
+        // (the installer scaffold, semitexa/ultimate), each pinned to it by
+        // ScaffoldSourceParityTest. The manifest must describe this copy.
+        $scaffoldRoot = dirname(__DIR__, 4) . '/resources/scaffold';
 
         $shipped = (new ScaffoldManifestLoader())->load(
             dirname(__DIR__, 4) . '/resources/scaffold-manifest.json'
@@ -148,6 +148,16 @@ final class ScaffoldManifestBuilderTest extends TestCase
                 $rebuiltEntry->currentSha256,
                 "Shipped manifest current_sha256 for {$path} is stale — rebuild the manifest.",
             );
+        }
+
+        // And against the installer source itself, not only the copy of it.
+        $installer = dirname(__DIR__, 5) . '/semitexa-installer/scaffold';
+        if (is_dir($installer)) {
+            foreach ($shipped->entries as $path => $shippedEntry) {
+                if (is_file($installer . '/' . $path)) {
+                    self::assertSame(hash_file('sha256', $installer . '/' . $path), $shippedEntry->currentSha256, "{$path} drifted from the installer scaffold");
+                }
+            }
         }
     }
 

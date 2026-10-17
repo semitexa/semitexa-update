@@ -41,4 +41,15 @@ enum ScaffoldFileCategory: string
      * candidate rather than written over.
      */
     case Analysis = 'analysis';
+
+    /**
+     * The agents' operating manual (AGENTS.md, CLAUDE.md, AI_*.md).
+     *
+     * Its own category because its source is not the installer scaffold but
+     * semitexa/ultimate (root → `scaffold:sync-docs`), and because until
+     * 2026-10-17 nothing updated it at all: `init --only-docs` writes AGENTS.md
+     * only when it is missing, so every project kept the manual it was
+     * installed with — one five months old, without the presence directive.
+     */
+    case AgentDocs = 'agent_docs';
 }

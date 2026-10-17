@@ -40,6 +40,12 @@ final class UpdateScaffoldRebuildCommandTest extends TestCase
         file_put_contents($this->updateScaffold . '/bin/semitexa', "#!/bin/sh\necho old\n");
         file_put_contents($this->installerScaffold . '/bin/semitexa', "#!/bin/sh\necho new\n");
 
+        // The agent docs' source: semitexa/ultimate beside this package.
+        mkdir($this->base . '/ultimate', 0777, true);
+        foreach (UpdateScaffoldRebuildCommand::AGENT_DOCS as $doc) {
+            file_put_contents($this->base . '/ultimate/' . $doc, "# {$doc}\n");
+        }
+
         // Seed the committed manifest for the OLD content.
         $manifest = (new ScaffoldManifestBuilder())->build($this->updateScaffold, null, '2026-01-01T00:00:00+00:00');
         file_put_contents(
@@ -131,6 +137,40 @@ final class UpdateScaffoldRebuildCommandTest extends TestCase
         self::assertStringContainsString('not a directory', $tester->getDisplay());
     }
 
+    public function testAgentDocsComeFromUltimateIntoTheCopyAndTheManifest(): void
+    {
+        // init --only-docs never rewrote AGENTS.md, and the update scaffold did
+        // not carry it: every project kept the manual it was installed with.
+        self::assertSame(Command::SUCCESS, $this->tester()->execute(['--installer-scaffold' => $this->installerScaffold]));
+
+        foreach (UpdateScaffoldRebuildCommand::AGENT_DOCS as $doc) {
+            self::assertFileEquals($this->base . '/ultimate/' . $doc, $this->updateScaffold . '/' . $doc);
+            self::assertSame(hash_file('sha256', $this->base . '/ultimate/' . $doc), $this->manifestEntry($doc)['current_sha256']);
+            self::assertSame('agent_docs', $this->manifestEntry($doc)['category'] ?? null);
+        }
+        self::assertSame(Command::SUCCESS, $this->tester()->execute(['--installer-scaffold' => $this->installerScaffold, '--check' => true]));
+
+        file_put_contents($this->base . '/ultimate/AGENTS.md', "# AGENTS.md, with directive 11\n");
+        self::assertSame(Command::FAILURE, $this->tester()->execute(['--installer-scaffold' => $this->installerScaffold, '--check' => true]), 'a newer manual is drift');
+        $before = $this->manifestEntry('AGENTS.md')['current_sha256'];
+        $this->tester()->execute(['--installer-scaffold' => $this->installerScaffold]);
+        self::assertContains($before, $this->manifestEntry('AGENTS.md')['previous_sha256'], 'a project still on the old manual stays eligible');
+    }
+
+    public function testAMissingAgentDocOrASecondSourceFailsTheRebuild(): void
+    {
+        unlink($this->base . '/ultimate/AI_REFERENCE.md');
+        $tester = $this->tester();
+        self::assertSame(Command::FAILURE, $tester->execute(['--installer-scaffold' => $this->installerScaffold]));
+        self::assertStringContainsString('AI_REFERENCE.md', $tester->getDisplay());
+
+        file_put_contents($this->base . '/ultimate/AI_REFERENCE.md', "# back\n");
+        file_put_contents($this->installerScaffold . '/CLAUDE.md', "# a stray copy\n");
+        $tester = $this->tester();
+        self::assertSame(Command::FAILURE, $tester->execute(['--installer-scaffold' => $this->installerScaffold]));
+        self::assertStringContainsString('installer scaffold too', $tester->getDisplay());
+    }
+
     private function tester(): CommandTester
     {
         $cmd = new UpdateScaffoldRebuildCommand();
@@ -143,7 +183,7 @@ final class UpdateScaffoldRebuildCommandTest extends TestCase
     }
 
     /**
-     * @return array{path: string, current_sha256: string, previous_sha256: list<string>}
+     * @return array{path: string, current_sha256: string, previous_sha256: list<string>, category?: string}
      */
     private function manifestEntry(string $path): array
     {

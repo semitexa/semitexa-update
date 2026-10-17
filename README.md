@@ -102,6 +102,7 @@ in that case. Schema mutations belong to the ORM.
 ## CLI commands
 
 - `update` — run the full sweep: preflight → composer → scaffold → patches → orm-sync → health check; `--dry-run` prints the plan without changing state
+  - the scaffold phase covers `bin/semitexa`, the compose and PHPStan files, and the agent docs (`AGENTS.md`, `CLAUDE.md`, `AI_*.md`): a file that matches a released version is replaced (with a `.bak`), an edited one gets the new version beside it as `.new`
 - `update:plan` — compute and display pending patches only
 - `update:status` — updater version, installed release set, last run, and applied/pending/failed patch counts by phase
 - `update:history` — the run journal: past runs with outcome, package deltas, duration; `--id=<run>` shows one run in full
