@@ -1,11 +1,13 @@
 {
     "schema_version": "semitexa.scaffold-manifest/v1",
-    "generated_at": "2026-10-17T11:57:09+00:00",
+    "generated_at": "2026-10-18T07:38:34+00:00",
     "files": [
         {
             "path": ".env.default",
-            "current_sha256": "d1dfe01ce8d8d4b068b11a33836c4ba3c765cf4a6579f3feaf890f384f495736",
+            "current_sha256": "567f00979b133f1d11f96c313b0ecba9c793679303e69a54575163bb2e8ff6b2",
             "previous_sha256": [
+                "9321eb671fabdbc297eaa763449b19ef3b38878cbdd92c22bd24586956efd21e",
+                "d1dfe01ce8d8d4b068b11a33836c4ba3c765cf4a6579f3feaf890f384f495736",
                 "c618c804941d70ab5c1cde4b3c7c6083ee53750ec7772bfb88c25a148ac5fb30",
                 "c2d2c925d0457860b5f47a3fcf4ad88eb07eaaa0067fb5325a5634652dfb6c2a",
                 "c2d7a94221d62854b9347bda8dcfea72ab51731aa0ea88b3f6c6378ff665058a",
@@ -47,8 +49,9 @@
         },
         {
             "path": "AGENTS.md",
-            "current_sha256": "adbe5fdf10bfebff4e67ed70856406d600d7a42360e1ca3e9eed990df9ab18ab",
+            "current_sha256": "e747059cfb8f0fcc10665bdcd12823a5250598e1da38c307998f322fb68fa3db",
             "previous_sha256": [
+                "adbe5fdf10bfebff4e67ed70856406d600d7a42360e1ca3e9eed990df9ab18ab",
                 "92b4174b9dc8a34122daf1400a1893d13655ed828fb7b7043194c3257cd4eed5",
                 "932a060d0068fe648c1618ea855d11662cc9da201fb932bcea2e64228eab7511",
                 "fab8eef0e1e43533c910b1a6753979919d9f62be5542a001431a1007dfdbaf8c",
@@ -192,8 +195,12 @@
         },
         {
             "path": "bin/semitexa",
-            "current_sha256": "2c99f36d0e84ff0fa3e56ba4d0208351b9472dda22220a798b3d8217a5a29093",
+            "current_sha256": "853a6b0a4db57d78231da20028c1214cfb28f8844ca8659332c3012a648cae21",
             "previous_sha256": [
+                "4bd568800bad41e8cbaa55447201090455279c5fedf6099cc2d45bd21aa3c620",
+                "00befa53f59d90ecde89fe29ca39a1cf67bc6f2e5e659a173070bd22fe420ede",
+                "06cf12401fdd1bd7cbafa3548bc0faab1ebd57bb56e5f1f9299e12383dd4791c",
+                "2c99f36d0e84ff0fa3e56ba4d0208351b9472dda22220a798b3d8217a5a29093",
                 "a2b2f4f4ccd209a9beaec8fedee4727e4b146c343d2af7b4f3b1051a751cd339",
                 "f18ee566c68cf59ffe7e216b9d4b74272eba0197d826e92e0522b79775357ccb",
                 "b16e99704e43120a8b7b3cda022d540400bd428e3edf30fc0aabe2468a0f4bb3",
@@ -245,8 +252,9 @@
         },
         {
             "path": "docker-compose.mysql.yml",
-            "current_sha256": "53c8e502ec0bc88abcca04501868c6e728db0bf30d3cc35b7badb41cc36b6d6b",
+            "current_sha256": "fcaaef4e3a71426b481a2743d4e5f9c64847a3e54cca7ab857dc00766b7fed6d",
             "previous_sha256": [
+                "53c8e502ec0bc88abcca04501868c6e728db0bf30d3cc35b7badb41cc36b6d6b",
                 "d01c7bcdc2a4380c723bf48487fa5f21da4023d82d795fe14aea0f3a8e5469d6"
             ],
             "category": "infrastructure",
