@@ -195,8 +195,9 @@
         },
         {
             "path": "bin/semitexa",
-            "current_sha256": "00befa53f59d90ecde89fe29ca39a1cf67bc6f2e5e659a173070bd22fe420ede",
+            "current_sha256": "4bd568800bad41e8cbaa55447201090455279c5fedf6099cc2d45bd21aa3c620",
             "previous_sha256": [
+                "00befa53f59d90ecde89fe29ca39a1cf67bc6f2e5e659a173070bd22fe420ede",
                 "06cf12401fdd1bd7cbafa3548bc0faab1ebd57bb56e5f1f9299e12383dd4791c",
                 "2c99f36d0e84ff0fa3e56ba4d0208351b9472dda22220a798b3d8217a5a29093",
                 "a2b2f4f4ccd209a9beaec8fedee4727e4b146c343d2af7b4f3b1051a751cd339",
