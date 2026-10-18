@@ -4,7 +4,7 @@
     "files": [
         {
             "path": ".env.default",
-            "current_sha256": "12fbc6e276d229d928e8e646d8304012c78be1c258fe8dc5cabcae05181d1866",
+            "current_sha256": "567f00979b133f1d11f96c313b0ecba9c793679303e69a54575163bb2e8ff6b2",
             "previous_sha256": [
                 "9321eb671fabdbc297eaa763449b19ef3b38878cbdd92c22bd24586956efd21e",
                 "d1dfe01ce8d8d4b068b11a33836c4ba3c765cf4a6579f3feaf890f384f495736",
@@ -195,7 +195,7 @@
         },
         {
             "path": "bin/semitexa",
-            "current_sha256": "d3306dd6705dd5071cf9f09ab5e29bb7cf971f6d5f2e604a53e388f117c9b765",
+            "current_sha256": "00befa53f59d90ecde89fe29ca39a1cf67bc6f2e5e659a173070bd22fe420ede",
             "previous_sha256": [
                 "06cf12401fdd1bd7cbafa3548bc0faab1ebd57bb56e5f1f9299e12383dd4791c",
                 "2c99f36d0e84ff0fa3e56ba4d0208351b9472dda22220a798b3d8217a5a29093",
