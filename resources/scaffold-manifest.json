@@ -327,8 +327,9 @@
         },
         {
             "path": "docker-compose.yml",
-            "current_sha256": "3c3f63c831b13cfbed2c060663d578d4bd5798c4c318b52a02a4a4eac94c197b",
+            "current_sha256": "fcaf044935eaeb74faa9bc66112eff9d164a100dd38e7817eef503982f00d705",
             "previous_sha256": [
+                "3c3f63c831b13cfbed2c060663d578d4bd5798c4c318b52a02a4a4eac94c197b",
                 "742f914ec0fa0f85b98bdb17827cc97386c5fa9e1277fb18ed22009ad634e5e1",
                 "9e198b38ba1ad146b0beff15234c740cc50bd023a63c68bcecaaa365c95cf9d5",
                 "c2c6f2ba8f331d28e9411e182ddc4895eb1b21be1d2a91e43051367af57a598d",
