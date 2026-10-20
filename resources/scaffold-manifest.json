@@ -1,11 +1,12 @@
 {
     "schema_version": "semitexa.scaffold-manifest/v1",
-    "generated_at": "2026-10-19T20:28:40+00:00",
+    "generated_at": "2026-10-20T06:05:43+00:00",
     "files": [
         {
             "path": ".env.default",
-            "current_sha256": "567f00979b133f1d11f96c313b0ecba9c793679303e69a54575163bb2e8ff6b2",
+            "current_sha256": "75467cc3867cc584bf0eb587b72d986359058044643572e98f0febd08b687bfb",
             "previous_sha256": [
+                "567f00979b133f1d11f96c313b0ecba9c793679303e69a54575163bb2e8ff6b2",
                 "9321eb671fabdbc297eaa763449b19ef3b38878cbdd92c22bd24586956efd21e",
                 "d1dfe01ce8d8d4b068b11a33836c4ba3c765cf4a6579f3feaf890f384f495736",
                 "c618c804941d70ab5c1cde4b3c7c6083ee53750ec7772bfb88c25a148ac5fb30",
@@ -29,8 +30,9 @@
         },
         {
             "path": ".gitignore",
-            "current_sha256": "2a1a6399052acdf6d527c5c762736a327d2c1b81cd6c197c7c2d0a1e2dfc5b8f",
+            "current_sha256": "00f368b72de30bb80e53ce395c1eb7a1788d448460e025a5ecf681e1865ba905",
             "previous_sha256": [
+                "2a1a6399052acdf6d527c5c762736a327d2c1b81cd6c197c7c2d0a1e2dfc5b8f",
                 "b2b2b5c2e644e9acec6664d35ff0b86e1342b9c2d19a190d47af6ff37a919d16",
                 "a324b654c3d56d5a29a92568a510a260b390d0b89efae84fb9a800c5da4acb37",
                 "f5d3e4788f49b933a90ba173e6990000812e43b999a228e7d7e15ab764e0534f",
@@ -196,8 +198,9 @@
         },
         {
             "path": "bin/semitexa",
-            "current_sha256": "21c335027d565f36159d0f3c472d6de3e5dcfb64e2ad3ab1f58bc1dd240955de",
+            "current_sha256": "2f38d84d0542db47681dfd1c6a19ad554e3295908722f30b6c1ccc1fd27dd1b0",
             "previous_sha256": [
+                "21c335027d565f36159d0f3c472d6de3e5dcfb64e2ad3ab1f58bc1dd240955de",
                 "a6b3c14a265a6b619eed5176cca0d1b67c5b777adfc862ea227c8e5638e9552c",
                 "90daef193c479d3c748a26a84d47dde2061ae7e61ac0f6d1501303201990ee5d",
                 "b07234b57864c8fd5ff8f0217ab772fd801e14b649edae9c305f96e7b8f2fa3c",
@@ -329,9 +332,20 @@
             "notes": ""
         },
         {
+            "path": "docker-compose.worker.yml",
+            "current_sha256": "9d62d9ee3243086947b8ccefd06922df5d0d2b62718c0bdacf47cf4bdfbdc354",
+            "previous_sha256": [],
+            "category": "infrastructure",
+            "critical": false,
+            "auto_update": true,
+            "preserve_executable": false,
+            "notes": "The queue worker service. Self-contained: no other compose file names it, so a project keeping an older edited docker-compose.yml still gets a valid stack."
+        },
+        {
             "path": "docker-compose.yml",
-            "current_sha256": "fcaf044935eaeb74faa9bc66112eff9d164a100dd38e7817eef503982f00d705",
+            "current_sha256": "13e082a2ed610534f1ed54f26b0d5bc5ea8dff38e61efce8b4d2d3215081d653",
             "previous_sha256": [
+                "fcaf044935eaeb74faa9bc66112eff9d164a100dd38e7817eef503982f00d705",
                 "3c3f63c831b13cfbed2c060663d578d4bd5798c4c318b52a02a4a4eac94c197b",
                 "742f914ec0fa0f85b98bdb17827cc97386c5fa9e1277fb18ed22009ad634e5e1",
                 "9e198b38ba1ad146b0beff15234c740cc50bd023a63c68bcecaaa365c95cf9d5",
