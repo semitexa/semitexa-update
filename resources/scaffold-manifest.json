@@ -1,11 +1,12 @@
 {
     "schema_version": "semitexa.scaffold-manifest/v1",
-    "generated_at": "2026-10-20T07:30:15+00:00",
+    "generated_at": "2026-10-20T07:48:08+00:00",
     "files": [
         {
             "path": ".env.default",
-            "current_sha256": "75467cc3867cc584bf0eb587b72d986359058044643572e98f0febd08b687bfb",
+            "current_sha256": "c5d231030e94b778aa1b739796f2dd57a7c31bdde00794e37f4536cdc05f5326",
             "previous_sha256": [
+                "75467cc3867cc584bf0eb587b72d986359058044643572e98f0febd08b687bfb",
                 "567f00979b133f1d11f96c313b0ecba9c793679303e69a54575163bb2e8ff6b2",
                 "9321eb671fabdbc297eaa763449b19ef3b38878cbdd92c22bd24586956efd21e",
                 "d1dfe01ce8d8d4b068b11a33836c4ba3c765cf4a6579f3feaf890f384f495736",
@@ -198,8 +199,9 @@
         },
         {
             "path": "bin/semitexa",
-            "current_sha256": "2f38d84d0542db47681dfd1c6a19ad554e3295908722f30b6c1ccc1fd27dd1b0",
+            "current_sha256": "f9a0ccb401d29cb1d1811d54bc4129530213ddd4e41d084a1c25cc3341e2bd15",
             "previous_sha256": [
+                "2f38d84d0542db47681dfd1c6a19ad554e3295908722f30b6c1ccc1fd27dd1b0",
                 "21c335027d565f36159d0f3c472d6de3e5dcfb64e2ad3ab1f58bc1dd240955de",
                 "a6b3c14a265a6b619eed5176cca0d1b67c5b777adfc862ea227c8e5638e9552c",
                 "90daef193c479d3c748a26a84d47dde2061ae7e61ac0f6d1501303201990ee5d",
@@ -333,15 +335,16 @@
         },
         {
             "path": "docker-compose.worker.yml",
-            "current_sha256": "467b9f3fc23cff746384b6df71c164fa646dc356001df813580b4870d7cc2739",
+            "current_sha256": "93712e0ccb747cad16dd85f077daf5b8d8d179073a999a5f92af95e25a8097ef",
             "previous_sha256": [
+                "467b9f3fc23cff746384b6df71c164fa646dc356001df813580b4870d7cc2739",
                 "9d62d9ee3243086947b8ccefd06922df5d0d2b62718c0bdacf47cf4bdfbdc354"
             ],
             "category": "infrastructure",
             "critical": false,
             "auto_update": true,
             "preserve_executable": false,
-            "notes": "The queue worker service. Self-contained: no other compose file names it, so a project keeping an older edited docker-compose.yml still gets a valid stack."
+            "notes": "The worker service, which runs what worker:processes lists. Self-contained: no other compose file names it, so a project keeping an older edited docker-compose.yml still gets a valid stack."
         },
         {
             "path": "docker-compose.yml",
