@@ -1,6 +1,6 @@
 {
     "schema_version": "semitexa.scaffold-manifest/v1",
-    "generated_at": "2026-10-18T07:38:34+00:00",
+    "generated_at": "2026-10-19T20:28:40+00:00",
     "files": [
         {
             "path": ".env.default",
@@ -121,8 +121,9 @@
         },
         {
             "path": "AI_ENTRY.md",
-            "current_sha256": "4b9d38cdf16c6345074e65fb6895c831751705f1a2d78e0cea06db796b5cc7ec",
+            "current_sha256": "3465807eb5427c447214a653e7e2bd961a585655a83f8088c4b1d6bca56ff9ef",
             "previous_sha256": [
+                "4b9d38cdf16c6345074e65fb6895c831751705f1a2d78e0cea06db796b5cc7ec",
                 "dd12c052d7857289479b4895bb65fbfa1437e9c71f74511a070ba80317ddb73f",
                 "ad1d57c159fc3e8308499aa1a8a22c74888ee1da5b86af56387236ce50a92882",
                 "33b036f5e5bdbb09759448ba97b09833b9dcb6a1da4c850db751aa39ed4ca713",
@@ -195,8 +196,11 @@
         },
         {
             "path": "bin/semitexa",
-            "current_sha256": "b07234b57864c8fd5ff8f0217ab772fd801e14b649edae9c305f96e7b8f2fa3c",
+            "current_sha256": "21c335027d565f36159d0f3c472d6de3e5dcfb64e2ad3ab1f58bc1dd240955de",
             "previous_sha256": [
+                "a6b3c14a265a6b619eed5176cca0d1b67c5b777adfc862ea227c8e5638e9552c",
+                "90daef193c479d3c748a26a84d47dde2061ae7e61ac0f6d1501303201990ee5d",
+                "b07234b57864c8fd5ff8f0217ab772fd801e14b649edae9c305f96e7b8f2fa3c",
                 "3858446c226b01b81325de67bda60a4c366ac9900c5d67b1efc089680694180a",
                 "853a6b0a4db57d78231da20028c1214cfb28f8844ca8659332c3012a648cae21",
                 "4bd568800bad41e8cbaa55447201090455279c5fedf6099cc2d45bd21aa3c620",
@@ -326,8 +330,9 @@
         },
         {
             "path": "docker-compose.yml",
-            "current_sha256": "3c3f63c831b13cfbed2c060663d578d4bd5798c4c318b52a02a4a4eac94c197b",
+            "current_sha256": "fcaf044935eaeb74faa9bc66112eff9d164a100dd38e7817eef503982f00d705",
             "previous_sha256": [
+                "3c3f63c831b13cfbed2c060663d578d4bd5798c4c318b52a02a4a4eac94c197b",
                 "742f914ec0fa0f85b98bdb17827cc97386c5fa9e1277fb18ed22009ad634e5e1",
                 "9e198b38ba1ad146b0beff15234c740cc50bd023a63c68bcecaaa365c95cf9d5",
                 "c2c6f2ba8f331d28e9411e182ddc4895eb1b21be1d2a91e43051367af57a598d",
