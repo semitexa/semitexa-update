@@ -16,8 +16,9 @@ use Semitexa\Update\Domain\Model\DeploymentPlan;
 use Semitexa\Update\Domain\Model\PackageUpdate;
 
 /**
- * Partial-failure semantics of the auto-deploy executor: when a step after a
- * successful `composer update` fails, the pre-update composer state is
+ * Partial-failure semantics of the auto-deploy executor: when a step after
+ * `composer update` changed something fails (or composer itself, after
+ * rewriting the lock), the pre-update composer state is
  * restored (files + vendor reinstall), the failure is journaled, and the
  * shared update lock is released.
  */
@@ -202,6 +203,91 @@ final class FrameworkDeploymentExecutorRollbackTest extends TestCase
         $record = $journal->findRecent()[0];
         self::assertSame(RunOutcome::Noop, $record->outcome);
         self::assertSame([], $record->packageDeltas);
+    }
+
+    /** A composer that failed half-way left the lock and vendor/ as it had them. */
+    public function testAComposerUpdateThatFailsIsRolledBackToo(): void
+    {
+        $ran = [];
+        $executor = new FrameworkDeploymentExecutor(
+            new DeploymentLogWriter(),
+            null,
+            new UpdateLock($this->projectRoot),
+            static function (string $command, string $projectRoot) use (&$ran): void {
+                $ran[] = $command;
+                if (str_contains($command, ' update ')) {
+                    file_put_contents($projectRoot . '/composer.lock', '{"packages":[{"name":"semitexa/core","version":"2.0.0"}]}');
+                    throw new \RuntimeException('composer: network unreachable');
+                }
+            },
+        );
+
+        $result = $executor->execute($this->projectRoot, $this->plan());
+
+        self::assertSame('failed', $result['status']);
+        self::assertStringStartsWith('performed', (string) $result['rollback']);
+        self::assertStringContainsString('1.0.0', (string) file_get_contents($this->projectRoot . '/composer.lock'));
+        self::assertTrue((bool) array_filter($ran, static fn (string $c): bool => str_contains($c, ' install ')), 'vendor/ reinstalled from the restored lock');
+    }
+
+    /**
+     * Inside the app container nothing is restarted, but cache:clear has
+     * reloaded the workers on the new vendor/: the health check still runs,
+     * and it is what rolls a broken release back.
+     */
+    public function testTheHealthCheckRunsWithoutARestartAndRollsBack(): void
+    {
+        $plan = $this->plan();
+        $plan = new DeploymentPlan(
+            config: new DeploymentConfig(enabled: true, channel: 'stable', sourceMode: 'packagist', healthcheckUrl: 'http://127.0.0.1:1/never', privateRepositoryUrl: null, restartCommand: null),
+            installedPackages: $plan->installedPackages,
+            packageUpdates: $plan->packageUpdates,
+            privateLatestVersion: null,
+            selectedVersion: '2.0.0',
+            updateAvailable: true,
+            reason: 'test',
+        );
+        $executor = new FrameworkDeploymentExecutor(
+            new DeploymentLogWriter(),
+            null,
+            new UpdateLock($this->projectRoot),
+            static function (string $command, string $projectRoot): void {
+                if (str_contains($command, ' update ')) {
+                    file_put_contents($projectRoot . '/composer.lock', '{"packages":[{"name":"semitexa/core","version":"2.0.0"}]}');
+                }
+            },
+        );
+
+        $result = $executor->execute($this->projectRoot, $plan);
+
+        self::assertSame('failed', $result['status']);
+        self::assertStringStartsWith('performed', (string) $result['rollback']);
+    }
+
+    /**
+     * Packagist unreachable, a token expired: composer fails before it
+     * changes anything. A rollback there restarted the app every tick.
+     */
+    public function testAComposerThatFailedBeforeChangingTheLockIsNotRolledBack(): void
+    {
+        $ran = [];
+        $executor = new FrameworkDeploymentExecutor(
+            new DeploymentLogWriter(),
+            null,
+            new UpdateLock($this->projectRoot),
+            static function (string $command, string $projectRoot) use (&$ran): void {
+                $ran[] = $command;
+                if (str_contains($command, ' update ')) {
+                    throw new \RuntimeException('composer: could not resolve host');
+                }
+            },
+        );
+
+        $result = $executor->execute($this->projectRoot, $this->plan());
+
+        self::assertSame('failed', $result['status']);
+        self::assertStringStartsWith('not needed', (string) $result['rollback']);
+        self::assertCount(1, $ran, 'no composer install, no restart');
     }
 
     private function plan(): DeploymentPlan

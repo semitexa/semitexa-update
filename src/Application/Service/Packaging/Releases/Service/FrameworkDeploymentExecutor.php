@@ -68,6 +68,8 @@ final class FrameworkDeploymentExecutor
         $lock = null;
         $snapshot = null;
         $composerUpdated = false;
+        $composerStarted = false;
+        $lockBefore = false;
         try {
             if (!$plan->config->enabled) {
                 return $this->finalize($projectRoot, $result, 'skipped');
@@ -109,7 +111,9 @@ final class FrameworkDeploymentExecutor
             $snapshot = ComposerStateSnapshot::capture($projectRoot);
             $lockBefore = @file_get_contents($projectRoot . '/composer.lock');
 
-            $this->run($this->composerUpdateCommand($projectRoot), $projectRoot);
+            $composerCommand = $this->composerUpdateCommand($projectRoot);
+            $composerStarted = true;
+            $this->run($composerCommand, $projectRoot);
             $composerUpdated = true;
 
             $this->assertVendorMatchesLock($projectRoot);
@@ -141,9 +145,19 @@ final class FrameworkDeploymentExecutor
             $result['restart_status'] = $restartStatus['message'];
 
             // Mandatory when configured: a deploy that cannot prove the app
-            // answers is a failed deploy, restart or not.
+            // answers is a failed deploy, restart or not. Without a restart
+            // (inside the app container) it asks workers cache:clear reloaded
+            // on the new vendor/; it is the only check that can roll back.
+            // After a restart the server is given a few seconds to come up.
             if ($plan->config->healthcheckUrl !== null) {
-                $check = $this->healthChecker->check($plan->config->healthcheckUrl);
+                $attempts = $restartStatus['performed'] ? 4 : 1;
+                for ($attempt = 1; ; $attempt++) {
+                    $check = $this->healthChecker->check($plan->config->healthcheckUrl);
+                    if ($check->ok || $attempt >= $attempts) {
+                        break;
+                    }
+                    sleep(3);
+                }
                 if (!$check->ok) {
                     throw new \RuntimeException($check->message);
                 }
@@ -156,7 +170,14 @@ final class FrameworkDeploymentExecutor
         } catch (\Throwable $e) {
             $result['status'] = 'failed';
             $result['reason'] = $e->getMessage();
-            if ($composerUpdated && $snapshot !== null) {
+            if ($composerStarted && !$composerUpdated && $lockBefore === @file_get_contents($projectRoot . '/composer.lock')) {
+                // Composer failed before it changed the lock (Packagist
+                // unreachable, a token expired): nothing to roll back, and no
+                // restart every tick for as long as that lasts.
+                $result['rollback'] = 'not needed: composer failed before it changed composer.lock.';
+            } elseif ($composerStarted && $snapshot !== null) {
+                // Also when composer failed half-way: it may already have
+                // rewritten the lock or part of vendor/.
                 $result['rollback'] = $this->rollback($projectRoot, $snapshot, $plan->config->restartCommand);
                 // Rolled back: vendor/ no longer holds what was read after the update.
                 foreach ($result['updated_packages'] as $i => $update) {
@@ -303,8 +324,9 @@ final class FrameworkDeploymentExecutor
 
     /**
      * Best-effort revert to the pre-update dependency state after a failure
-     * that happened once vendor/ was already upgraded: restore composer
-     * files, reinstall vendor from the restored lock, restart. The returned
+     * once composer had changed something (a later step failed, or composer
+     * failed after rewriting the lock): restore composer files, reinstall
+     * vendor from the restored lock, restart. The returned
      * string lands in the deployment log + run journal either way.
      */
     private function rollback(string $projectRoot, ComposerStateSnapshot $snapshot, ?string $restartCommand): string

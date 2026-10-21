@@ -38,7 +38,7 @@ final class UpdatePackagesBootstrapRemoteCommand extends BaseCommand
             ->addOption('target', null, InputOption::VALUE_REQUIRED, 'Explicit remote target in user@host format')
             ->addOption('path', null, InputOption::VALUE_REQUIRED, 'Remote deployment path override')
             ->addOption('force-reinitialize', null, InputOption::VALUE_NONE, 'Allow bootstrap validation against an already initialized remote path')
-            ->addOption('remote-env-file', null, InputOption::VALUE_REQUIRED, 'Reserved for future remote production env file support')
+            ->addOption('remote-env-file', null, InputOption::VALUE_REQUIRED, 'A local .env file to upload as the server\'s .env instead of the generated one')
             ->addOption('json', null, InputOption::VALUE_NONE, 'Output remote bootstrap preflight result as JSON');
     }
 
