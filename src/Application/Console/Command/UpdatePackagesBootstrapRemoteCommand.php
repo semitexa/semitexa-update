@@ -35,7 +35,7 @@ final class UpdatePackagesBootstrapRemoteCommand extends BaseCommand
     protected function configure(): void
     {
         $this
-            ->addOption('target', null, InputOption::VALUE_REQUIRED, 'Explicit remote target in user@host format')
+            ->addOption('target', null, InputOption::VALUE_REQUIRED, 'Explicit remote target, user@host or user@[IPv6 address]')
             ->addOption('path', null, InputOption::VALUE_REQUIRED, 'Remote deployment path override')
             ->addOption('force-reinitialize', null, InputOption::VALUE_NONE, 'Allow bootstrap validation against an already initialized remote path')
             ->addOption('remote-env-file', null, InputOption::VALUE_REQUIRED, 'A local .env file to upload as the server\'s .env instead of the generated one')
@@ -74,16 +74,20 @@ final class UpdatePackagesBootstrapRemoteCommand extends BaseCommand
 
             $sshClient = new RemoteSshClient();
             $password = null;
-            $probe = $sshClient->probeBatchAuth($target, $config->sshPort);
+            // SEMITEXA_REMOTE_DEPLOY_USE_PASSWORD=true asks for the password
+            // at once; otherwise a key is tried first. It was read and unused.
+            $probe = $config->preferPasswordAuth ? null : $sshClient->probeBatchAuth($target, $config->sshPort);
             $authMode = 'ssh-key';
 
-            if (!$probe->isSuccess()) {
-                if (!$sshClient->requiresPassword($probe)) {
+            if ($probe === null || !$probe->isSuccess()) {
+                if ($probe !== null && !$sshClient->requiresPassword($probe)) {
                     throw new \RuntimeException('SSH connection failed: ' . $this->bestError($probe->stderr, $probe->stdout));
                 }
 
                 if (!$checker->hasSshpass()) {
-                    throw new \RuntimeException('SSH password auth is required, but sshpass is not installed locally.');
+                    throw new \RuntimeException($probe === null
+                        ? 'SEMITEXA_REMOTE_DEPLOY_USE_PASSWORD=true needs sshpass installed locally.'
+                        : 'SSH password auth is required, but sshpass is not installed locally.');
                 }
 
                 $password = $io->askHidden('SSH password for ' . $target->toConnectionString());
@@ -318,7 +322,7 @@ final class UpdatePackagesBootstrapRemoteCommand extends BaseCommand
 
         if ($configuredTargets === []) {
             $this->assertInteractive($input);
-            $raw = $io->ask('No remote deploy target is configured. Enter a target in user@host format');
+            $raw = $io->ask('No remote deploy target is configured. Enter a target (user@host, or user@[IPv6 address])');
             if (!is_string($raw) || trim($raw) === '') {
                 throw new \RuntimeException('Remote deploy target was not provided.');
             }

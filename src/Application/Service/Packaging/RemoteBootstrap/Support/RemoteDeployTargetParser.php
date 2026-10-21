@@ -32,16 +32,19 @@ final class RemoteDeployTargetParser
     public function parseOne(string $rawTarget): RemoteDeployTarget
     {
         $rawTarget = trim($rawTarget);
-        if (!preg_match('/^(?<user>[a-zA-Z0-9._-]+)@(?<host>[a-zA-Z0-9.-]+)$/', $rawTarget, $matches)) {
+        // An IPv6 address in brackets (user@[2001:db8::10]): bare, its
+        // colons could not be told from a port or an scp path.
+        if (preg_match('/^(?<user>[a-zA-Z0-9._-]+)@(?:(?<host>[a-zA-Z0-9.-]+)|\[(?<v6>[0-9a-fA-F:.]+)\])$/', $rawTarget, $matches) !== 1
+            || (($matches['v6'] ?? '') !== '' && filter_var($matches['v6'], FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) === false)) {
             throw new \InvalidArgumentException(sprintf(
-                'Invalid remote target "%s". Expected format: user@host',
+                'Invalid remote target "%s". Expected format: user@host or user@[IPv6 address]',
                 $rawTarget,
             ));
         }
 
         return new RemoteDeployTarget(
             user: $matches['user'],
-            host: $matches['host'],
+            host: ($matches['v6'] ?? '') !== '' ? strtolower($matches['v6']) : $matches['host'],
         );
     }
 }

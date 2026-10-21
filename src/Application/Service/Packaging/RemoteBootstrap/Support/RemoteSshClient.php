@@ -28,7 +28,7 @@ final class RemoteSshClient
     public function upload(RemoteDeployTarget $target, int $port, string $localPath, string $remotePath, ?string $password = null): SshCommandResult
     {
         return $this->execute(
-            $this->buildScpCommand($target, $port, $localPath, $remotePath),
+            $this->buildScpCommand($target, $port, $localPath, $remotePath, $password !== null),
             $password,
         );
     }
@@ -85,14 +85,14 @@ final class RemoteSshClient
     {
         return array_merge([
             'ssh',
-        ], $this->identityArgs(), [
+        ], $batchMode ? $this->identityArgs() : self::passwordOnlyArgs(), [
             '-p',
             (string) $port,
             '-o',
             $batchMode ? 'BatchMode=yes' : 'BatchMode=no',
             '-o',
             'StrictHostKeyChecking=accept-new',
-            $target->toConnectionString(),
+            $target->sshDestination(),
             'sh -lc ' . escapeshellarg($command),
         ]);
     }
@@ -100,11 +100,11 @@ final class RemoteSshClient
     /**
      * @return list<string>
      */
-    private function buildScpCommand(RemoteDeployTarget $target, int $port, string $localPath, string $remotePath): array
+    private function buildScpCommand(RemoteDeployTarget $target, int $port, string $localPath, string $remotePath, bool $withPassword = false): array
     {
         return array_merge([
             'scp',
-        ], $this->identityArgs(), [
+        ], $withPassword ? self::passwordOnlyArgs() : $this->identityArgs(), [
             '-P',
             (string) $port,
             '-o',
@@ -117,6 +117,19 @@ final class RemoteSshClient
     /**
      * @return list<string>
      */
+    /**
+     * With a password, the password only: a key with a passphrase and no
+     * agent made ssh ask for the passphrase inside sshpass, which answers
+     * only a password prompt, and the command hung with no output.
+     *
+     * @return list<string>
+     */
+    private static function passwordOnlyArgs(): array
+    {
+        return ['-o', 'PubkeyAuthentication=no', '-o', 'PreferredAuthentications=password,keyboard-interactive'];
+    }
+
+    /** @return list<string> */
     private function identityArgs(): array
     {
         $identityFile = trim((string) getenv('SEMITEXA_REMOTE_DEPLOY_SSH_IDENTITY_FILE'));

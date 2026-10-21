@@ -23,4 +23,21 @@ final class RemoteDeployTargetParserTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
         (new RemoteDeployTargetParser())->parseOne('bad-target');
     }
+
+    /** IPv6 targets were refused outright. */
+    public function testParsesABracketedIpv6Target(): void
+    {
+        $target = (new RemoteDeployTargetParser())->parseOne('deploy@[2001:db8::10]');
+
+        self::assertSame('2001:db8::10', $target->host);
+        self::assertSame('deploy@[2001:db8::10]', $target->toConnectionString());
+        self::assertSame('deploy@2001:db8::10', $target->sshDestination());
+        self::assertSame('deploy@[2001:db8::10]', (new RemoteDeployTargetParser())->parseOne($target->toConnectionString())->toConnectionString(), 'what the settings store parses back');
+    }
+
+    public function testRejectsABracketedHostThatIsNotIpv6(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        (new RemoteDeployTargetParser())->parseOne('deploy@[1.2.3]');
+    }
 }
