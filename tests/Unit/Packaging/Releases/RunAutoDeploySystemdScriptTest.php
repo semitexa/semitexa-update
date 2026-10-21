@@ -39,6 +39,34 @@ final class RunAutoDeploySystemdScriptTest extends TestCase
         }
     }
 
+    /**
+     * The host has no PHP: the wrapper parsed the JSON with `php -r` and
+     * failed on every tick there. A noop must not restart anything.
+     */
+    public function testANoopRestartsNothingAndNeedsNoPhpOnTheHost(): void
+    {
+        $server = $this->startHttpServer(200);
+        $projectRoot = $this->createFakeProject($server, null, ['status' => 'noop', 'restart_required' => false, 'reason' => 'pinned "x", see {y}']);
+
+        try {
+            $path = $projectRoot . '/nophp';
+            mkdir($path);
+            foreach (['bash', 'sed', 'grep', 'tail', 'head', 'curl', 'touch', 'sleep', 'env', 'printf'] as $tool) {
+                $found = trim((string) shell_exec('command -v ' . $tool));
+                if ($found !== '' && $found[0] === '/') {
+                    symlink($found, $path . '/' . $tool);
+                }
+            }
+            $command = sprintf('PATH=%s bash %s %s 2>&1', escapeshellarg($path), escapeshellarg(dirname(__DIR__, 4) . '/tools/run-auto-deploy-systemd.sh'), escapeshellarg($projectRoot));
+            exec($command, $lines, $exitCode);
+
+            self::assertSame(0, $exitCode, implode("\n", $lines));
+            self::assertFileDoesNotExist($projectRoot . '/var/server-started');
+        } finally {
+            $this->cleanupProject($projectRoot, $server);
+        }
+    }
+
     public function testWrapperFailsWhenDeployCheckOutputIsMalformed(): void
     {
         $server = $this->startHttpServer(200);
@@ -127,16 +155,19 @@ final class RunAutoDeploySystemdScriptTest extends TestCase
     /**
      * @param array{server_root: string, port: int, process: resource} $server
      */
-    private function createFakeProject(array $server, ?string $deployCheckOutput = null): string
+    /** @param array<string, mixed>|null $autoPayload */
+    private function createFakeProject(array $server, ?string $deployCheckOutput = null, ?array $autoPayload = null): string
     {
         $projectRoot = sys_get_temp_dir() . '/semitexa-auto-deploy-project-' . bin2hex(random_bytes(4));
         mkdir($projectRoot . '/bin', 0777, true);
         mkdir($projectRoot . '/var', 0777, true);
 
-        $payload = json_encode([
+        $payload = json_encode($autoPayload ?? [
             'status' => 'updated',
+            'reason' => 'a "quoted" reason with {braces}',
             'restart_required' => true,
-        ], JSON_THROW_ON_ERROR);
+            'updated_packages' => [['package' => 'semitexa/core', 'installed_version' => '1', 'latest_version' => '2']],
+        ], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
 
         $healthcheckPayload = json_encode([
             'healthcheck_url' => sprintf('http://127.0.0.1:%d/', $server['port']),
@@ -154,7 +185,8 @@ case "\${1:-}" in
   update:packages:check)
     printf '%s\n' '__HEALTHCHECK_PAYLOAD__'
     ;;
-  server:start)
+  server:restart)
+    echo '[INFO] Restarting the stack'
     touch var/server-started
     ;;
   *)

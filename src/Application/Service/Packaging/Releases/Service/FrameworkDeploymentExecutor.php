@@ -77,6 +77,21 @@ final class FrameworkDeploymentExecutor
                 return $this->finalize($projectRoot, $result, 'noop');
             }
 
+            // The planner reads the newest releases, not composer.json. A
+            // project made from semitexa/ultimate pins every semitexa/*
+            // exactly: composer could move none of them, yet every tick ran
+            // it and reported "updated" with versions that were never
+            // installed. Said, and composer not run, when nothing can move.
+            $pinned = self::pinnedWhereTheyAre($projectRoot, $plan);
+            if ($pinned !== null) {
+                $result['reason'] = sprintf(
+                    'Newer releases exist, but composer.json pins %s at the installed version, so nothing can move. Take them with bin/semitexa update, which moves the pins.',
+                    count($pinned) === 1 ? $pinned[0] : count($pinned) . ' packages',
+                );
+
+                return $this->finalize($projectRoot, $result, 'noop');
+            }
+
             // Same lock as the manual `update` sweep: never race a running
             // operator update from the auto-deploy timer (or vice versa).
             $lock = $this->lock ?? new UpdateLock($projectRoot);
@@ -92,11 +107,31 @@ final class FrameworkDeploymentExecutor
             $runId = $this->beginRunRecord($result);
 
             $snapshot = ComposerStateSnapshot::capture($projectRoot);
+            $lockBefore = @file_get_contents($projectRoot . '/composer.lock');
 
             $this->run($this->composerUpdateCommand($projectRoot), $projectRoot);
             $composerUpdated = true;
 
             $this->assertVendorMatchesLock($projectRoot);
+
+            // What was installed, not what was planned: a constraint can hold
+            // a package back, and the journal said it moved.
+            $installed = self::installedVersions($projectRoot);
+            $moved = false;
+            foreach ($result['updated_packages'] as $i => $update) {
+                $deployed = $installed[$update['package']] ?? null;
+                $result['updated_packages'][$i]['deployed_version'] = $deployed;
+                $moved = $moved || ($deployed !== null && $deployed !== $update['installed_version']);
+            }
+            // Composer ran and installed none of them (a constraint held one
+            // back, or a pinned package the newer one needs) and nothing else
+            // in the lock changed: nothing to sync or restart. Taken for an
+            // update, it restarted the app every tick.
+            if (!$moved && is_string($lockBefore) && $lockBefore === @file_get_contents($projectRoot . '/composer.lock')) {
+                $result['reason'] = 'Newer releases exist, but composer installed none of them: a constraint in composer.json holds them back. bin/semitexa update moves the pins to the newest release set.';
+
+                return $this->finalize($projectRoot, $result, 'noop', $plan, $runId);
+            }
 
             $this->run($this->projectCliCommand($projectRoot, 'orm:sync'), $projectRoot);
             $this->run($this->projectCliCommand($projectRoot, 'cache:clear'), $projectRoot);
@@ -123,6 +158,10 @@ final class FrameworkDeploymentExecutor
             $result['reason'] = $e->getMessage();
             if ($composerUpdated && $snapshot !== null) {
                 $result['rollback'] = $this->rollback($projectRoot, $snapshot, $plan->config->restartCommand);
+                // Rolled back: vendor/ no longer holds what was read after the update.
+                foreach ($result['updated_packages'] as $i => $update) {
+                    unset($result['updated_packages'][$i]['deployed_version']);
+                }
             }
             return $this->finalize($projectRoot, $result, 'failed', $plan, $runId);
         } finally {
@@ -151,13 +190,18 @@ final class FrameworkDeploymentExecutor
             return;
         }
 
+        // The deploy installs with --no-dev, which takes require-dev packages
+        // out of vendor/ while the lock keeps them: semitexa/testing, which
+        // every project made from semitexa/ultimate requires for dev, was
+        // "missing" after every update and every deploy was rolled back.
+        $devOnly = self::devPackagesLeftOut($projectRoot);
         $stale = array_values(array_filter(
             (new PackageDriftInspector())->inspect($projectRoot)->entries,
             static fn (PackageDriftEntry $entry): bool => in_array($entry->status, [
                 PackageDriftStatus::VendorStale,
                 PackageDriftStatus::MissingFromVendor,
                 PackageDriftStatus::VersionMismatch,
-            ], true),
+            ], true) && !($entry->status === PackageDriftStatus::MissingFromVendor && isset($devOnly[$entry->name])),
         ));
 
         if ($stale === []) {
@@ -177,6 +221,84 @@ final class FrameworkDeploymentExecutor
                 array_slice($stale, 0, 5),
             )),
         ));
+    }
+
+    /**
+     * The planned packages, when composer.json pins every one of them at the
+     * version installed (`"2026.10.19.0811"`, `"==…"`, `"v…"`); null when any
+     * could move.
+     *
+     * @return list<string>|null
+     */
+    private static function pinnedWhereTheyAre(string $projectRoot, DeploymentPlan $plan): ?array
+    {
+        $manifest = json_decode((string) @file_get_contents($projectRoot . '/composer.json'), true);
+        if (!is_array($manifest) || $plan->packageUpdates === []) {
+            return null;
+        }
+        $declared = array_merge(
+            is_array($manifest['require-dev'] ?? null) ? $manifest['require-dev'] : [],
+            is_array($manifest['require'] ?? null) ? $manifest['require'] : [],
+        );
+        $pinned = [];
+        foreach ($plan->packageUpdates as $update) {
+            $constraint = $declared[$update->packageName] ?? null;
+            if (!is_string($constraint) || self::bareVersion(ltrim(trim($constraint), '=')) !== self::bareVersion($update->installedVersion)) {
+                return null;
+            }
+            $pinned[] = $update->packageName;
+        }
+
+        return $pinned;
+    }
+
+    private static function bareVersion(string $version): string
+    {
+        return ltrim(trim($version), 'vV');
+    }
+
+    /** @return array<string, string> package => version, as vendor/composer/installed.json has it */
+    private static function installedVersions(string $projectRoot): array
+    {
+        $installed = json_decode((string) @file_get_contents($projectRoot . '/vendor/composer/installed.json'), true);
+        $versions = [];
+        foreach ((is_array($installed) ? ($installed['packages'] ?? []) : []) as $package) {
+            if (is_array($package) && is_string($package['name'] ?? null) && is_string($package['version'] ?? null)) {
+                $versions[$package['name']] = self::bareVersion($package['version']);
+            }
+        }
+
+        return $versions;
+    }
+
+    /**
+     * The lock's require-dev packages, when vendor/ was installed without
+     * them (installed.json says "dev": false); none otherwise, so a dev
+     * install that lost one still fails.
+     *
+     * @return array<string, true>
+     */
+    private static function devPackagesLeftOut(string $projectRoot): array
+    {
+        $installed = json_decode((string) @file_get_contents($projectRoot . '/vendor/composer/installed.json'), true);
+        $lock = json_decode((string) @file_get_contents($projectRoot . '/composer.lock'), true);
+        if (!is_array($installed) || ($installed['dev'] ?? true) !== false || !is_array($lock) || !is_array($lock['packages-dev'] ?? null)) {
+            return [];
+        }
+
+        $names = [];
+        foreach ($lock['packages-dev'] as $package) {
+            if (is_array($package) && is_string($package['name'] ?? null)) {
+                $names[$package['name']] = true;
+            }
+        }
+        foreach (is_array($lock['packages'] ?? null) ? $lock['packages'] : [] as $package) {
+            if (is_array($package) && is_string($package['name'] ?? null)) {
+                unset($names[$package['name']]);
+            }
+        }
+
+        return $names;
     }
 
     /**
@@ -244,19 +366,26 @@ final class FrameworkDeploymentExecutor
             return;
         }
 
+        // An update journals what vendor/ now holds (nothing for a package it
+        // cannot read there); a failed one what it attempted, rolled back; a
+        // noop nothing.
         $deltas = [];
-        foreach ($plan->packageUpdates as $update) {
-            $deltas[$update->packageName] = [
-                'from' => $update->installedVersion,
-                'to'   => $update->latestVersion,
-            ];
+        foreach ($status === 'noop' ? [] : ($result['updated_packages'] ?? []) as $update) {
+            $to = $status === 'updated' ? ($update['deployed_version'] ?? null) : $update['latest_version'];
+            if ($to !== null && $to !== $update['installed_version']) {
+                $deltas[$update['package']] = ['from' => $update['installed_version'], 'to' => $to];
+            }
         }
 
-        $outcome = $status === 'updated' ? RunOutcome::Success : RunOutcome::Failed;
+        $outcome = match ($status) {
+            'updated' => RunOutcome::Success,
+            'noop' => RunOutcome::Noop,
+            default => RunOutcome::Failed,
+        };
         $stage = [
             'name'    => 'auto-deploy',
-            'success' => $outcome === RunOutcome::Success,
-            'message' => (string) ($result['restart_status'] ?? ''),
+            'success' => $outcome !== RunOutcome::Failed,
+            'message' => (string) ($outcome === RunOutcome::Noop ? $result['reason'] : ($result['restart_status'] ?? '')),
         ];
         if (isset($result['healthcheck'])) {
             $stage['healthcheck'] = (string) $result['healthcheck'];

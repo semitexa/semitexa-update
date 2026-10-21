@@ -29,7 +29,7 @@ final class FrameworkDeploymentExecutorRollbackTest extends TestCase
     {
         $this->projectRoot = sys_get_temp_dir() . '/semitexa-deploy-' . bin2hex(random_bytes(8));
         mkdir($this->projectRoot . '/vendor/bin', 0777, true);
-        file_put_contents($this->projectRoot . '/composer.json', '{"require":{"semitexa/core":"1.0.0"}}');
+        file_put_contents($this->projectRoot . '/composer.json', '{"require":{"semitexa/core":">=1.0.0"}}');
         file_put_contents($this->projectRoot . '/composer.lock', '{"packages":[{"name":"semitexa/core","version":"1.0.0"}]}');
         file_put_contents($this->projectRoot . '/vendor/bin/semitexa', "#!/bin/sh\nexit 0\n");
     }
@@ -98,7 +98,12 @@ final class FrameworkDeploymentExecutorRollbackTest extends TestCase
             $journal,
             new UpdateLock($this->projectRoot),
             static function (string $command, string $projectRoot): void {
-                // Every step succeeds.
+                // Every step succeeds; composer installs 2.0.0.
+                if (str_contains($command, ' update ')) {
+                    file_put_contents($projectRoot . '/composer.lock', '{"packages":[{"name":"semitexa/core","version":"2.0.0"}]}');
+                    @mkdir($projectRoot . '/vendor/composer', 0777, true);
+                    file_put_contents($projectRoot . '/vendor/composer/installed.json', '{"packages":[{"name":"semitexa/core","version":"2.0.0"}],"dev":false}');
+                }
             },
         );
 
@@ -112,6 +117,91 @@ final class FrameworkDeploymentExecutorRollbackTest extends TestCase
         self::assertCount(1, $records);
         self::assertSame(RunOutcome::Success, $records[0]->outcome);
         self::assertSame('auto-deploy', $records[0]->kind);
+        self::assertSame(['semitexa/core' => ['from' => '1.0.0', 'to' => '2.0.0']], $records[0]->packageDeltas);
+    }
+
+    /** A constraint held the package back: the journal says it did not move. */
+    public function testAPackageComposerHeldBackIsNotJournalledAsMoved(): void
+    {
+        $journal = new RunJournalRepository(new SqliteAdapter('sqlite::memory:'));
+        $executor = new FrameworkDeploymentExecutor(
+            new DeploymentLogWriter(),
+            $journal,
+            new UpdateLock($this->projectRoot),
+            static function (string $command, string $projectRoot): void {
+                if (str_contains($command, ' update ')) {
+                    // A third-party package moved; semitexa/core stayed.
+                    file_put_contents($projectRoot . '/composer.lock', '{"packages":[{"name":"semitexa/core","version":"1.0.0"},{"name":"psr/log","version":"3.0.2"}]}');
+                    @mkdir($projectRoot . '/vendor/composer', 0777, true);
+                    file_put_contents($projectRoot . '/vendor/composer/installed.json', '{"packages":[{"name":"semitexa/core","version":"v1.0.0"},{"name":"psr/log","version":"3.0.2"}],"dev":false}');
+                }
+            },
+        );
+
+        $result = $executor->execute($this->projectRoot, $this->plan());
+
+        self::assertSame('updated', $result['status']);
+        self::assertSame('1.0.0', $result['updated_packages'][0]['deployed_version']);
+        self::assertSame([], $journal->findRecent()[0]->packageDeltas);
+    }
+
+    /**
+     * A project made from semitexa/ultimate pins every semitexa/* exactly:
+     * composer could move nothing, yet every tick ran it and the run said
+     * "updated" with versions that were never installed.
+     */
+    public function testAPackagePinnedAtItsInstalledVersionIsANoopWithoutComposer(): void
+    {
+        file_put_contents($this->projectRoot . '/composer.json', '{"require":{"semitexa/core":"1.0.0"}}');
+        $journal = new RunJournalRepository(new SqliteAdapter('sqlite::memory:'));
+        $ran = [];
+        $executor = new FrameworkDeploymentExecutor(
+            new DeploymentLogWriter(),
+            $journal,
+            new UpdateLock($this->projectRoot),
+            static function (string $command, string $projectRoot) use (&$ran): void {
+                $ran[] = $command;
+            },
+        );
+
+        $result = $executor->execute($this->projectRoot, $this->plan());
+
+        self::assertSame('noop', $result['status']);
+        self::assertStringContainsString('pins semitexa/core', (string) $result['reason']);
+        self::assertStringContainsString('bin/semitexa update', (string) $result['reason']);
+        self::assertSame([], $ran, 'composer is not run when nothing can move');
+        self::assertSame([], $journal->findRecent(), 'a noop tick is not a run');
+    }
+
+    /**
+     * Composer ran and moved nothing (a pinned package the newer one needs
+     * held it back): taken for an update, the systemd wrapper restarted the
+     * app every tick.
+     */
+    public function testComposerThatMovedNothingIsANoopWithoutSyncOrRestart(): void
+    {
+        mkdir($this->projectRoot . '/vendor/composer', 0777, true);
+        file_put_contents($this->projectRoot . '/vendor/composer/installed.json', '{"packages":[{"name":"semitexa/core","version":"1.0.0"}],"dev":false}');
+        $journal = new RunJournalRepository(new SqliteAdapter('sqlite::memory:'));
+        $ran = [];
+        $executor = new FrameworkDeploymentExecutor(
+            new DeploymentLogWriter(),
+            $journal,
+            new UpdateLock($this->projectRoot),
+            static function (string $command, string $projectRoot) use (&$ran): void {
+                $ran[] = $command; // composer resolves to what is there
+            },
+        );
+
+        $result = $executor->execute($this->projectRoot, $this->plan());
+
+        self::assertSame('noop', $result['status']);
+        self::assertFalse($result['restart_required']);
+        self::assertStringContainsString('composer installed none of them', (string) $result['reason']);
+        self::assertCount(1, $ran, 'composer only: no orm:sync, cache:clear or restart');
+        $record = $journal->findRecent()[0];
+        self::assertSame(RunOutcome::Noop, $record->outcome);
+        self::assertSame([], $record->packageDeltas);
     }
 
     private function plan(): DeploymentPlan

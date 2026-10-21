@@ -169,11 +169,17 @@ Auto-deploy is opt-in:
 ```dotenv
 SEMITEXA_AUTO_DEPLOY_ENABLED=true
 SEMITEXA_AUTO_DEPLOY_CHANNEL=stable
-SEMITEXA_AUTO_DEPLOY_SOURCE=mixed
-SEMITEXA_AUTO_DEPLOY_PRIVATE_REPOSITORY_URL=git@github.com:semitexa/releases.git
+SEMITEXA_AUTO_DEPLOY_SOURCE=packagist   # the default; `mixed` also reads a private repository
 SEMITEXA_AUTO_DEPLOY_HEALTHCHECK_URL=https://example.test/health
-SEMITEXA_AUTO_DEPLOY_RESTART_COMMAND=bin/semitexa server:start
 ```
+
+Leave `SEMITEXA_AUTO_DEPLOY_RESTART_COMMAND` unset on a Docker project: the command runs inside the
+app container, where `bin/semitexa server:start` has no Docker to call and fails every deploy. The
+systemd wrapper below restarts the stack from the host instead (`server:restart`).
+
+A project made from `semitexa/ultimate` pins every `semitexa/*` package exactly; auto-deploy does not
+move pins, so there a run that finds newer releases reports `noop` with the reason. Take a release with
+`bin/semitexa update`, which moves them.
 
 Remote first-deployment (Ubuntu 20.04+):
 
@@ -181,8 +187,8 @@ Remote first-deployment (Ubuntu 20.04+):
 SEMITEXA_REMOTE_DEPLOY_TARGETS=deploy@203.0.113.10
 SEMITEXA_REMOTE_DEPLOY_PATH=/srv/semitexa/my-project
 SEMITEXA_REMOTE_DEPLOY_SSH_PORT=22
+SEMITEXA_REMOTE_DEPLOY_SSH_IDENTITY_FILE=/home/me/.ssh/id_ed25519   # optional
 SEMITEXA_REMOTE_DEPLOY_DOMAIN=my-project.example.com
-SEMITEXA_REMOTE_DEPLOY_USE_PASSWORD=false
 ```
 
 ### Operator commands
@@ -200,7 +206,7 @@ Production polling install:
 sudo SEMITEXA_AUTO_DEPLOY_ENABLE=1 vendor/semitexa/update/tools/install-auto-deploy-systemd.sh /srv/semitexa/my-project
 ```
 
-Run it from the project root (`/srv/semitexa/my-project`). The systemd wrapper (`vendor/semitexa/update/tools/run-auto-deploy-systemd.sh`, copied into the project's `tools/`) calls `update:packages:auto` and reruns `bin/semitexa server:start` when `restart_required=true`, then performs the configured HTTP healthcheck.
+Run it from the project root (`/srv/semitexa/my-project`). The systemd wrapper (`vendor/semitexa/update/tools/run-auto-deploy-systemd.sh`, copied into the project's `tools/`) calls `update:packages:auto`; when that reports `updated` with `restart_required=true` it runs `bin/semitexa server:restart` (every container: the worker container runs the queue and scheduler workers on the same code) and then the configured HTTP health check, which wants a 2xx answer and tries for up to about a minute and a half while the server comes back. It runs on the host and needs only `curl` there, not PHP; `update:packages:bootstrap-remote` installs it.
 
 ### Production deploy systemd units
 
@@ -213,7 +219,7 @@ The installer above provisions **two independent unit pairs**, decoupled on purp
 | `semitexa-refresh-install-sh.service` | **semitexa.com hosting only.** Atomically refreshes `packages/semitexa-ultimate/install.sh` (the public installer served by semitexa.com) from upstream `master`. |
 | `semitexa-refresh-install-sh.timer` | **semitexa.com hosting only.** Periodic refresh (default `10m`), independent of the deploy. |
 
-The refresh pair only applies to the host that serves the public installer. On any other project the refresh script refuses to run (there is no `packages/semitexa-ultimate` checkout), so disable it after installing the units: `sudo systemctl disable --now semitexa-refresh-install-sh.timer`.
+The refresh pair only applies to the host that serves the public installer. The installer enables its timer only where there is a `packages/semitexa-ultimate` checkout, and with `SEMITEXA_AUTO_DEPLOY_ENABLE=1` disables one an earlier install enabled anywhere else.
 
 `semitexa-auto-deploy.service` runs `composer update 'semitexa/*' --with-all-dependencies --prefer-dist --no-dev --no-interaction --optimize-autoloader`. The `--prefer-dist` flag is mandatory: production `vendor/semitexa/*` is shipped as dist (no `.git/`), so without it composer may pick source mode for some packages and fail with `GitDownloader.php line 155: The .git directory is missing`.
 
