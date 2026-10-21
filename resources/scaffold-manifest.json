@@ -1,6 +1,6 @@
 {
     "schema_version": "semitexa.scaffold-manifest/v1",
-    "generated_at": "2026-10-20T23:19:28+00:00",
+    "generated_at": "2026-10-21T11:10:40+00:00",
     "files": [
         {
             "path": ".env.default",
@@ -32,8 +32,9 @@
         },
         {
             "path": ".gitignore",
-            "current_sha256": "00f368b72de30bb80e53ce395c1eb7a1788d448460e025a5ecf681e1865ba905",
+            "current_sha256": "7a9f8d814e8d998d51b092bf4ed4ffb1f87ccfd6fb3cfde74092817d53b19116",
             "previous_sha256": [
+                "00f368b72de30bb80e53ce395c1eb7a1788d448460e025a5ecf681e1865ba905",
                 "2a1a6399052acdf6d527c5c762736a327d2c1b81cd6c197c7c2d0a1e2dfc5b8f",
                 "b2b2b5c2e644e9acec6664d35ff0b86e1342b9c2d19a190d47af6ff37a919d16",
                 "a324b654c3d56d5a29a92568a510a260b390d0b89efae84fb9a800c5da4acb37",
@@ -184,8 +185,10 @@
         },
         {
             "path": "Dockerfile",
-            "current_sha256": "c63f9d1211ab93d8b8fc4dfb1d5c91f6581b7a6bdb0065c4a1d8c7a5ef3c7e38",
+            "current_sha256": "5e9cdf90b7a68b7b0a3ca86ab32c802f75cc0a94bf9586bca14928e55dd24ab0",
             "previous_sha256": [
+                "dd8611980340acb6aa1961873a388d234ed49c92665570eda7d4f64cc3cf854e",
+                "c63f9d1211ab93d8b8fc4dfb1d5c91f6581b7a6bdb0065c4a1d8c7a5ef3c7e38",
                 "4d08c73dc86172ee5cf50a3f697a57042570bd1fa31c565de326fddf5ef2b0eb",
                 "de70575cf55d4e8766ff6baac6039c8a36051458a977bbcba8d0ae61a5abf81f",
                 "8065c5d7a372616fdf3f6fd047f8575e984622ec4446ccb1721a74d0935b944b",

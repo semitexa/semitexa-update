@@ -70,3 +70,7 @@ docker-compose.override.yml
 # bin/semitexa autoloads docker-compose.path-repos.yml when this symlink
 # exists, mounting it consistently into every container.
 /semitexa.pl
+
+# SSH state of update:packages:bootstrap-remote, and keys put in the project
+.ssh/
+var/ssh/

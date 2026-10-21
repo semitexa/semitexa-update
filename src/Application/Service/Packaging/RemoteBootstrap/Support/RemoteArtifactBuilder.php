@@ -24,6 +24,10 @@ final class RemoteArtifactBuilder
         'var/cache',
         'var/log',
         'var/run',
+        // SSH state: known_hosts (var/ssh) and keys a user put in the project
+        // (the image user's home is the project directory). Never shipped.
+        '.ssh',
+        'var/ssh',
     ];
 
     public function build(string $projectRoot): RemoteDeployArtifact

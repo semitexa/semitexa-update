@@ -42,6 +42,25 @@ final class RemoteSshClientCommandTest extends TestCase
         self::assertNotContains('PubkeyAuthentication=no', $this->build('buildSshCommand', $target, 22, 'true', true));
     }
 
+    /** known_hosts went to ~/.ssh, the project directory itself, and shipped in the artifact. */
+    public function testKnownHostsAreKeptUnderTheStateDirectory(): void
+    {
+        $target = (new RemoteDeployTargetParser())->parseOne('deploy@example.com');
+        $dir = sys_get_temp_dir() . '/semitexa-ssh-state-' . bin2hex(random_bytes(4));
+        $client = new RemoteSshClient($dir);
+
+        try {
+            $ssh = (new \ReflectionMethod(RemoteSshClient::class, 'buildSshCommand'))->invoke($client, $target, 22, 'true', true);
+            $scp = (new \ReflectionMethod(RemoteSshClient::class, 'buildScpCommand'))->invoke($client, $target, 22, '/tmp/a', '/srv/a');
+
+            self::assertContains('UserKnownHostsFile=' . $dir . '/known_hosts', $ssh);
+            self::assertContains('UserKnownHostsFile=' . $dir . '/known_hosts', $scp);
+            self::assertDirectoryExists($dir);
+        } finally {
+            @rmdir($dir);
+        }
+    }
+
     /** @return list<string> */
     private function build(string $method, mixed ...$args): array
     {

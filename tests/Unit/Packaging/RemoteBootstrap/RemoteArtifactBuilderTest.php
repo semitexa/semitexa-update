@@ -18,6 +18,10 @@ final class RemoteArtifactBuilderTest extends TestCase
         mkdir($this->projectRoot . '/vendor', 0777, true);
         mkdir($this->projectRoot . '/var/cache', 0777, true);
         mkdir($this->projectRoot . '/.codex', 0777, true);
+        mkdir($this->projectRoot . '/.ssh', 0777, true);
+        mkdir($this->projectRoot . '/var/ssh', 0777, true);
+        file_put_contents($this->projectRoot . '/.ssh/id_ed25519', "private\n");
+        file_put_contents($this->projectRoot . '/var/ssh/known_hosts', "host key\n");
 
         file_put_contents($this->projectRoot . '/composer.json', "{}\n");
         file_put_contents($this->projectRoot . '/.env', "APP_ENV=dev\n");
@@ -47,6 +51,8 @@ final class RemoteArtifactBuilderTest extends TestCase
         self::assertStringNotContainsString('./var/cache/ignored.txt', $listing);
         self::assertStringNotContainsString('./.env', $listing);
         self::assertStringNotContainsString('./.codex/ignored.md', $listing);
+        self::assertStringNotContainsString('id_ed25519', $listing, 'a key in the project is never shipped');
+        self::assertStringNotContainsString('known_hosts', $listing);
 
         @unlink($artifact->path);
     }

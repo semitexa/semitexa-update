@@ -72,7 +72,7 @@ final class UpdatePackagesBootstrapRemoteCommand extends BaseCommand
             }
             $this->markStep('local_prerequisites');
 
-            $sshClient = new RemoteSshClient();
+            $sshClient = new RemoteSshClient($projectRoot . '/var/ssh');
             $password = null;
             // SEMITEXA_REMOTE_DEPLOY_USE_PASSWORD=true asks for the password
             // at once; otherwise a key is tried first. It was read and unused.
