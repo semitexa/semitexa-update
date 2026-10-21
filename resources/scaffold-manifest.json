@@ -1,11 +1,14 @@
 {
     "schema_version": "semitexa.scaffold-manifest/v1",
-    "generated_at": "2026-10-21T11:10:40+00:00",
+    "generated_at": "2026-10-21T15:32:53+00:00",
     "files": [
         {
             "path": ".env.default",
-            "current_sha256": "6045a21e38ee31be97c5ed50f4e20463cde94f3857359f0dc046a3c7a4fb5afa",
+            "current_sha256": "3ad07daac394248bb6d58879854ce2d380d1b2ae697bffc747adcf458ba68c65",
             "previous_sha256": [
+                "958f01eafaf6bfc8145535b54f71666983e0a4a7945a42a8ea7f562b95cafa1b",
+                "8c2a07684379575a7f0dcd42aef4c3a531c4abe58de350a3b51ce5660d4088de",
+                "6045a21e38ee31be97c5ed50f4e20463cde94f3857359f0dc046a3c7a4fb5afa",
                 "c5d231030e94b778aa1b739796f2dd57a7c31bdde00794e37f4536cdc05f5326",
                 "75467cc3867cc584bf0eb587b72d986359058044643572e98f0febd08b687bfb",
                 "567f00979b133f1d11f96c313b0ecba9c793679303e69a54575163bb2e8ff6b2",
@@ -185,8 +188,9 @@
         },
         {
             "path": "Dockerfile",
-            "current_sha256": "5e9cdf90b7a68b7b0a3ca86ab32c802f75cc0a94bf9586bca14928e55dd24ab0",
+            "current_sha256": "b30d542f0a0783563dca8be7b0afbc5d1143e55f768b80d6191bc48e88d1efc1",
             "previous_sha256": [
+                "5e9cdf90b7a68b7b0a3ca86ab32c802f75cc0a94bf9586bca14928e55dd24ab0",
                 "dd8611980340acb6aa1961873a388d234ed49c92665570eda7d4f64cc3cf854e",
                 "c63f9d1211ab93d8b8fc4dfb1d5c91f6581b7a6bdb0065c4a1d8c7a5ef3c7e38",
                 "4d08c73dc86172ee5cf50a3f697a57042570bd1fa31c565de326fddf5ef2b0eb",
@@ -342,8 +346,10 @@
         },
         {
             "path": "docker-compose.worker.yml",
-            "current_sha256": "e984013c45247a74ba5208a1442c0137dc7c1d6df49f3a2ccf5cb87e1ebb01b0",
+            "current_sha256": "c6b0ef32d8b3e78b4cae6cb90af44f80d2e56a1eaefc1e8fe9a7867e18de3bf1",
             "previous_sha256": [
+                "18e8772c09639ef501ed20004840926019b3fad9532406e0abb541e17c948a9b",
+                "e984013c45247a74ba5208a1442c0137dc7c1d6df49f3a2ccf5cb87e1ebb01b0",
                 "93712e0ccb747cad16dd85f077daf5b8d8d179073a999a5f92af95e25a8097ef",
                 "467b9f3fc23cff746384b6df71c164fa646dc356001df813580b4870d7cc2739",
                 "9d62d9ee3243086947b8ccefd06922df5d0d2b62718c0bdacf47cf4bdfbdc354"
