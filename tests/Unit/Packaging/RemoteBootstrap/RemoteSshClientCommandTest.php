@@ -53,9 +53,12 @@ final class RemoteSshClientCommandTest extends TestCase
             $ssh = (new \ReflectionMethod(RemoteSshClient::class, 'buildSshCommand'))->invoke($client, $target, 22, 'true', true);
             $scp = (new \ReflectionMethod(RemoteSshClient::class, 'buildScpCommand'))->invoke($client, $target, 22, '/tmp/a', '/srv/a');
 
-            self::assertContains('UserKnownHostsFile=' . $dir . '/known_hosts', $ssh);
-            self::assertContains('UserKnownHostsFile=' . $dir . '/known_hosts', $scp);
+            self::assertContains('UserKnownHostsFile="' . $dir . '/known_hosts"', $ssh);
+            self::assertContains('UserKnownHostsFile="' . $dir . '/known_hosts"', $scp);
             self::assertDirectoryExists($dir);
+            // Nothing after the options reads as one.
+            self::assertSame('--', $ssh[array_search('deploy@example.com', $ssh, true) - 1]);
+            self::assertSame('--', $scp[array_search('/tmp/a', $scp, true) - 1]);
         } finally {
             @rmdir($dir);
         }
@@ -65,5 +68,21 @@ final class RemoteSshClientCommandTest extends TestCase
     private function build(string $method, mixed ...$args): array
     {
         return (new \ReflectionMethod(RemoteSshClient::class, $method))->invoke(new RemoteSshClient(), ...$args);
+    }
+
+    /** A space split the path into two files, and a % made ssh read a token. */
+    public function testAKnownHostsPathWithASpaceOrPercentIsQuotedAndEscaped(): void
+    {
+        $target = (new RemoteDeployTargetParser())->parseOne('deploy@example.com');
+        $dir = sys_get_temp_dir() . '/semitexa ssh 100%-' . bin2hex(random_bytes(4));
+        $client = new RemoteSshClient($dir);
+
+        try {
+            $ssh = (new \ReflectionMethod(RemoteSshClient::class, 'buildSshCommand'))->invoke($client, $target, 22, 'true', true);
+
+            self::assertContains('UserKnownHostsFile="' . str_replace('%', '%%', $dir) . '/known_hosts"', $ssh);
+        } finally {
+            @rmdir($dir);
+        }
     }
 }

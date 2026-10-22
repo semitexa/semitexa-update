@@ -70,6 +70,7 @@ final class FrameworkDeploymentExecutor
         $composerUpdated = false;
         $composerStarted = false;
         $lockBefore = false;
+        $installedBefore = false;
         try {
             if (!$plan->config->enabled) {
                 return $this->finalize($projectRoot, $result, 'skipped');
@@ -110,6 +111,7 @@ final class FrameworkDeploymentExecutor
 
             $snapshot = ComposerStateSnapshot::capture($projectRoot);
             $lockBefore = @file_get_contents($projectRoot . '/composer.lock');
+            $installedBefore = @file_get_contents($projectRoot . '/vendor/composer/installed.json');
 
             $composerCommand = $this->composerUpdateCommand($projectRoot);
             $composerStarted = true;
@@ -170,15 +172,22 @@ final class FrameworkDeploymentExecutor
         } catch (\Throwable $e) {
             $result['status'] = 'failed';
             $result['reason'] = $e->getMessage();
-            if ($composerStarted && !$composerUpdated && $lockBefore === @file_get_contents($projectRoot . '/composer.lock')) {
-                // Composer failed before it changed the lock (Packagist
-                // unreachable, a token expired): nothing to roll back, and no
-                // restart every tick for as long as that lasts.
-                $result['rollback'] = 'not needed: composer failed before it changed composer.lock.';
+            if ($composerStarted && !$composerUpdated
+                && $lockBefore === @file_get_contents($projectRoot . '/composer.lock')
+                && $installedBefore === @file_get_contents($projectRoot . '/vendor/composer/installed.json')
+            ) {
+                // Composer failed before it changed the lock or vendor/
+                // (Packagist unreachable, a token expired): nothing to roll
+                // back, and no restart every tick for as long as that lasts.
+                // vendor/ is compared too: with a lock already ahead of it, or
+                // --no-dev removing packages, the install half-changes vendor/
+                // and leaves the lock as it was.
+                $result['rollback'] = 'not needed: composer failed before it changed composer.lock or vendor/.';
             } elseif ($composerStarted && $snapshot !== null) {
                 // Also when composer failed half-way: it may already have
                 // rewritten the lock or part of vendor/.
-                $result['rollback'] = $this->rollback($projectRoot, $snapshot, $plan->config->restartCommand);
+                [$result['rollback'], $restartStillRequired] = $this->rollback($projectRoot, $snapshot, $plan->config->restartCommand);
+                $result['restart_required'] = $restartStillRequired;
                 // Rolled back: vendor/ no longer holds what was read after the update.
                 foreach ($result['updated_packages'] as $i => $update) {
                     unset($result['updated_packages'][$i]['deployed_version']);
@@ -326,28 +335,47 @@ final class FrameworkDeploymentExecutor
      * Best-effort revert to the pre-update dependency state after a failure
      * once composer had changed something (a later step failed, or composer
      * failed after rewriting the lock): restore composer files, reinstall
-     * vendor from the restored lock, restart. The returned
-     * string lands in the deployment log + run journal either way.
+     * vendor from the restored lock, restart. The message lands in the
+     * deployment log + run journal either way; the flag says whether a
+     * restart is still owed (the wrapper on the host then makes it). Never
+     * after a FAILED rollback: vendor/ is half-written then, and a restart
+     * would take the site from the old code still in memory to none.
+     *
+     * @return array{0: string, 1: bool}
      */
-    private function rollback(string $projectRoot, ComposerStateSnapshot $snapshot, ?string $restartCommand): string
+    private function rollback(string $projectRoot, ComposerStateSnapshot $snapshot, ?string $restartCommand): array
     {
         if (!$snapshot->restoreFiles()) {
-            return 'FAILED: could not restore composer.json/lock — system left on the new version; operator intervention required.';
+            return ['FAILED: could not restore composer.json/lock — system left on the new version; operator intervention required.', false];
         }
 
         try {
             $this->run($this->composerInstallCommand($projectRoot), $projectRoot);
         } catch (\Throwable $e) {
-            return 'FAILED: composer files restored but composer install failed — vendor/ still on the new version: ' . $e->getMessage();
+            return ['FAILED: composer files restored but composer install failed — vendor/ still on the new version: ' . $e->getMessage(), false];
         }
 
         try {
-            $this->restartRuntime($projectRoot, $restartCommand);
+            $restart = $this->restartRuntime($projectRoot, $restartCommand);
         } catch (\Throwable $e) {
-            return 'partial: dependency state restored, but restart failed — restart manually: ' . $e->getMessage();
+            return ['partial: dependency state restored, but restart failed — restart manually: ' . $e->getMessage(), true];
         }
 
-        return 'performed: composer.json/lock and vendor/ restored to the pre-update state.';
+        if (!$restart['performed']) {
+            // Inside the app container nothing restarts: the workers
+            // cache:clear reloaded onto the new vendor/ kept running it, and
+            // the journal said "performed". They are reloaded again, onto the
+            // restored one; the full restart is still owed.
+            try {
+                $this->run($this->projectCliCommand($projectRoot, 'cache:clear'), $projectRoot);
+            } catch (\Throwable $e) {
+                return ['partial: dependency state restored, but the workers still run the new code — restart required: ' . $e->getMessage(), true];
+            }
+
+            return ['partial: composer.json/lock and vendor/ restored and the workers reloaded (cache:clear); a restart is still required.', true];
+        }
+
+        return ['performed: composer.json/lock and vendor/ restored to the pre-update state, and the runtime restarted.', false];
     }
 
     private function composerInstallCommand(string $projectRoot): string

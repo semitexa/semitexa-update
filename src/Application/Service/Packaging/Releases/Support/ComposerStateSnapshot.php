@@ -49,15 +49,40 @@ final class ComposerStateSnapshot
      */
     public function restoreFiles(): bool
     {
-        $ok = file_put_contents($this->projectRoot . '/composer.json', $this->composerJson) !== false;
+        $ok = self::writeAtomically($this->projectRoot . '/composer.json', $this->composerJson);
 
         $lockPath = $this->projectRoot . '/composer.lock';
         if ($this->composerLock !== null) {
-            $ok = file_put_contents($lockPath, $this->composerLock) !== false && $ok;
+            $ok = self::writeAtomically($lockPath, $this->composerLock) && $ok;
         } elseif (is_file($lockPath)) {
             $ok = @unlink($lockPath) && $ok;
         }
 
         return $ok;
+    }
+
+    /**
+     * Written beside the file, then renamed over it: a full disk truncated
+     * composer.lock in place, and the rollback left a project with no lock.
+     */
+    private static function writeAtomically(string $path, string $contents): bool
+    {
+        $temp = $path . '.rollback-' . bin2hex(random_bytes(4));
+        if (@file_put_contents($temp, $contents) !== strlen($contents)) {
+            @unlink($temp);
+
+            return false;
+        }
+        $mode = @fileperms($path);
+        if ($mode !== false) {
+            @chmod($temp, $mode & 0777);
+        }
+        if (!@rename($temp, $path)) {
+            @unlink($temp);
+
+            return false;
+        }
+
+        return true;
     }
 }

@@ -65,7 +65,7 @@ final class FrameworkDeploymentExecutorRollbackTest extends TestCase
             \Closure::fromCallable($runner),
         );
 
-        $result = $executor->execute($this->projectRoot, $this->plan());
+        $result = $executor->execute($this->projectRoot, $this->plan(restartCommand: 'restart-the-stack'));
 
         self::assertSame('failed', $result['status']);
         self::assertStringContainsString('orm:sync exploded', (string) $result['reason']);
@@ -222,7 +222,7 @@ final class FrameworkDeploymentExecutorRollbackTest extends TestCase
             },
         );
 
-        $result = $executor->execute($this->projectRoot, $this->plan());
+        $result = $executor->execute($this->projectRoot, $this->plan(restartCommand: 'restart-the-stack'));
 
         self::assertSame('failed', $result['status']);
         self::assertStringStartsWith('performed', (string) $result['rollback']);
@@ -247,11 +247,13 @@ final class FrameworkDeploymentExecutorRollbackTest extends TestCase
             updateAvailable: true,
             reason: 'test',
         );
+        $ran = [];
         $executor = new FrameworkDeploymentExecutor(
             new DeploymentLogWriter(),
             null,
             new UpdateLock($this->projectRoot),
-            static function (string $command, string $projectRoot): void {
+            static function (string $command, string $projectRoot) use (&$ran): void {
+                $ran[] = $command;
                 if (str_contains($command, ' update ')) {
                     file_put_contents($projectRoot . '/composer.lock', '{"packages":[{"name":"semitexa/core","version":"2.0.0"}]}');
                 }
@@ -261,7 +263,75 @@ final class FrameworkDeploymentExecutorRollbackTest extends TestCase
         $result = $executor->execute($this->projectRoot, $plan);
 
         self::assertSame('failed', $result['status']);
+        // Nothing restarts here: it said "performed" while the workers kept
+        // the broken release. They are reloaded onto the restored vendor/,
+        // and the restart is left owed for the wrapper on the host.
+        self::assertStringStartsWith('partial', (string) $result['rollback']);
+        self::assertTrue($result['restart_required']);
+        $clears = array_values(array_filter($ran, static fn (string $c): bool => str_contains($c, 'cache:clear')));
+        self::assertCount(2, $clears, 'once onto the new vendor/, once onto the restored one');
+        $install = array_search(true, array_map(static fn (string $c): bool => str_contains($c, ' install '), $ran), true);
+        self::assertIsInt($install);
+        $clearAt = array_keys(array_filter($ran, static fn (string $c): bool => str_contains($c, 'cache:clear')));
+        self::assertGreaterThan($install, $clearAt[1], 'the second cache:clear follows the reinstall');
+    }
+
+    /**
+     * A rollback whose composer install failed leaves vendor/ half-written:
+     * restarting onto it took the site from the old code still in memory to
+     * none. It owes no restart; the operator steps in.
+     */
+    public function testAFailedRollbackOwesNoRestart(): void
+    {
+        $executor = new FrameworkDeploymentExecutor(
+            new DeploymentLogWriter(),
+            null,
+            new UpdateLock($this->projectRoot),
+            static function (string $command, string $projectRoot): void {
+                if (str_contains($command, ' update ')) {
+                    file_put_contents($projectRoot . '/composer.lock', '{"packages":[{"name":"semitexa/core","version":"2.0.0"}]}');
+                    throw new \RuntimeException('composer: disk full');
+                }
+                if (str_contains($command, ' install ')) {
+                    throw new \RuntimeException('composer: disk full');
+                }
+            },
+        );
+
+        $result = $executor->execute($this->projectRoot, $this->plan());
+
+        self::assertStringStartsWith('FAILED', (string) $result['rollback']);
+        self::assertFalse($result['restart_required']);
+    }
+
+    /**
+     * A lock already ahead of vendor/, or --no-dev removing packages: the
+     * install half-changes vendor/ and leaves the lock as it was. Judged by
+     * the lock alone, that was "not needed".
+     */
+    public function testAComposerThatChangedVendorButNotTheLockIsRolledBack(): void
+    {
+        mkdir($this->projectRoot . '/vendor/composer', 0777, true);
+        file_put_contents($this->projectRoot . '/vendor/composer/installed.json', '{"packages":[{"name":"semitexa/core","version":"1.0.0"}]}');
+        $ran = [];
+        $executor = new FrameworkDeploymentExecutor(
+            new DeploymentLogWriter(),
+            null,
+            new UpdateLock($this->projectRoot),
+            static function (string $command, string $projectRoot) use (&$ran): void {
+                $ran[] = $command;
+                if (str_contains($command, ' update ')) {
+                    file_put_contents($projectRoot . '/vendor/composer/installed.json', '{"packages":[]}');
+                    throw new \RuntimeException('composer: disk full');
+                }
+            },
+        );
+
+        $result = $executor->execute($this->projectRoot, $this->plan(restartCommand: 'restart-the-stack'));
+
+        self::assertSame('failed', $result['status']);
         self::assertStringStartsWith('performed', (string) $result['rollback']);
+        self::assertTrue((bool) array_filter($ran, static fn (string $c): bool => str_contains($c, ' install ')), 'vendor/ reinstalled from the lock');
     }
 
     /**
@@ -290,7 +360,7 @@ final class FrameworkDeploymentExecutorRollbackTest extends TestCase
         self::assertCount(1, $ran, 'no composer install, no restart');
     }
 
-    private function plan(): DeploymentPlan
+    private function plan(?string $restartCommand = null): DeploymentPlan
     {
         return new DeploymentPlan(
             config: new DeploymentConfig(
@@ -299,7 +369,7 @@ final class FrameworkDeploymentExecutorRollbackTest extends TestCase
                 sourceMode: 'packagist',
                 healthcheckUrl: null,
                 privateRepositoryUrl: null,
-                restartCommand: null,
+                restartCommand: $restartCommand,
             ),
             installedPackages: ['semitexa/core' => '1.0.0'],
             packageUpdates: [

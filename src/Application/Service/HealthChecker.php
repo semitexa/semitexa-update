@@ -24,18 +24,33 @@ final class HealthChecker
         ]);
 
         $response = @file_get_contents($url, false, $context);
+        $shown = self::displayUrl($url);
         $statusCode = 0;
         if (isset($http_response_header[0]) && preg_match('/\s(\d{3})\s/', $http_response_header[0], $m) === 1) {
             $statusCode = (int) $m[1];
         }
 
         if ($response === false) {
-            return new PreflightCheck('http', false, sprintf('Health check failed: no response from %s.', $url));
+            return new PreflightCheck('http', false, sprintf('Health check failed: no response from %s.', $shown));
         }
         if ($statusCode < 200 || $statusCode >= 300) {
-            return new PreflightCheck('http', false, sprintf('Health check failed: %s answered HTTP %d.', $url, $statusCode));
+            return new PreflightCheck('http', false, sprintf('Health check failed: %s answered HTTP %d.', $shown, $statusCode));
         }
 
-        return new PreflightCheck('http', true, sprintf('%s answered HTTP %d.', $url, $statusCode));
+        return new PreflightCheck('http', true, sprintf('%s answered HTTP %d.', $shown, $statusCode));
+    }
+
+    /**
+     * The URL as it may be shown: no credentials, no query string, no
+     * fragment. The message lands in the systemd journal, the deployment log
+     * and the run journal, and a health URL often carries a token.
+     */
+    public static function displayUrl(string $url): string
+    {
+        // Credentials first, up to the last @ before the path: a password
+        // with an unencoded # or ? was cut there and its first half shown.
+        $url = (string) preg_replace('#^([a-z][a-z0-9+.\-]*://)[^/]*@#i', '$1', $url);
+
+        return (string) preg_replace('/[?#].*$/s', '', $url);
     }
 }

@@ -86,16 +86,31 @@ escape_sed() {
     printf '%s' "$1" | sed -e 's/[&\\|]/\\&/g'
 }
 
-project_root_escaped="$(escape_sed "${PROJECT_ROOT}")"
+# A value inside a unit file: systemd reads % as a specifier (%h, %n) and $
+# as a variable, so both are doubled, and the paths are quoted there, so a
+# quote, a backslash or a newline in one is refused rather than written into
+# a broken unit.
+escape_unit() {
+    case "$1" in
+        *'"'*|*'\'*|*"
+"*)
+            echo "Refusing a path systemd cannot quote: $1" >&2
+            exit 1
+            ;;
+    esac
+    escape_sed "$(printf '%s' "$1" | sed -e 's/%/%%/g' -e 's/\$/$$/g')"
+}
+
+project_root_escaped="$(escape_unit "${PROJECT_ROOT}")"
 unit_prefix_escaped="$(escape_sed "${UNIT_PREFIX}")"
 interval_escaped="$(escape_sed "${INTERVAL}")"
 run_as_user_escaped="$(escape_sed "${RUN_AS_USER}")"
 home_dir="$(getent passwd "${RUN_AS_USER}" | cut -d: -f6)"
-home_dir_escaped="$(escape_sed "${home_dir}")"
-run_script_escaped="$(escape_sed "${RUN_SCRIPT_PATH}")"
+home_dir_escaped="$(escape_unit "${home_dir}")"
+run_script_escaped="$(escape_unit "${RUN_SCRIPT_PATH}")"
 refresh_unit_prefix_escaped="$(escape_sed "${REFRESH_UNIT_PREFIX}")"
 refresh_interval_escaped="$(escape_sed "${REFRESH_INTERVAL}")"
-refresh_script_escaped="$(escape_sed "${REFRESH_SCRIPT_PATH}")"
+refresh_script_escaped="$(escape_unit "${REFRESH_SCRIPT_PATH}")"
 
 sed \
     -e "s|@@PROJECT_ROOT@@|${project_root_escaped}|g" \

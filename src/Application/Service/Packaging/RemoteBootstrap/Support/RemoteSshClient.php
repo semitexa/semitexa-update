@@ -105,6 +105,8 @@ final class RemoteSshClient
             '-o',
             'StrictHostKeyChecking=accept-new',
             ...$this->knownHostsArgs(),
+            // Nothing after this is an option, whatever it starts with.
+            '--',
             $target->sshDestination(),
             'sh -lc ' . escapeshellarg($command),
         ]);
@@ -123,14 +125,12 @@ final class RemoteSshClient
             '-o',
             'StrictHostKeyChecking=accept-new',
             ...$this->knownHostsArgs(),
+            '--',
             $localPath,
             $target->toConnectionString() . ':' . $remotePath,
         ]);
     }
 
-    /**
-     * @return list<string>
-     */
     /** @return list<string> */
     private function knownHostsArgs(): array
     {
@@ -141,7 +141,9 @@ final class RemoteSshClient
             @mkdir($this->stateDir, 0700, true);
         }
 
-        return ['-o', 'UserKnownHostsFile=' . $this->stateDir . '/known_hosts'];
+        // Quoted, and % doubled: a path with a space split into two files
+        // (known_hosts went to "/proj/My"), and a % made ssh read a token.
+        return ['-o', 'UserKnownHostsFile="' . str_replace('%', '%%', $this->stateDir . '/known_hosts') . '"'];
     }
 
     /**

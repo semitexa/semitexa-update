@@ -33,8 +33,10 @@ final class RemoteDeployTargetParser
     {
         $rawTarget = trim($rawTarget);
         // An IPv6 address in brackets (user@[2001:db8::10]): bare, its
-        // colons could not be told from a port or an scp path.
-        if (preg_match('/^(?<user>[a-zA-Z0-9._-]+)@(?:(?<host>[a-zA-Z0-9.-]+)|\[(?<v6>[0-9a-fA-F:.]+)\])$/', $rawTarget, $matches) !== 1
+        // colons could not be told from a port or an scp path. User and host
+        // start with a letter or digit: one starting with '-' reached ssh's
+        // argv, where it reads as an option.
+        if (preg_match('/^(?<user>[a-zA-Z0-9][a-zA-Z0-9._-]*)@(?:(?<host>[a-zA-Z0-9][a-zA-Z0-9.-]*)|\[(?<v6>[0-9a-fA-F:.]+)\])$/', $rawTarget, $matches) !== 1
             || (($matches['v6'] ?? '') !== '' && filter_var($matches['v6'], FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) === false)) {
             throw new \InvalidArgumentException(sprintf(
                 'Invalid remote target "%s". Expected format: user@host or user@[IPv6 address]',

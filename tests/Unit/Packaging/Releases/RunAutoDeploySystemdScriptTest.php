@@ -67,7 +67,63 @@ final class RunAutoDeploySystemdScriptTest extends TestCase
         }
     }
 
-    public function testWrapperFailsWhenDeployCheckOutputIsMalformed(): void
+    /**
+     * Rolled back inside the app container, where nothing restarts: the
+     * workers ran the broken release until someone restarted by hand.
+     */
+    public function testAFailedDeployThatOwesARestartRestartsAndStillFails(): void
+    {
+        $server = $this->startHttpServer(200);
+        $projectRoot = $this->createFakeProject($server, null, ['status' => 'failed', 'reason' => 'health check failed', 'restart_required' => true], autoExit: 1);
+
+        try {
+            [$exitCode, $output] = $this->runWrapper($projectRoot);
+
+            self::assertSame(1, $exitCode, $output);
+            self::assertFileExists($projectRoot . '/var/server-started');
+        } finally {
+            $this->cleanupProject($projectRoot, $server);
+        }
+    }
+
+    public function testAFailedDeployThatOwesNoRestartRestartsNothing(): void
+    {
+        $server = $this->startHttpServer(200);
+        $projectRoot = $this->createFakeProject($server, null, ['status' => 'failed', 'reason' => 'composer: could not resolve host', 'restart_required' => false], autoExit: 1);
+
+        try {
+            [$exitCode, $output] = $this->runWrapper($projectRoot);
+
+            self::assertSame(1, $exitCode, $output);
+            self::assertFileDoesNotExist($projectRoot . '/var/server-started');
+        } finally {
+            $this->cleanupProject($projectRoot, $server);
+        }
+    }
+
+/** A health URL that is a password away from a leak: never printed, never in curl's argv. */
+    public function testTheHealthUrlIsNeitherPrintedNorPassedOnTheCommandLine(): void
+    {
+        $server = $this->startHttpServer(500);
+        $projectRoot = $this->createFakeProject($server);
+        $check = sprintf('{"healthcheck_url":"http://user:p#ss@127.0.0.1:%d/?token=SECRET"}', $server['port']);
+        $script = (string) file_get_contents($projectRoot . '/bin/semitexa');
+        file_put_contents($projectRoot . '/bin/semitexa', (string) preg_replace('/(update:packages:check\)\n    printf .%s\\n. )\'[^\']*\'/', '$1\'' . $check . '\'', $script));
+        self::assertStringContainsString('SECRET', (string) file_get_contents($projectRoot . '/bin/semitexa'), 'the check answers with the secret URL');
+
+        try {
+            [$exitCode, $output] = $this->runWrapper($projectRoot);
+
+            self::assertSame(1, $exitCode, $output);
+            self::assertStringContainsString(sprintf('Health check failed for http://127.0.0.1:%d/.', $server['port']), $output);
+            self::assertStringNotContainsString('ss@', $output);
+            self::assertStringNotContainsString('SECRET', $output);
+        } finally {
+            $this->cleanupProject($projectRoot, $server);
+        }
+    }
+
+        public function testWrapperFailsWhenDeployCheckOutputIsMalformed(): void
     {
         $server = $this->startHttpServer(200);
         $projectRoot = $this->createFakeProject($server, 'notice: deprecated output');
@@ -156,7 +212,7 @@ final class RunAutoDeploySystemdScriptTest extends TestCase
      * @param array{server_root: string, port: int, process: resource} $server
      */
     /** @param array<string, mixed>|null $autoPayload */
-    private function createFakeProject(array $server, ?string $deployCheckOutput = null, ?array $autoPayload = null): string
+    private function createFakeProject(array $server, ?string $deployCheckOutput = null, ?array $autoPayload = null, int $autoExit = 0): string
     {
         $projectRoot = sys_get_temp_dir() . '/semitexa-auto-deploy-project-' . bin2hex(random_bytes(4));
         mkdir($projectRoot . '/bin', 0777, true);
@@ -181,6 +237,7 @@ set -euo pipefail
 case "\${1:-}" in
   update:packages:auto)
     printf '%s\n' '__PAYLOAD__'
+    exit __AUTO_EXIT__
     ;;
   update:packages:check)
     printf '%s\n' '__HEALTHCHECK_PAYLOAD__'
@@ -199,8 +256,8 @@ BASH;
         file_put_contents(
             $projectRoot . '/bin/semitexa',
             str_replace(
-                ['__PAYLOAD__', '__HEALTHCHECK_PAYLOAD__'],
-                [$payload, $deployCheckPayload],
+                ['__PAYLOAD__', '__HEALTHCHECK_PAYLOAD__', '__AUTO_EXIT__'],
+                [$payload, $deployCheckPayload, (string) $autoExit],
                 $script,
             ),
         );

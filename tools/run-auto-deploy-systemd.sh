@@ -39,6 +39,20 @@ json_line() {
     printf '%s\n' "$1" | { grep -E '^\{' || true; } | tail -n 1
 }
 
+# The restart under the update lock update:packages:auto took and released:
+# a bin/semitexa update starting in between had its one-off container killed
+# by server:restart mid-composer, vendor/ half-updated. flock is util-linux,
+# on every supported host; without it, or with a lock file this user cannot
+# open, the restart runs unguarded rather than not at all.
+restart_stack() {
+    mkdir -p var/lock 2>/dev/null || true
+    if command -v flock >/dev/null 2>&1 && { [ -r var/lock/semitexa-update.lock ] || : >> var/lock/semitexa-update.lock; } 2>/dev/null; then
+        flock var/lock/semitexa-update.lock ./bin/semitexa server:restart
+    else
+        ./bin/semitexa server:restart
+    fi
+}
+
 cd "${PROJECT_ROOT}"
 
 if OUTPUT="$(./bin/semitexa update:packages:auto --json)"; then
@@ -49,12 +63,19 @@ fi
 
 printf '%s\n' "${OUTPUT}"
 
-if [ "${STATUS}" -ne 0 ]; then
-    exit "${STATUS}"
-fi
-
 JSON_PAYLOAD="$(json_line "${OUTPUT}")"
 DEPLOY_STATUS="$(json_value "${JSON_PAYLOAD}" status)"
+
+if [ "${STATUS}" -ne 0 ]; then
+    # A failed deploy rolled back inside the app container, where nothing
+    # restarts: the old vendor/ is back, but only a restart puts every
+    # container on it.
+    if [ "${DEPLOY_STATUS}" = "failed" ] && [ "$(json_value "${JSON_PAYLOAD}" restart_required)" = "true" ]; then
+        echo "The deploy failed and was rolled back; restarting the stack onto the restored release." >&2
+        restart_stack || true
+    fi
+    exit "${STATUS}"
+fi
 
 if [ -z "${DEPLOY_STATUS}" ]; then
     echo "Failed to decode update:packages:auto JSON output." >&2
@@ -69,7 +90,7 @@ fi
 # nothing, and classes the server loaded before the update stay old. Every
 # container, not only app: the worker container runs the queue, scheduler and
 # mail workers on the same code.
-./bin/semitexa server:restart
+restart_stack
 
 if ! CHECK_OUTPUT="$(./bin/semitexa update:packages:check --json 2>/dev/null)"; then
     echo "Failed to inspect health check configuration after restart-required deployment." >&2
@@ -91,14 +112,21 @@ if [ -z "${HEALTHCHECK_URL}" ]; then
     exit 0
 fi
 
-# Never print the query string or credentials of the URL.
-DISPLAY_URL="${HEALTHCHECK_URL%%\?*}"
-DISPLAY_URL="$(printf '%s' "${DISPLAY_URL}" | sed -E 's#^([a-z]+://)[^@/]*@#\1#')"
+# Never print the query string or credentials of the URL. Credentials first,
+# up to the last @ before the path: a password with a # or ? in it was cut
+# there and its first half printed.
+DISPLAY_URL="$(printf '%s' "${HEALTHCHECK_URL}" | sed -E 's#^([A-Za-z][A-Za-z0-9+.-]*://)[^/]*@#\1#')"
+DISPLAY_URL="${DISPLAY_URL%%\?*}"
+DISPLAY_URL="${DISPLAY_URL%%#*}"
+
+# The URL goes to curl on stdin, not in its argv, where ps shows it to every
+# user on the host. curl's config syntax: backslash and quote escaped.
+CURL_URL_CONFIG="url = \"$(printf '%s' "${HEALTHCHECK_URL}" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')\""
 
 # The server takes a moment to come back after the restart. A 2xx answer,
 # as update:packages:auto's own check requires; a redirect is not one.
 for attempt in 1 2 3 4 5 6; do
-    CODE="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 -A 'Semitexa-Auto-Deploy' "${HEALTHCHECK_URL}" 2>/dev/null || true)"
+    CODE="$(printf '%s\n' "${CURL_URL_CONFIG}" | curl -sS -o /dev/null -w '%{http_code}' --max-time 10 -A 'Semitexa-Auto-Deploy' --config - 2>/dev/null || true)"
     case "${CODE}" in
         2[0-9][0-9]) exit 0 ;;
     esac
