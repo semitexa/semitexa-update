@@ -95,6 +95,15 @@ final class FrameworkDeploymentExecutor
                 return $this->finalize($projectRoot, $result, 'noop');
             }
 
+            // The release update:packages:rollback backed out is "newer" again
+            // once vendor/ is back: every tick deployed it, restarted, failed
+            // the wrapper's health check and rolled back, two outages a tick.
+            if (ComposerStateSnapshot::rejects($projectRoot, $plan)) {
+                $result['reason'] = 'These releases were rolled back after a failed health check; waiting for newer ones. Delete var/update/rollback/rejected.json to try them again.';
+
+                return $this->finalize($projectRoot, $result, 'noop');
+            }
+
             // Same lock as the manual `update` sweep: never race a running
             // operator update from the auto-deploy timer (or vice versa).
             $lock = $this->lock ?? new UpdateLock($projectRoot);
@@ -168,6 +177,13 @@ final class FrameworkDeploymentExecutor
                 $result['healthcheck'] = 'skipped: SEMITEXA_AUTO_DEPLOY_HEALTHCHECK_URL not configured';
             }
 
+            // Kept for update:packages:rollback: the wrapper's own health
+            // check, after its restart, has nothing else to go back to.
+            $installedLock = @file_get_contents($projectRoot . '/composer.lock');
+            $result['rollback_snapshot'] = is_string($installedLock) && $snapshot !== null && $snapshot->keep(sha1($installedLock))
+                ? 'kept'
+                : 'unavailable';
+
             return $this->finalize($projectRoot, $result, 'updated', $plan, $runId);
         } catch (\Throwable $e) {
             $result['status'] = 'failed';
@@ -197,6 +213,57 @@ final class FrameworkDeploymentExecutor
         } finally {
             $lock?->release();
         }
+    }
+
+    /**
+     * Put back the state the last deploy replaced, as kept on disk: what the
+     * systemd wrapper runs when its health check fails after its restart.
+     * Nothing to do when no state is kept, or composer.lock is no longer the
+     * one that deploy installed.
+     *
+     * @return array<string, mixed>
+     */
+    public function rollbackLastDeploy(string $projectRoot, ?string $restartCommand = null): array
+    {
+        $result = ['started_at' => gmdate(DATE_ATOM), 'finished_at' => null, 'status' => 'nothing', 'reason' => '', 'restart_required' => false];
+        $lock = $this->lock ?? new UpdateLock($projectRoot);
+        try {
+            $acquired = $lock->acquire('rollback');
+        } catch (\Throwable $e) {
+            $result['reason'] = $e->getMessage();
+
+            return $this->finalize($projectRoot, $result, 'failed');
+        }
+        if (!$acquired) {
+            $result['reason'] = sprintf('Another update run is in progress (%s).', $lock->holderDescription());
+
+            return $this->finalize($projectRoot, $result, 'failed');
+        }
+        // Read and dropped under the lock: an update finishing in between
+        // had its new composer.lock overwritten with the old one.
+        try {
+            $snapshot = ComposerStateSnapshot::kept($projectRoot);
+            if ($snapshot === null) {
+                $result['reason'] = 'Nothing to roll back: no deploy state is kept, or composer.lock has changed since the deploy that kept it.';
+
+                return $this->finalize($projectRoot, $result, 'nothing');
+            }
+            [$result['rollback'], $result['restart_required']] = $this->rollback($projectRoot, $snapshot, $restartCommand);
+            if (str_starts_with((string) $result['rollback'], 'FAILED')) {
+                $result['reason'] = (string) $result['rollback'];
+
+                return $this->finalize($projectRoot, $result, 'failed');
+            }
+            // Unrecorded, the next tick deploys the same releases again.
+            $result['rejected'] = ComposerStateSnapshot::rejectKept($projectRoot)
+                ? 'recorded'
+                : 'not recorded: the next tick may deploy the same releases again';
+        } finally {
+            $lock->release();
+        }
+        $result['reason'] = 'The release before the last deploy is back.';
+
+        return $this->finalize($projectRoot, $result, 'rolled_back');
     }
 
     /**

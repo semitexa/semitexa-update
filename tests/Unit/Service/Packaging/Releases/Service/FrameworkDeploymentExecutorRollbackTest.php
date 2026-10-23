@@ -360,7 +360,150 @@ final class FrameworkDeploymentExecutorRollbackTest extends TestCase
         self::assertCount(1, $ran, 'no composer install, no restart');
     }
 
-    private function plan(?string $restartCommand = null): DeploymentPlan
+    /**
+     * The wrapper's health check after its restart is the one a broken
+     * release fails, and by then the deploy process and its in-memory
+     * snapshot were gone: nothing could go back. The deploy keeps it on disk.
+     */
+    public function testAHealthyDeployKeepsTheStateItReplacedForALaterRollback(): void
+    {
+        $ran = [];
+        $deploy = new FrameworkDeploymentExecutor(new DeploymentLogWriter(), null, new UpdateLock($this->projectRoot), self::composerInstalling2($ran));
+
+        $result = $deploy->execute($this->projectRoot, $this->plan());
+
+        self::assertSame('updated', $result['status']);
+        self::assertSame('kept', $result['rollback_snapshot']);
+
+        $ran = [];
+        $rollback = (new FrameworkDeploymentExecutor(new DeploymentLogWriter(), null, new UpdateLock($this->projectRoot), static function (string $command) use (&$ran): void {
+            $ran[] = $command;
+        }))->rollbackLastDeploy($this->projectRoot);
+
+        self::assertSame('rolled_back', $rollback['status'], (string) $rollback['reason']);
+        self::assertTrue($rollback['restart_required'], 'nothing restarts here: the wrapper owes the restart');
+        self::assertStringContainsString('1.0.0', (string) file_get_contents($this->projectRoot . '/composer.lock'));
+        self::assertStringContainsString('>=1.0.0', (string) file_get_contents($this->projectRoot . '/composer.json'));
+        self::assertTrue((bool) array_filter($ran, static fn (string $c): bool => str_contains($c, ' install ')), 'vendor/ reinstalled from the restored lock');
+
+        $again = (new FrameworkDeploymentExecutor(new DeploymentLogWriter(), null, new UpdateLock($this->projectRoot), static function (): void {}))
+            ->rollbackLastDeploy($this->projectRoot);
+        self::assertSame('nothing', $again['status'], 'a rollback is used once');
+    }
+
+    /**
+     * vendor/ back on 1.0.0 makes 2.0.0 "newer" again: every tick deployed
+     * it, restarted, failed the wrapper's check and rolled back.
+     */
+    public function testTheReleasesARollbackBackedOutAreNotDeployedAgain(): void
+    {
+        $ran = [];
+        $deploy = new FrameworkDeploymentExecutor(new DeploymentLogWriter(), null, new UpdateLock($this->projectRoot), self::composerInstalling2($ran));
+        self::assertSame('updated', $deploy->execute($this->projectRoot, $this->plan())['status']);
+        $rollback = (new FrameworkDeploymentExecutor(new DeploymentLogWriter(), null, new UpdateLock($this->projectRoot), static function (): void {}))
+            ->rollbackLastDeploy($this->projectRoot);
+        self::assertSame('rolled_back', $rollback['status']);
+
+        $ran = [];
+        $result = $deploy->execute($this->projectRoot, $this->plan());
+
+        self::assertSame('noop', $result['status']);
+        self::assertStringContainsString('rolled back', (string) $result['reason']);
+        self::assertSame([], $ran, 'composer not run');
+
+        self::assertSame('updated', $deploy->execute($this->projectRoot, $this->plan(latest: '2.0.1'))['status'], 'a newer release is deployed');
+    }
+
+    /** A Packagist lookup that timed out leaves a package off the plan; composer still installs it. */
+    public function testARejectionHoldsWhenThePlanListsFewerPackages(): void
+    {
+        $ran = [];
+        $deploy = new FrameworkDeploymentExecutor(new DeploymentLogWriter(), null, new UpdateLock($this->projectRoot), static function (string $command, string $projectRoot) use (&$ran): void {
+            $ran[] = $command;
+            if (str_contains($command, ' update ')) {
+                file_put_contents($projectRoot . '/composer.lock', '{"packages":[{"name":"semitexa/core","version":"2.0.0"},{"name":"semitexa/orm","version":"2.0.0"}]}');
+                @mkdir($projectRoot . '/vendor/composer', 0777, true);
+                file_put_contents($projectRoot . '/vendor/composer/installed.json', '{"packages":[{"name":"semitexa/core","version":"2.0.0"},{"name":"semitexa/orm","version":"2.0.0"}],"dev":false}');
+            }
+        });
+        self::assertSame('updated', $deploy->execute($this->projectRoot, $this->plan())['status']);
+        (new FrameworkDeploymentExecutor(new DeploymentLogWriter(), null, new UpdateLock($this->projectRoot), static function (): void {}))
+            ->rollbackLastDeploy($this->projectRoot);
+
+        $ran = [];
+        self::assertSame('noop', $deploy->execute($this->projectRoot, $this->plan())['status']);
+        self::assertSame([], $ran);
+
+        unlink($this->projectRoot . '/var/update/rollback/rejected.json');
+        self::assertSame('updated', $deploy->execute($this->projectRoot, $this->plan())['status'], 'deleting the marker tries them again');
+    }
+
+    /** Anything that changed composer.lock since: putting the old one back would undo that too. */
+    public function testALockChangedSinceTheDeployIsNotRolledBack(): void
+    {
+        $ran = [];
+        $deploy = new FrameworkDeploymentExecutor(new DeploymentLogWriter(), null, new UpdateLock($this->projectRoot), self::composerInstalling2($ran));
+        self::assertSame('updated', $deploy->execute($this->projectRoot, $this->plan())['status']);
+        file_put_contents($this->projectRoot . '/composer.lock', '{"packages":[{"name":"semitexa/core","version":"3.0.0"}]}');
+
+        $ran = [];
+        $result = (new FrameworkDeploymentExecutor(new DeploymentLogWriter(), null, new UpdateLock($this->projectRoot), static function (string $command) use (&$ran): void {
+            $ran[] = $command;
+        }))->rollbackLastDeploy($this->projectRoot);
+
+        self::assertSame('nothing', $result['status']);
+        self::assertSame([], $ran);
+        self::assertStringContainsString('3.0.0', (string) file_get_contents($this->projectRoot . '/composer.lock'));
+    }
+
+    /** A kept lock that went missing must not read as "there was none" and delete the project's. */
+    public function testAKeptLockThatWentMissingRollsNothingBack(): void
+    {
+        $ran = [];
+        $deploy = new FrameworkDeploymentExecutor(new DeploymentLogWriter(), null, new UpdateLock($this->projectRoot), self::composerInstalling2($ran));
+        self::assertSame('updated', $deploy->execute($this->projectRoot, $this->plan())['status']);
+        unlink($this->projectRoot . '/var/update/rollback/composer.lock');
+
+        $result = (new FrameworkDeploymentExecutor(new DeploymentLogWriter(), null, new UpdateLock($this->projectRoot), static function (): void {}))
+            ->rollbackLastDeploy($this->projectRoot);
+
+        self::assertSame('nothing', $result['status']);
+        self::assertFileExists($this->projectRoot . '/composer.lock');
+    }
+
+    public function testARollbackWhileAnUpdateRunsIsRefused(): void
+    {
+        $ran = [];
+        $deploy = new FrameworkDeploymentExecutor(new DeploymentLogWriter(), null, new UpdateLock($this->projectRoot), self::composerInstalling2($ran));
+        self::assertSame('updated', $deploy->execute($this->projectRoot, $this->plan())['status']);
+        $held = new UpdateLock($this->projectRoot);
+        self::assertTrue($held->acquire('test'));
+
+        try {
+            $result = (new FrameworkDeploymentExecutor(new DeploymentLogWriter(), null, new UpdateLock($this->projectRoot), static function (): void {}))
+                ->rollbackLastDeploy($this->projectRoot);
+        } finally {
+            $held->release();
+        }
+
+        self::assertSame('failed', $result['status']);
+        self::assertStringContainsString('2.0.0', (string) file_get_contents($this->projectRoot . '/composer.lock'));
+    }
+
+    /** @param list<string> $ran */
+    private static function composerInstalling2(array &$ran): \Closure
+    {
+        return static function (string $command, string $projectRoot) use (&$ran): void {
+            $ran[] = $command;
+            if (str_contains($command, ' update ')) {
+                file_put_contents($projectRoot . '/composer.lock', '{"packages":[{"name":"semitexa/core","version":"2.0.0"}]}');
+                @mkdir($projectRoot . '/vendor/composer', 0777, true);
+                file_put_contents($projectRoot . '/vendor/composer/installed.json', '{"packages":[{"name":"semitexa/core","version":"2.0.0"}],"dev":false}');
+            }
+        };
+    }
+
+    private function plan(?string $restartCommand = null, string $latest = '2.0.0'): DeploymentPlan
     {
         return new DeploymentPlan(
             config: new DeploymentConfig(
@@ -376,12 +519,12 @@ final class FrameworkDeploymentExecutorRollbackTest extends TestCase
                 new PackageUpdate(
                     packageName: 'semitexa/core',
                     installedVersion: '1.0.0',
-                    latestVersion: '2.0.0',
+                    latestVersion: $latest,
                     source: 'packagist',
                 ),
             ],
             privateLatestVersion: null,
-            selectedVersion: '2.0.0',
+            selectedVersion: $latest,
             updateAvailable: true,
             reason: 'test',
         );

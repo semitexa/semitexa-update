@@ -90,7 +90,32 @@ fi
 # nothing, and classes the server loaded before the update stay old. Every
 # container, not only app: the worker container runs the queue, scheduler and
 # mail workers on the same code.
-restart_stack
+# Back to the release before when the new one does not come up, then exit 1.
+# The next tick does not deploy it again (update:packages:auto skips releases
+# a rollback backed out); without the rollback it stayed live.
+roll_back_and_fail() {
+    local output="" json
+    if output="$(./bin/semitexa update:packages:rollback --json)"; then
+        :
+    fi
+    printf '%s\n' "${output}"
+    json="$(json_line "${output}")"
+    if [ "$(json_value "${json}" status)" = "rolled_back" ]; then
+        echo "Rolled back to the release before the deploy." >&2
+        # Inside the app container the rollback cannot restart the stack itself.
+        if [ "$(json_value "${json}" restart_required)" = "true" ]; then
+            restart_stack || true
+        fi
+    else
+        echo "Not rolled back: see the line above. The failing release is still live." >&2
+    fi
+    exit 1
+}
+
+if ! restart_stack; then
+    echo "Restart onto the new release failed." >&2
+    roll_back_and_fail
+fi
 
 if ! CHECK_OUTPUT="$(./bin/semitexa update:packages:check --json 2>/dev/null)"; then
     echo "Failed to inspect health check configuration after restart-required deployment." >&2
@@ -136,4 +161,5 @@ for attempt in 1 2 3 4 5 6; do
 done
 
 echo "Health check failed for ${DISPLAY_URL}." >&2
-exit 1
+
+roll_back_and_fail

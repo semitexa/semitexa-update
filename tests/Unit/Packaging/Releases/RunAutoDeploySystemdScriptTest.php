@@ -34,6 +34,8 @@ final class RunAutoDeploySystemdScriptTest extends TestCase
             self::assertNotSame(0, $exitCode, $output);
             self::assertStringContainsString('Health check failed', $output);
             self::assertFileExists($projectRoot . '/var/server-started');
+            self::assertFileExists($projectRoot . '/var/rollback-asked', 'a failed health check asks for the rollback');
+            self::assertStringContainsString('The failing release is still live', $output);
         } finally {
             $this->cleanupProject($projectRoot, $server);
         }
@@ -140,6 +142,61 @@ final class RunAutoDeploySystemdScriptTest extends TestCase
     }
 
     /**
+     * The release is broken after the wrapper's own restart: the next tick
+     * finds nothing newer and it stayed live. Rolled back inside the app
+     * container, the stack is restarted onto the release before.
+     */
+    public function testAFailedHealthCheckRollsBackAndRestartsOntoTheReleaseBefore(): void
+    {
+        $server = $this->startHttpServer(500);
+        $projectRoot = $this->createFakeProject($server, rollbackPayload: ['status' => 'rolled_back', 'reason' => 'back', 'restart_required' => true]);
+
+        try {
+            [$exitCode, $output] = $this->runWrapper($projectRoot);
+
+            self::assertSame(1, $exitCode, $output);
+            self::assertFileExists($projectRoot . '/var/rollback-asked');
+            self::assertSame(2, substr_count((string) file_get_contents($projectRoot . '/var/server-started'), 'x'), 'the deploy restart, then the one onto the restored release');
+            self::assertStringContainsString('Rolled back to the release before the deploy.', $output);
+        } finally {
+            $this->cleanupProject($projectRoot, $server);
+        }
+    }
+
+    /** The new release's containers do not come up: set -e ended the run before any rollback. */
+    public function testARestartThatFailsRollsBackWithoutAHealthCheck(): void
+    {
+        $server = $this->startHttpServer(200);
+        $projectRoot = $this->createFakeProject($server, rollbackPayload: ['status' => 'rolled_back', 'reason' => 'back', 'restart_required' => true], restartExit: 1);
+
+        try {
+            [$exitCode, $output] = $this->runWrapper($projectRoot);
+
+            self::assertSame(1, $exitCode, $output);
+            self::assertStringContainsString('Restart onto the new release failed.', $output);
+            self::assertFileExists($projectRoot . '/var/rollback-asked');
+            self::assertStringNotContainsString('Health check failed', $output);
+        } finally {
+            $this->cleanupProject($projectRoot, $server);
+        }
+    }
+
+    public function testARollbackThatRestartedItselfIsNotRestartedAgain(): void
+    {
+        $server = $this->startHttpServer(500);
+        $projectRoot = $this->createFakeProject($server, rollbackPayload: ['status' => 'rolled_back', 'reason' => 'back', 'restart_required' => false]);
+
+        try {
+            [$exitCode, $output] = $this->runWrapper($projectRoot);
+
+            self::assertSame(1, $exitCode, $output);
+            self::assertSame(1, substr_count((string) file_get_contents($projectRoot . '/var/server-started'), 'x'), $output);
+        } finally {
+            $this->cleanupProject($projectRoot, $server);
+        }
+    }
+
+    /**
      * @return array{0: int, 1: string}
      */
     private function runWrapper(string $projectRoot): array
@@ -211,8 +268,11 @@ final class RunAutoDeploySystemdScriptTest extends TestCase
     /**
      * @param array{server_root: string, port: int, process: resource} $server
      */
-    /** @param array<string, mixed>|null $autoPayload */
-    private function createFakeProject(array $server, ?string $deployCheckOutput = null, ?array $autoPayload = null, int $autoExit = 0): string
+    /**
+     * @param array<string, mixed>|null $autoPayload
+     * @param array<string, mixed>|null $rollbackPayload
+     */
+    private function createFakeProject(array $server, ?string $deployCheckOutput = null, ?array $autoPayload = null, int $autoExit = 0, ?array $rollbackPayload = null, int $restartExit = 0): string
     {
         $projectRoot = sys_get_temp_dir() . '/semitexa-auto-deploy-project-' . bin2hex(random_bytes(4));
         mkdir($projectRoot . '/bin', 0777, true);
@@ -229,6 +289,7 @@ final class RunAutoDeploySystemdScriptTest extends TestCase
             'healthcheck_url' => sprintf('http://127.0.0.1:%d/', $server['port']),
         ], JSON_THROW_ON_ERROR);
         $deployCheckPayload = $deployCheckOutput ?? $healthcheckPayload;
+        $rollback = json_encode($rollbackPayload ?? ['status' => 'nothing', 'reason' => 'Nothing to roll back', 'restart_required' => false], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
 
         $script = <<<BASH
 #!/usr/bin/env bash
@@ -242,9 +303,14 @@ case "\${1:-}" in
   update:packages:check)
     printf '%s\n' '__HEALTHCHECK_PAYLOAD__'
     ;;
+  update:packages:rollback)
+    touch var/rollback-asked
+    printf '%s\n' '__ROLLBACK_PAYLOAD__'
+    ;;
   server:restart)
     echo '[INFO] Restarting the stack'
-    touch var/server-started
+    printf x >> var/server-started
+    exit __RESTART_EXIT__
     ;;
   *)
     echo "Unexpected command: \$*" >&2
@@ -256,8 +322,8 @@ BASH;
         file_put_contents(
             $projectRoot . '/bin/semitexa',
             str_replace(
-                ['__PAYLOAD__', '__HEALTHCHECK_PAYLOAD__', '__AUTO_EXIT__'],
-                [$payload, $deployCheckPayload, (string) $autoExit],
+                ['__PAYLOAD__', '__HEALTHCHECK_PAYLOAD__', '__AUTO_EXIT__', '__ROLLBACK_PAYLOAD__', '__RESTART_EXIT__'],
+                [$payload, $deployCheckPayload, (string) $autoExit, $rollback, (string) $restartExit],
                 $script,
             ),
         );
