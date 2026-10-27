@@ -1,6 +1,6 @@
 {
     "schema_version": "semitexa.scaffold-manifest/v1",
-    "generated_at": "2026-10-21T19:45:48+00:00",
+    "generated_at": "2026-10-27T15:35:36+00:00",
     "files": [
         {
             "path": ".env.default",
@@ -215,8 +215,9 @@
         },
         {
             "path": "Dockerfile",
-            "current_sha256": "b30d542f0a0783563dca8be7b0afbc5d1143e55f768b80d6191bc48e88d1efc1",
+            "current_sha256": "9f73d16ce0854999bcd041b3e0017876f19450358421204e2736df1bfa6c7257",
             "previous_sha256": [
+                "b30d542f0a0783563dca8be7b0afbc5d1143e55f768b80d6191bc48e88d1efc1",
                 "5e9cdf90b7a68b7b0a3ca86ab32c802f75cc0a94bf9586bca14928e55dd24ab0",
                 "dd8611980340acb6aa1961873a388d234ed49c92665570eda7d4f64cc3cf854e",
                 "c63f9d1211ab93d8b8fc4dfb1d5c91f6581b7a6bdb0065c4a1d8c7a5ef3c7e38",
@@ -392,8 +393,9 @@
         },
         {
             "path": "docker-compose.yml",
-            "current_sha256": "13e082a2ed610534f1ed54f26b0d5bc5ea8dff38e61efce8b4d2d3215081d653",
+            "current_sha256": "669f62b8e1766f8682bb580a09865a9b1df0c90c53b5be18072820390077c04d",
             "previous_sha256": [
+                "13e082a2ed610534f1ed54f26b0d5bc5ea8dff38e61efce8b4d2d3215081d653",
                 "fcaf044935eaeb74faa9bc66112eff9d164a100dd38e7817eef503982f00d705",
                 "3c3f63c831b13cfbed2c060663d578d4bd5798c4c318b52a02a4a4eac94c197b",
                 "742f914ec0fa0f85b98bdb17827cc97386c5fa9e1277fb18ed22009ad634e5e1",
