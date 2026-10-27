@@ -449,6 +449,56 @@ final class FrameworkDeploymentExecutorRollbackTest extends TestCase
         self::assertSame([], $ran, 'composer not run');
     }
 
+    /**
+     * REGRESSION (review). 1.0.0 -> 2.0.0 is kept; 2.0.0 -> 3.0.0 fails its
+     * health check in process and is rejected, leaving 2.0.0's state kept;
+     * rolling that back too renamed 2.0.0's marker over 3.0.0's rejection,
+     * and the next tick deployed the broken 3.0.0 again.
+     */
+    public function testRollingBackAnEarlierDeployKeepsALaterRejection(): void
+    {
+        $ran = [];
+        $installing = static function (string $version) use (&$ran): \Closure {
+            return static function (string $command, string $projectRoot) use (&$ran, $version): void {
+                $ran[] = $command;
+                if (str_contains($command, ' update ')) {
+                    file_put_contents($projectRoot . '/composer.lock', '{"packages":[{"name":"semitexa/core","version":"' . $version . '"}]}');
+                    @mkdir($projectRoot . '/vendor/composer', 0777, true);
+                    file_put_contents($projectRoot . '/vendor/composer/installed.json', '{"packages":[{"name":"semitexa/core","version":"' . $version . '"}],"dev":false}');
+                }
+            };
+        };
+        $to2 = new FrameworkDeploymentExecutor(new DeploymentLogWriter(), null, new UpdateLock($this->projectRoot), $installing('2.0.0'));
+        self::assertSame('updated', $to2->execute($this->projectRoot, $this->plan())['status']);
+
+        $unhealthy = $this->plan(latest: '3.0.0');
+        $unhealthy = new DeploymentPlan(
+            config: new DeploymentConfig(enabled: true, channel: 'stable', sourceMode: 'packagist', healthcheckUrl: 'http://127.0.0.1:1/never', privateRepositoryUrl: null, restartCommand: null),
+            installedPackages: ['semitexa/core' => '2.0.0'],
+            packageUpdates: $unhealthy->packageUpdates,
+            privateLatestVersion: null,
+            selectedVersion: '3.0.0',
+            updateAvailable: true,
+            reason: 'test',
+        );
+        // The rollback's composer install puts vendor/ back on 2.0.0.
+        $to3 = new FrameworkDeploymentExecutor(new DeploymentLogWriter(), null, new UpdateLock($this->projectRoot), static function (string $command, string $projectRoot) use ($installing): void {
+            $installing(str_contains($command, ' update ') ? '3.0.0' : '2.0.0')($command, $projectRoot);
+        });
+        self::assertSame('recorded', $to3->execute($this->projectRoot, $unhealthy)['rejected']);
+
+        $rollback = (new FrameworkDeploymentExecutor(new DeploymentLogWriter(), null, new UpdateLock($this->projectRoot), static function (): void {}))
+            ->rollbackLastDeploy($this->projectRoot);
+        self::assertSame(['rolled_back', 'recorded'], [$rollback['status'], $rollback['rejected']]);
+
+        $rejected = json_decode((string) file_get_contents($this->projectRoot . '/var/update/rollback/rejected.json'), true);
+        self::assertSame(['semitexa/core' => '3.0.0'], is_array($rejected) ? $rejected['installed'] : null, 'the higher of the two rejected releases');
+        $ran = [];
+        $again = $to3->execute($this->projectRoot, $this->plan(latest: '3.0.0'));
+        self::assertSame('noop', $again['status']);
+        self::assertSame([], $ran, 'composer not run');
+    }
+
     /** A step that may pass on the next tick (orm:sync with the database down) rejects nothing. */
     public function testAFailureOtherThanTheHealthCheckRejectsNothing(): void
     {

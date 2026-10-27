@@ -125,14 +125,19 @@ final class ComposerStateSnapshot
     /**
      * After a rollback: the kept files go, and what that deploy installed
      * is remembered as rejected, so the next tick does not deploy it again.
+     * Added to what is rejected already, not over it: a later release that
+     * failed its health check in process leaves the earlier deploy's state
+     * kept, and rolling that back as well renamed the older set over the
+     * newer one's rejection, so the next tick deployed the broken release
+     * again.
      */
     public static function rejectKept(string $projectRoot): bool
     {
         $dir = $projectRoot . '/' . self::KEPT_DIR;
-        $recorded = @rename($dir . '/kept.json', $dir . '/rejected.json');
-        if (!$recorded) {
-            @unlink($dir . '/kept.json');
-        }
+        $meta = json_decode((string) @file_get_contents($dir . '/kept.json'), true);
+        $installed = is_array($meta) && is_array($meta['installed'] ?? null) ? array_filter($meta['installed'], 'is_string') : [];
+        $recorded = $installed !== [] && self::reject($projectRoot, $installed);
+        @unlink($dir . '/kept.json');
         @unlink($dir . '/composer.json');
         @unlink($dir . '/composer.lock');
 
@@ -140,9 +145,11 @@ final class ComposerStateSnapshot
     }
 
     /**
-     * Remember a release set as rejected when this process rolled it back
-     * itself (its health check failed before any restart): nothing was kept
-     * for rejectKept() to rename. The shape rejects() reads.
+     * Remember a release set as rejected: when this process rolled it back
+     * itself (its health check failed before any restart), and through
+     * rejectKept(). Merged with what is rejected already, each package at
+     * the higher of the two versions: rejects() then waits for a release
+     * newer than every one proven broken. The shape rejects() reads.
      *
      * @param array<string, string> $installed what vendor/ held when it failed
      */
@@ -152,11 +159,26 @@ final class ComposerStateSnapshot
         if (!is_dir($dir) && !@mkdir($dir, 0775, true) && !is_dir($dir)) {
             return false;
         }
+        $merged = self::rejected($projectRoot);
+        foreach ($installed as $package => $version) {
+            if (!isset($merged[$package]) || SemitexaReleaseVersion::compare($version, $merged[$package]) > 0) {
+                $merged[$package] = $version;
+            }
+        }
+        ksort($merged);
 
         return self::writeAtomically($dir . '/rejected.json', (string) json_encode([
-            'installed' => $installed,
+            'installed' => $merged,
             'rejected_at' => gmdate(DATE_ATOM),
         ]));
+    }
+
+    /** @return array<string, string> package => the highest version rejected so far */
+    private static function rejected(string $projectRoot): array
+    {
+        $meta = json_decode((string) @file_get_contents($projectRoot . '/' . self::KEPT_DIR . '/rejected.json'), true);
+
+        return is_array($meta) && is_array($meta['installed'] ?? null) ? array_filter($meta['installed'], 'is_string') : [];
     }
 
     /**
@@ -168,8 +190,7 @@ final class ComposerStateSnapshot
      */
     public static function rejects(string $projectRoot, DeploymentPlan $plan): bool
     {
-        $meta = json_decode((string) @file_get_contents($projectRoot . '/' . self::KEPT_DIR . '/rejected.json'), true);
-        $rejected = is_array($meta) && is_array($meta['installed'] ?? null) ? array_filter($meta['installed'], 'is_string') : [];
+        $rejected = self::rejected($projectRoot);
         if ($rejected === []) {
             return false;
         }
