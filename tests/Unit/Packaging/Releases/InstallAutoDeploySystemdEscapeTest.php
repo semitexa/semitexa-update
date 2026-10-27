@@ -34,6 +34,20 @@ final class InstallAutoDeploySystemdEscapeTest extends TestCase
         self::assertSame($expected, $out);
     }
 
+    /**
+     * WorkingDirectory= and Environment= read `$` literally: doubled there, a
+     * path with one named another directory and the unit did not start.
+     */
+    #[Test]
+    public function a_value_outside_exec_start_keeps_its_dollar(): void
+    {
+        [$exit, $out] = $this->escape('/srv/a$b 100%', 'escape_unit_value');
+
+        self::assertSame(0, $exit, $out);
+        self::assertSame('/srv/a$b 100%%', $out);
+        self::assertNotSame(0, $this->escape('/srv/a"b', 'escape_unit_value')[0], 'refused as escape_unit refuses it');
+    }
+
     /** @return iterable<string, array{string}> */
     public static function refused(): iterable
     {
@@ -53,10 +67,10 @@ final class InstallAutoDeploySystemdEscapeTest extends TestCase
     }
 
     /** @return array{int, string} */
-    private function escape(string $path): array
+    private function escape(string $path, string $function = 'escape_unit'): array
     {
         $installer = dirname(__DIR__, 4) . '/tools/install-auto-deploy-systemd.sh';
-        $script = 'set -euo pipefail; source <(sed -n "/^escape_sed()/,/^}/p;/^escape_unit()/,/^}/p" "$1"); out="$(escape_unit "$2")"; printf %s "$out"';
+        $script = 'set -euo pipefail; source <(sed -n "/^escape_sed()/,/^}/p;/^escape_unit()/,/^}/p;/^escape_unit_value()/,/^}/p" "$1"); out="$(' . $function . ' "$2")"; printf %s "$out"';
         exec(sprintf('bash -c %s _ %s %s 2>&1', escapeshellarg($script), escapeshellarg($installer), escapeshellarg($path)), $lines, $exit);
 
         return [$exit, implode("\n", $lines)];

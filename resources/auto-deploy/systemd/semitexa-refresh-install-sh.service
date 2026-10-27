@@ -8,7 +8,7 @@ Type=oneshot
 User=@@RUN_AS_USER@@
 WorkingDirectory=@@PROJECT_ROOT@@
 Environment="HOME=@@HOME_DIR@@"
-ExecStart="@@REFRESH_SCRIPT@@" "@@PROJECT_ROOT@@"
+ExecStart="@@REFRESH_SCRIPT@@" "@@PROJECT_ROOT_EXEC@@"
 TimeoutStartSec=10min
 NoNewPrivileges=true
 PrivateTmp=true

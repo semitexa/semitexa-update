@@ -101,18 +101,28 @@ escape_unit() {
     escape_sed "$(printf '%s' "$1" | sed -e 's/%/%%/g' -e 's/\$/$$/g')"
 }
 
-project_root_escaped="$(escape_unit "${PROJECT_ROOT}")"
+# For WorkingDirectory= and Environment=: systemd reads `$` as a variable only
+# in ExecStart=, so a doubled `$$` stayed literal there and named another
+# directory. `%` is a specifier everywhere.
+escape_unit_value() {
+    escape_unit "$1" >/dev/null
+    escape_sed "$(printf '%s' "$1" | sed -e 's/%/%%/g')"
+}
+
+project_root_escaped="$(escape_unit_value "${PROJECT_ROOT}")"
+project_root_exec_escaped="$(escape_unit "${PROJECT_ROOT}")"
 unit_prefix_escaped="$(escape_sed "${UNIT_PREFIX}")"
 interval_escaped="$(escape_sed "${INTERVAL}")"
 run_as_user_escaped="$(escape_sed "${RUN_AS_USER}")"
 home_dir="$(getent passwd "${RUN_AS_USER}" | cut -d: -f6)"
-home_dir_escaped="$(escape_unit "${home_dir}")"
+home_dir_escaped="$(escape_unit_value "${home_dir}")"
 run_script_escaped="$(escape_unit "${RUN_SCRIPT_PATH}")"
 refresh_unit_prefix_escaped="$(escape_sed "${REFRESH_UNIT_PREFIX}")"
 refresh_interval_escaped="$(escape_sed "${REFRESH_INTERVAL}")"
 refresh_script_escaped="$(escape_unit "${REFRESH_SCRIPT_PATH}")"
 
 sed \
+    -e "s|@@PROJECT_ROOT_EXEC@@|${project_root_exec_escaped}|g" \
     -e "s|@@PROJECT_ROOT@@|${project_root_escaped}|g" \
     -e "s|@@RUN_AS_USER@@|${run_as_user_escaped}|g" \
     -e "s|@@HOME_DIR@@|${home_dir_escaped}|g" \
@@ -125,6 +135,7 @@ sed \
     "${TIMER_TEMPLATE}" > "${TIMER_PATH}"
 
 sed \
+    -e "s|@@PROJECT_ROOT_EXEC@@|${project_root_exec_escaped}|g" \
     -e "s|@@PROJECT_ROOT@@|${project_root_escaped}|g" \
     -e "s|@@RUN_AS_USER@@|${run_as_user_escaped}|g" \
     -e "s|@@HOME_DIR@@|${home_dir_escaped}|g" \
