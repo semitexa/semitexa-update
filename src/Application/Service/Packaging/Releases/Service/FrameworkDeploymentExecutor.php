@@ -15,6 +15,7 @@ use Semitexa\Update\Domain\Enum\RunOutcome;
 use Semitexa\Update\Domain\Model\DeploymentPlan;
 use Semitexa\Update\Application\Service\Packaging\Releases\Support\ComposerStateSnapshot;
 use Semitexa\Update\Application\Service\Packaging\Releases\Support\DeploymentLogWriter;
+use Semitexa\Update\Application\Service\Packaging\Releases\Support\InstalledSemitexaPackageReader;
 
 final class FrameworkDeploymentExecutor
 {
@@ -71,6 +72,8 @@ final class FrameworkDeploymentExecutor
         $composerStarted = false;
         $lockBefore = false;
         $installedBefore = false;
+        /** @var array<string, string>|null $unhealthySet what vendor/ held when the health check failed */
+        $unhealthySet = null;
         try {
             if (!$plan->config->enabled) {
                 return $this->finalize($projectRoot, $result, 'skipped');
@@ -170,6 +173,9 @@ final class FrameworkDeploymentExecutor
                     sleep(3);
                 }
                 if (!$check->ok) {
+                    // Read before the rollback puts vendor/ back: this is the
+                    // set the release proved broken with.
+                    $unhealthySet = (new InstalledSemitexaPackageReader())->read($projectRoot);
                     throw new \RuntimeException($check->message);
                 }
                 $result['healthcheck'] = $check->message;
@@ -204,6 +210,16 @@ final class FrameworkDeploymentExecutor
                 // rewritten the lock or part of vendor/.
                 [$result['rollback'], $restartStillRequired] = $this->rollback($projectRoot, $snapshot, $plan->config->restartCommand);
                 $result['restart_required'] = $restartStillRequired;
+                // A release that failed this health check is newer again once
+                // vendor/ is back, and only update:packages:rollback recorded
+                // it: every tick deployed it, failed and rolled back again.
+                // Other failures (a database down for orm:sync) may pass on
+                // the next tick, so they reject nothing.
+                if ($unhealthySet !== null && $unhealthySet !== [] && !str_starts_with((string) $result['rollback'], 'FAILED')) {
+                    $result['rejected'] = ComposerStateSnapshot::reject($projectRoot, $unhealthySet)
+                        ? 'recorded'
+                        : 'not recorded: the next tick may deploy the same releases again';
+                }
                 // Rolled back: vendor/ no longer holds what was read after the update.
                 foreach ($result['updated_packages'] as $i => $update) {
                     unset($result['updated_packages'][$i]['deployed_version']);

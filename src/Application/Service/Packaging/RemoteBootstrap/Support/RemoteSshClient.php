@@ -56,7 +56,7 @@ final class RemoteSshClient
      */
     private function execute(array $command, ?string $password): SshCommandResult
     {
-        $this->ensureAccount();
+        $env = $this->accountEnvironment();
 
         $descriptor = [
             0 => ['pipe', 'r'],
@@ -64,13 +64,16 @@ final class RemoteSshClient
             2 => ['pipe', 'w'],
         ];
 
-        $env = null;
         if ($password !== null) {
             array_unshift($command, 'sshpass', '-e');
-            $env = array_merge($_ENV, $_SERVER, ['SSHPASS' => $password]);
+            $env['SSHPASS'] = $password;
         }
 
-        $process = proc_open($command, $descriptor, $pipes, null, $env);
+        // Strings only: $_SERVER also holds argv, an array, which is no
+        // environment value.
+        $process = proc_open($command, $descriptor, $pipes, null, $env === []
+            ? null
+            : array_merge(array_filter(array_merge(getenv(), $_ENV, $_SERVER), 'is_string'), $env));
         if (!is_resource($process)) {
             throw new \RuntimeException('Failed to start SSH process.');
         }
@@ -150,22 +153,50 @@ final class RemoteSshClient
      * ssh and scp refuse to run for a uid with no account ("No user exists
      * for uid 501"), and the app container runs as the host user's uid, which
      * the image cannot know: every macOS user, every host user but 1000. The
-     * image leaves /etc/passwd writable for this (it has no setuid program to
-     * abuse it with); the account is added once, here, only when missing.
+     * image ships nss_wrapper for this, so the account is named in a passwd
+     * file of this client's own: a writable /etc/passwd turned any file write
+     * in the app into a new account.
+     *
+     * @return array<string, string> what ssh is run with; none when the uid has an account
      */
-    private function ensureAccount(): void
+    private function accountEnvironment(): array
     {
-        if (!function_exists('posix_geteuid') || posix_getpwuid(posix_geteuid()) !== false || !is_writable('/etc/passwd')) {
-            return;
+        if (!function_exists('posix_geteuid') || posix_getpwuid(posix_geteuid()) !== false || !is_file(self::NSS_WRAPPER)) {
+            return [];
         }
-        $uid = posix_geteuid();
-        @file_put_contents('/etc/passwd', sprintf(
-            "semitexa-%d:x:%d:%d:Semitexa:%s:/sbin/nologin\n",
-            $uid,
-            $uid,
-            posix_getegid(),
-            $this->stateDir ?? sys_get_temp_dir(),
-        ), FILE_APPEND | LOCK_EX);
+
+        return self::nssWrapperEnvironment(posix_geteuid(), posix_getegid(), $this->stateDir ?? sys_get_temp_dir(), self::NSS_WRAPPER);
+    }
+
+    /** Where the image's nss_wrapper package puts the library (Alpine). */
+    private const NSS_WRAPPER = '/usr/lib/libnss_wrapper.so';
+
+    /**
+     * The system's accounts and groups, and one for this uid (and its gid
+     * when that has no group), in files under $dir that nss_wrapper reads
+     * in place of /etc/passwd and /etc/group. None when they cannot be
+     * written: ssh then says itself which account is missing.
+     *
+     * @return array<string, string>
+     */
+    private static function nssWrapperEnvironment(int $uid, int $gid, string $dir, string $library): array
+    {
+        if (!is_dir($dir) && !@mkdir($dir, 0700, true) && !is_dir($dir)) {
+            return [];
+        }
+        $accounts = rtrim((string) @file_get_contents('/etc/passwd'), "\n");
+        $accounts .= ($accounts === '' ? '' : "\n") . sprintf("semitexa-%d:x:%d:%d:Semitexa:%s:/sbin/nologin\n", $uid, $uid, $gid, $dir);
+        $groups = rtrim((string) @file_get_contents('/etc/group'), "\n");
+        if (!function_exists('posix_getgrgid') || posix_getgrgid($gid) === false) {
+            $groups .= ($groups === '' ? '' : "\n") . sprintf('semitexa-%d:x:%d:', $gid, $gid);
+        }
+        $passwdFile = $dir . '/nss-passwd';
+        $groupFile = $dir . '/nss-group';
+        if (@file_put_contents($passwdFile, $accounts) === false || @file_put_contents($groupFile, $groups . "\n") === false) {
+            return [];
+        }
+
+        return ['LD_PRELOAD' => $library, 'NSS_WRAPPER_PASSWD' => $passwdFile, 'NSS_WRAPPER_GROUP' => $groupFile];
     }
 
     /**

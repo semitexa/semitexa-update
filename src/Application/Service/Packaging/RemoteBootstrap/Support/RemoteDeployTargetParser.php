@@ -46,7 +46,7 @@ final class RemoteDeployTargetParser
 
         return new RemoteDeployTarget(
             user: $matches['user'],
-            host: ($matches['v6'] ?? '') !== '' ? strtolower($matches['v6']) : $matches['host'],
+            host: ($matches['v6'] ?? '') !== '' ? strtolower($matches['v6']) : ($matches['host'] ?? ''),
         );
     }
 }

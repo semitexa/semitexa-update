@@ -91,6 +91,37 @@ final class RemoteBootstrapPathGuardTest extends TestCase
         }
     }
 
+    /**
+     * What the guard must let through: a deployment this bootstrap made (its
+     * marker beside the app's files) and an empty directory. Past the guard
+     * the script starts provisioning and stops at apt-get, which the test
+     * PATH does not have.
+     */
+    #[Test]
+    #[DataProvider('versions')]
+    public function reinitializing_goes_on_for_a_marked_or_an_empty_directory(string $version): void
+    {
+        foreach (['marked' => true, 'empty' => false] as $label => $marked) {
+            $dir = sys_get_temp_dir() . '/semitexa-deploy-' . $label . '-' . bin2hex(random_bytes(6));
+            mkdir($dir);
+            if ($marked) {
+                file_put_contents($dir . '/.semitexa-deployment.json', '{}');
+                touch($dir . '/app-file');
+            }
+
+            try {
+                [$exit, $output] = $this->bootstrap($version, $dir, ['SEMITEXA_FORCE_REINITIALIZE' => '1']);
+
+                self::assertSame(127, $exit, $label . ': ' . $output);
+                self::assertStringContainsString('[remote-bootstrap] Preparing Ubuntu host', $output, $label);
+                self::assertStringContainsString('apt-get: command not found', $output, $label);
+                self::assertStringNotContainsString('Refusing to reinitialize', $output, $label);
+            } finally {
+                exec('rm -rf ' . escapeshellarg($dir));
+            }
+        }
+    }
+
     /** A directory this user may enter but not read listed as empty, and the guard let it through to rm -rf. */
     #[Test]
     #[DataProvider('versions')]

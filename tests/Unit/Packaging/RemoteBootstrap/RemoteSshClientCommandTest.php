@@ -85,4 +85,30 @@ final class RemoteSshClientCommandTest extends TestCase
             @rmdir($dir);
         }
     }
+
+    /**
+     * A uid with no account: ssh refused to run, and the image made
+     * /etc/passwd writable so one could be added (review: any file write in
+     * the app became a new account). The account is named in files of the
+     * client's own, which nss_wrapper reads in place of the system's.
+     */
+    public function testAUidWithNoAccountIsNamedInFilesOfItsOwnForNssWrapper(): void
+    {
+        $dir = sys_get_temp_dir() . '/semitexa-ssh-nss-' . bin2hex(random_bytes(4));
+
+        try {
+            $env = (new \ReflectionMethod(RemoteSshClient::class, 'nssWrapperEnvironment'))->invoke(null, 64001, 64002, $dir, '/usr/lib/libnss_wrapper.so');
+
+            self::assertSame([
+                'LD_PRELOAD' => '/usr/lib/libnss_wrapper.so',
+                'NSS_WRAPPER_PASSWD' => $dir . '/nss-passwd',
+                'NSS_WRAPPER_GROUP' => $dir . '/nss-group',
+            ], $env);
+            $accounts = (string) file_get_contents($dir . '/nss-passwd');
+            self::assertSame(rtrim((string) file_get_contents('/etc/passwd'), "\n") . "\nsemitexa-64001:x:64001:64002:Semitexa:{$dir}:/sbin/nologin\n", $accounts, 'every system account, then this uid');
+            self::assertSame(rtrim((string) file_get_contents('/etc/group'), "\n") . "\nsemitexa-64002:x:64002:\n", (string) file_get_contents($dir . '/nss-group'));
+        } finally {
+            exec('rm -rf ' . escapeshellarg($dir));
+        }
+    }
 }

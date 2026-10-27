@@ -414,6 +414,60 @@ final class FrameworkDeploymentExecutorRollbackTest extends TestCase
         self::assertSame('updated', $deploy->execute($this->projectRoot, $this->plan(latest: '2.0.1'))['status'], 'a newer release is deployed');
     }
 
+    /**
+     * REGRESSION (review). Inside the app container nothing restarts, and the
+     * deploy's own health check is the one a broken release fails: it rolled
+     * back and recorded nothing, so every tick deployed the same release,
+     * failed and rolled back again.
+     */
+    public function testAReleaseThatFailedTheHealthCheckInProcessIsNotDeployedAgain(): void
+    {
+        $plan = $this->plan();
+        $plan = new DeploymentPlan(
+            config: new DeploymentConfig(enabled: true, channel: 'stable', sourceMode: 'packagist', healthcheckUrl: 'http://127.0.0.1:1/never', privateRepositoryUrl: null, restartCommand: null),
+            installedPackages: $plan->installedPackages,
+            packageUpdates: $plan->packageUpdates,
+            privateLatestVersion: null,
+            selectedVersion: '2.0.0',
+            updateAvailable: true,
+            reason: 'test',
+        );
+        $ran = [];
+        $deploy = new FrameworkDeploymentExecutor(new DeploymentLogWriter(), null, new UpdateLock($this->projectRoot), self::composerInstalling2($ran));
+
+        $failed = $deploy->execute($this->projectRoot, $plan);
+        self::assertSame('failed', $failed['status']);
+        self::assertSame('recorded', $failed['rejected']);
+        $rejected = json_decode((string) file_get_contents($this->projectRoot . '/var/update/rollback/rejected.json'), true);
+        self::assertIsArray($rejected);
+        self::assertSame(['semitexa/core' => '2.0.0'], $rejected['installed']);
+
+        $ran = [];
+        $again = $deploy->execute($this->projectRoot, $plan);
+
+        self::assertSame('noop', $again['status']);
+        self::assertSame([], $ran, 'composer not run');
+    }
+
+    /** A step that may pass on the next tick (orm:sync with the database down) rejects nothing. */
+    public function testAFailureOtherThanTheHealthCheckRejectsNothing(): void
+    {
+        $ran = [];
+        $installing = self::composerInstalling2($ran);
+        $deploy = new FrameworkDeploymentExecutor(new DeploymentLogWriter(), null, new UpdateLock($this->projectRoot), static function (string $command, string $projectRoot) use ($installing): void {
+            $installing($command, $projectRoot);
+            if (str_contains($command, 'orm:sync')) {
+                throw new \RuntimeException('database unreachable');
+            }
+        });
+
+        $result = $deploy->execute($this->projectRoot, $this->plan());
+
+        self::assertSame('failed', $result['status']);
+        self::assertArrayNotHasKey('rejected', $result);
+        self::assertFileDoesNotExist($this->projectRoot . '/var/update/rollback/rejected.json');
+    }
+
     /** A Packagist lookup that timed out leaves a package off the plan; composer still installs it. */
     public function testARejectionHoldsWhenThePlanListsFewerPackages(): void
     {

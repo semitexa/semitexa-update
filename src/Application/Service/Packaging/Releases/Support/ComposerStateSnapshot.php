@@ -140,6 +140,26 @@ final class ComposerStateSnapshot
     }
 
     /**
+     * Remember a release set as rejected when this process rolled it back
+     * itself (its health check failed before any restart): nothing was kept
+     * for rejectKept() to rename. The shape rejects() reads.
+     *
+     * @param array<string, string> $installed what vendor/ held when it failed
+     */
+    public static function reject(string $projectRoot, array $installed): bool
+    {
+        $dir = $projectRoot . '/' . self::KEPT_DIR;
+        if (!is_dir($dir) && !@mkdir($dir, 0775, true) && !is_dir($dir)) {
+            return false;
+        }
+
+        return self::writeAtomically($dir . '/rejected.json', (string) json_encode([
+            'installed' => $installed,
+            'rejected_at' => gmdate(DATE_ATOM),
+        ]));
+    }
+
+    /**
      * Whether a plan offers nothing newer than the releases the last
      * rollback backed out: with vendor/ back on the older ones, those look
      * new again. Per package, by version, not the plan's list as a whole: a
