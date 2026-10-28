@@ -461,8 +461,12 @@ final class FrameworkDeploymentExecutorRollbackTest extends TestCase
         $installing = static function (string $version) use (&$ran): \Closure {
             return static function (string $command, string $projectRoot) use (&$ran, $version): void {
                 $ran[] = $command;
+                // update resolves a new lock; install (the rollback's) puts
+                // vendor/ back on the lock the rollback restored.
                 if (str_contains($command, ' update ')) {
                     file_put_contents($projectRoot . '/composer.lock', '{"packages":[{"name":"semitexa/core","version":"' . $version . '"}]}');
+                }
+                if (str_contains($command, ' update ') || str_contains($command, ' install ')) {
                     @mkdir($projectRoot . '/vendor/composer', 0777, true);
                     file_put_contents($projectRoot . '/vendor/composer/installed.json', '{"packages":[{"name":"semitexa/core","version":"' . $version . '"}],"dev":false}');
                 }
@@ -486,6 +490,8 @@ final class FrameworkDeploymentExecutorRollbackTest extends TestCase
             $installing(str_contains($command, ' update ') ? '3.0.0' : '2.0.0')($command, $projectRoot);
         });
         self::assertSame('recorded', $to3->execute($this->projectRoot, $unhealthy)['rejected']);
+        $vendor = json_decode((string) file_get_contents($this->projectRoot . '/vendor/composer/installed.json'), true);
+        self::assertSame('2.0.0', is_array($vendor) ? $vendor['packages'][0]['version'] : null, 'vendor/ back on 2.0.0');
 
         $rollback = (new FrameworkDeploymentExecutor(new DeploymentLogWriter(), null, new UpdateLock($this->projectRoot), static function (): void {}))
             ->rollbackLastDeploy($this->projectRoot);
@@ -496,6 +502,51 @@ final class FrameworkDeploymentExecutorRollbackTest extends TestCase
         $ran = [];
         $again = $to3->execute($this->projectRoot, $this->plan(latest: '3.0.0'));
         self::assertSame('noop', $again['status']);
+        self::assertSame([], $ran, 'composer not run');
+    }
+
+    /**
+     * 2.0.0 is rejected first, then 3.0.0 fails its health check in process:
+     * the record holds 3.0.0. Keeping the first version recorded would let
+     * rejects() see 3.0.0 as newer than every broken release, and the next
+     * tick would deploy it again.
+     */
+    public function testAHigherFailedReleaseReplacesALowerRejection(): void
+    {
+        $ran = [];
+        $deploy = new FrameworkDeploymentExecutor(new DeploymentLogWriter(), null, new UpdateLock($this->projectRoot), self::composerInstalling2($ran));
+        self::assertSame('updated', $deploy->execute($this->projectRoot, $this->plan())['status']);
+        $rollback = (new FrameworkDeploymentExecutor(new DeploymentLogWriter(), null, new UpdateLock($this->projectRoot), static function (): void {}))
+            ->rollbackLastDeploy($this->projectRoot);
+        self::assertSame(['rolled_back', 'recorded'], [$rollback['status'], $rollback['rejected']]);
+        $rejected = json_decode((string) file_get_contents($this->projectRoot . '/var/update/rollback/rejected.json'), true);
+        self::assertSame(['semitexa/core' => '2.0.0'], is_array($rejected) ? $rejected['installed'] : null);
+
+        $offered = $this->plan(latest: '3.0.0');
+        $unhealthy = new DeploymentPlan(
+            config: new DeploymentConfig(enabled: true, channel: 'stable', sourceMode: 'packagist', healthcheckUrl: 'http://127.0.0.1:1/never', privateRepositoryUrl: null, restartCommand: null),
+            installedPackages: $offered->installedPackages,
+            packageUpdates: $offered->packageUpdates,
+            privateLatestVersion: null,
+            selectedVersion: '3.0.0',
+            updateAvailable: true,
+            reason: 'test',
+        );
+        $to3 = new FrameworkDeploymentExecutor(new DeploymentLogWriter(), null, new UpdateLock($this->projectRoot), static function (string $command, string $projectRoot) use (&$ran): void {
+            $ran[] = $command;
+            if (str_contains($command, ' update ')) {
+                file_put_contents($projectRoot . '/composer.lock', '{"packages":[{"name":"semitexa/core","version":"3.0.0"}]}');
+                @mkdir($projectRoot . '/vendor/composer', 0777, true);
+                file_put_contents($projectRoot . '/vendor/composer/installed.json', '{"packages":[{"name":"semitexa/core","version":"3.0.0"}],"dev":false}');
+            }
+        });
+        $failed = $to3->execute($this->projectRoot, $unhealthy);
+        self::assertSame(['failed', 'recorded'], [$failed['status'], $failed['rejected']]);
+
+        $rejected = json_decode((string) file_get_contents($this->projectRoot . '/var/update/rollback/rejected.json'), true);
+        self::assertSame(['semitexa/core' => '3.0.0'], is_array($rejected) ? $rejected['installed'] : null);
+        $ran = [];
+        self::assertSame('noop', $to3->execute($this->projectRoot, $offered)['status']);
         self::assertSame([], $ran, 'composer not run');
     }
 
