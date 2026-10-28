@@ -2,6 +2,27 @@
 set -euo pipefail
 
 DEPLOY_PATH="${SEMITEXA_DEPLOY_PATH:?SEMITEXA_DEPLOY_PATH is required}"
+case "$DEPLOY_PATH" in
+    /*) ;;
+    *)
+        echo "SEMITEXA_DEPLOY_PATH must be an absolute path." >&2
+        exit 1
+        ;;
+esac
+
+if [[ "$DEPLOY_PATH" == *"/../"* ]] || [[ "$DEPLOY_PATH" == ../* ]] || [[ "$DEPLOY_PATH" == */.. ]] || [[ "$DEPLOY_PATH" == *"/./"* ]]; then
+    echo "SEMITEXA_DEPLOY_PATH must not contain traversal segments." >&2
+    exit 1
+fi
+
+DEPLOY_PATH="$(readlink -m "$DEPLOY_PATH")"
+case "$DEPLOY_PATH" in
+    /|/bin|/boot|/dev|/etc|/home|/opt|/root|/run|/srv|/tmp|/usr|/var)
+        echo "Refusing unsafe deploy path: ${DEPLOY_PATH}." >&2
+        exit 1
+        ;;
+esac
+
 ARTIFACT_PATH="${SEMITEXA_ARTIFACT_PATH:?SEMITEXA_ARTIFACT_PATH is required}"
 REMOTE_ENV_PATH="${SEMITEXA_REMOTE_ENV_PATH:-}"
 FORCE_REINITIALIZE="${SEMITEXA_FORCE_REINITIALIZE:-0}"
@@ -29,6 +50,20 @@ run_root() {
         "$@"
     fi
 }
+
+# --force-reinitialize deletes the deploy path: only a directory this
+# bootstrap made (it writes the marker) or an empty one. The path checks
+# above refuse the obvious system directories; this refuses every other
+# directory that holds something else (/var/lib, a home directory). Listed
+# as root, as it is then deleted: a directory this user may enter but not
+# read listed as empty, and the guard let it through. A listing that fails
+# refuses too.
+if [ "$FORCE_REINITIALIZE" = "1" ] && run_root test -d "$DEPLOY_PATH" && ! run_root test -f "$MARKER_PATH"; then
+    if ! DEPLOY_PATH_LISTING="$(run_root ls -A "$DEPLOY_PATH" 2>/dev/null)" || [ -n "$DEPLOY_PATH_LISTING" ]; then
+        echo "Refusing to reinitialize ${DEPLOY_PATH}: it is not empty and holds no .semitexa-deployment.json from an earlier bootstrap." >&2
+        exit 1
+    fi
+fi
 
 project_sh() {
     if [ -n "$SUDO" ]; then

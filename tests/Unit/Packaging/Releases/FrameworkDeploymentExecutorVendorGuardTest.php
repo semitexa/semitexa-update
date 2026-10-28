@@ -101,6 +101,74 @@ final class FrameworkDeploymentExecutorVendorGuardTest extends TestCase
         $this->addToAssertionCount(1);
     }
 
+    /**
+     * The deploy installs --no-dev: a project made from semitexa/ultimate
+     * requires semitexa/testing for dev, and every deploy was rolled back
+     * for it being "missing".
+     */
+    public function testARequireDevPackageLeftOutByANoDevInstallIsNotDrift(): void
+    {
+        file_put_contents($this->projectRoot . '/composer.lock', json_encode([
+            'packages' => $this->packages(['semitexa/core' => '2026.09.19.1020']),
+            'packages-dev' => $this->packages(['semitexa/testing' => '2026.09.19.1020']),
+        ], JSON_THROW_ON_ERROR));
+        $this->writeInstalled(['semitexa/core' => '2026.09.19.1020']);
+
+        $this->guard();
+
+        $this->addToAssertionCount(1);
+    }
+
+    /** With dev packages installed, one that is missing is still drift. */
+    public function testARequireDevPackageMissingFromADevInstallStillFails(): void
+    {
+        file_put_contents($this->projectRoot . '/composer.lock', json_encode([
+            'packages' => $this->packages(['semitexa/core' => '2026.09.19.1020']),
+            'packages-dev' => $this->packages(['semitexa/testing' => '2026.09.19.1020']),
+        ], JSON_THROW_ON_ERROR));
+        file_put_contents(
+            $this->projectRoot . '/vendor/composer/installed.json',
+            json_encode(['packages' => $this->packages(['semitexa/core' => '2026.09.19.1020']), 'dev' => true], JSON_THROW_ON_ERROR),
+        );
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/semitexa\/testing \(lock 2026\.09\.19\.1020, vendor absent\)/');
+
+        $this->guard();
+    }
+
+    /** The exemption is for require-dev only: a missing runtime package still fails a --no-dev install. */
+    public function testARuntimePackageMissingFromANoDevInstallStillFails(): void
+    {
+        file_put_contents($this->projectRoot . '/composer.lock', json_encode([
+            'packages' => $this->packages(['semitexa/core' => '2026.09.19.1020']),
+            'packages-dev' => $this->packages(['semitexa/testing' => '2026.09.19.1020']),
+        ], JSON_THROW_ON_ERROR));
+        $this->writeInstalled([]);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/semitexa\/core \(lock 2026\.09\.19\.1020, vendor absent\)/');
+
+        $this->guard();
+    }
+
+    /** An installed.json that does not say "dev": false is not taken for a --no-dev install. */
+    public function testAnInstalledJsonWithoutTheDevFlagGetsNoExemption(): void
+    {
+        file_put_contents($this->projectRoot . '/composer.lock', json_encode([
+            'packages' => $this->packages(['semitexa/core' => '2026.09.19.1020']),
+            'packages-dev' => $this->packages(['semitexa/testing' => '2026.09.19.1020']),
+        ], JSON_THROW_ON_ERROR));
+        file_put_contents(
+            $this->projectRoot . '/vendor/composer/installed.json',
+            json_encode(['packages' => $this->packages(['semitexa/core' => '2026.09.19.1020'])], JSON_THROW_ON_ERROR),
+        );
+
+        $this->expectException(RuntimeException::class);
+
+        $this->guard();
+    }
+
     private function guard(): void
     {
         $method = new ReflectionMethod(FrameworkDeploymentExecutor::class, 'assertVendorMatchesLock');

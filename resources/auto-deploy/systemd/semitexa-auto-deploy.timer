@@ -12,7 +12,6 @@ OnBootSec=2m
 OnUnitActiveSec=@@INTERVAL@@
 RandomizedDelaySec=1m
 AccuracySec=1m
-Persistent=true
 Unit=@@UNIT_PREFIX@@.service
 
 [Install]

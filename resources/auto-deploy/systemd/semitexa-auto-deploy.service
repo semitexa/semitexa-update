@@ -7,7 +7,9 @@ Wants=network-online.target
 Type=oneshot
 User=@@RUN_AS_USER@@
 WorkingDirectory=@@PROJECT_ROOT@@
-Environment=HOME=@@HOME_DIR@@
-ExecStart=@@RUN_SCRIPT@@ "@@PROJECT_ROOT@@"
+Environment="HOME=@@HOME_DIR@@"
+ExecStart="@@RUN_SCRIPT@@" "@@PROJECT_ROOT_EXEC@@"
+# A composer that hangs would hold the oneshot, and every later tick, forever.
+TimeoutStartSec=30min
 NoNewPrivileges=true
 PrivateTmp=true

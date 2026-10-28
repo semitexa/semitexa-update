@@ -7,6 +7,7 @@ namespace Semitexa\Update\Application\Console\Command;
 use JsonException;
 use Semitexa\Core\Attribute\AsCommand;
 use Semitexa\Core\Console\BaseCommand;
+use Semitexa\Update\Application\Service\HealthChecker;
 use Semitexa\Update\Application\Service\Packaging\Releases\Service\FrameworkDeploymentPlanner;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -74,7 +75,7 @@ final class UpdatePackagesCheckCommand extends BaseCommand
             ['Enabled' => $plan->config->enabled ? 'yes' : 'no'],
             ['Channel' => $plan->config->channel],
             ['Source mode' => $plan->config->sourceMode],
-            ['Healthcheck URL' => $plan->config->healthcheckUrl ?? 'not configured'],
+            ['Healthcheck URL' => $plan->config->healthcheckUrl !== null ? HealthChecker::displayUrl($plan->config->healthcheckUrl) : 'not configured'],
             ['Private repository' => $plan->config->privateRepositoryUrl ?? 'not configured'],
             ['Selected version' => $plan->selectedVersion ?? 'none'],
             ['Reason' => $plan->reason],

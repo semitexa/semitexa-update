@@ -118,6 +118,13 @@ final class ScaffoldManifestPolicy
                 'preserve_executable' => false,
                 'notes' => '',
             ],
+            'docker-compose.worker.yml' => [
+                'category' => ScaffoldFileCategory::Infrastructure,
+                'critical' => false,
+                'auto_update' => true,
+                'preserve_executable' => false,
+                'notes' => 'The worker service, which runs what worker:processes lists. Self-contained: no other compose file names it, so a project keeping an older edited docker-compose.yml still gets a valid stack.',
+            ],
             'docker-compose.test.yml' => [
                 'category' => ScaffoldFileCategory::Infrastructure,
                 'critical' => false,

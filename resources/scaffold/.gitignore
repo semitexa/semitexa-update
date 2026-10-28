@@ -17,6 +17,8 @@ var/lock/*
 var/sitemap/*
 var/storage/*
 var/uploads/*
+# Written by bin/semitexa for the queue worker container on every start.
+var/run/worker.env
 # Hashed SSR templates and asset bundles (semitexa-ssr) are rebuilt by the
 # server on start: runtime output, never source.
 /public/assets/ssr/
@@ -68,3 +70,7 @@ docker-compose.override.yml
 # bin/semitexa autoloads docker-compose.path-repos.yml when this symlink
 # exists, mounting it consistently into every container.
 /semitexa.pl
+
+# SSH state of update:packages:bootstrap-remote, and keys put in the project
+.ssh/
+var/ssh/

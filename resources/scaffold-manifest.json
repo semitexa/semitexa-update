@@ -1,11 +1,17 @@
 {
     "schema_version": "semitexa.scaffold-manifest/v1",
-    "generated_at": "2026-10-19T20:28:40+00:00",
+    "generated_at": "2026-10-27T18:57:20+00:00",
     "files": [
         {
             "path": ".env.default",
-            "current_sha256": "567f00979b133f1d11f96c313b0ecba9c793679303e69a54575163bb2e8ff6b2",
+            "current_sha256": "3ad07daac394248bb6d58879854ce2d380d1b2ae697bffc747adcf458ba68c65",
             "previous_sha256": [
+                "958f01eafaf6bfc8145535b54f71666983e0a4a7945a42a8ea7f562b95cafa1b",
+                "8c2a07684379575a7f0dcd42aef4c3a531c4abe58de350a3b51ce5660d4088de",
+                "6045a21e38ee31be97c5ed50f4e20463cde94f3857359f0dc046a3c7a4fb5afa",
+                "c5d231030e94b778aa1b739796f2dd57a7c31bdde00794e37f4536cdc05f5326",
+                "75467cc3867cc584bf0eb587b72d986359058044643572e98f0febd08b687bfb",
+                "567f00979b133f1d11f96c313b0ecba9c793679303e69a54575163bb2e8ff6b2",
                 "9321eb671fabdbc297eaa763449b19ef3b38878cbdd92c22bd24586956efd21e",
                 "d1dfe01ce8d8d4b068b11a33836c4ba3c765cf4a6579f3feaf890f384f495736",
                 "c618c804941d70ab5c1cde4b3c7c6083ee53750ec7772bfb88c25a148ac5fb30",
@@ -19,7 +25,32 @@
                 "334e83f4038586e5987ca3e0846f352bc4abb04935a1b475b80b427e71e50120",
                 "198bf4b8a894d5213195da6a82039872f4b593109af74dcb646059a52295271e",
                 "fee0a681795f128b97bce63a4d7d2e6b620b1d20a0eeec6160a7f399ce54ba9a",
-                "9fc7be0832e3362c9644c1562b5476668fff77aa3b73850cc735b355f8c3796d"
+                "9fc7be0832e3362c9644c1562b5476668fff77aa3b73850cc735b355f8c3796d",
+                "12fbc6e276d229d928e8e646d8304012c78be1c258fe8dc5cabcae05181d1866",
+                "407be9aeccd4f7785cd85f7c6318ee6c5063d663e91a6d9b2e1bf8a26a1cf7ac",
+                "b8fef0fd8ec905cf3aacf46009f4122b002d9927467c3a9ec745e7377898fee3",
+                "725c5f8b75565d63c0bfa11b805e82e61a8aaf334984b7ad3935cf287d672688",
+                "37ef9d71e2dbcfa9143c8b79be09e50e8fe9dea446d618e9066ef7a77800d814",
+                "891688d95b6dea754bc78e1f022f05330e1b40cc4cc9b62d268500ddb9472e09",
+                "b1bb14d336b9693a3f3e24d777406fddda22c66529ddb6866055232ac5dfc378",
+                "13e881586cf5b3655de745c561b0e04aa2929b6e98ca1955e3abfae8390a4b36",
+                "0ac28470d16cd5f7bdd1641a26e7ef32a30d9b5288a7e36131922968a755b85b",
+                "35001bb04b3e9af93cec1a24e76ea46bd2b4a38d594d3abde8a5891c9de727b2",
+                "98dbec244d463d938e233cd5f505e787f94295e7c878e4cfe2dadcfc31da8548",
+                "44d62f663b87fa20a332fb6fdf98b70f492145cd2ec2d31dfdbd248be65a427f",
+                "faeabf57bccf0d8aa1dbaf7ca666428c048ab542c61241e25e576655a4410c8d",
+                "041259a3f14ceb0850d954b7a87166fd40bf88a33890d9d9077575157b50132c",
+                "465baa76dfa91262d28ed0279c5bbc3e6ef930a267548ecdd351da057424549b",
+                "b12b0b22aa5229d53890efb2d75aa10227109d0ed2f637e0662bf9fceb359b26",
+                "256503ccd16fe6e054ccdde52e21cdf3064303298858f338b8d1f45eac9da43b",
+                "5d14485c447d9d4f92b7a183881ef8dff9491e1c65ef89858c9fe6bf0b8257db",
+                "ecedbb9e15f95926628af1241e0bad3dd1c30228534afafcb14749ae81440d52",
+                "b0832a7a88c753aa348714f041cac4e64f01e2fb7462d93e9b237048857bfef5",
+                "5dcb946e7b2a74a7313db59687c1a3be688a8a246a50c8f0a4576c1acfbb0fa5",
+                "3d6fb1dfc9629536dff69a068df4f87b26f7c56b4a857dc6a4745be5bd397656",
+                "56dd82a5348cb4b99add57e6604f9a71104dfbedc54f9363e0ad48a03bbd30bc",
+                "7cbc533db84d3a31a4273ed8ba7d5cf775ba0a5666f8f47c050072bf0f462d01",
+                "a1987b0d748383e2cce7e197712f03105bd526d6e34d7354a0acd057744620a9"
             ],
             "category": "env_template",
             "critical": false,
@@ -29,8 +60,10 @@
         },
         {
             "path": ".gitignore",
-            "current_sha256": "2a1a6399052acdf6d527c5c762736a327d2c1b81cd6c197c7c2d0a1e2dfc5b8f",
+            "current_sha256": "7a9f8d814e8d998d51b092bf4ed4ffb1f87ccfd6fb3cfde74092817d53b19116",
             "previous_sha256": [
+                "00f368b72de30bb80e53ce395c1eb7a1788d448460e025a5ecf681e1865ba905",
+                "2a1a6399052acdf6d527c5c762736a327d2c1b81cd6c197c7c2d0a1e2dfc5b8f",
                 "b2b2b5c2e644e9acec6664d35ff0b86e1342b9c2d19a190d47af6ff37a919d16",
                 "a324b654c3d56d5a29a92568a510a260b390d0b89efae84fb9a800c5da4acb37",
                 "f5d3e4788f49b933a90ba173e6990000812e43b999a228e7d7e15ab764e0534f",
@@ -39,7 +72,9 @@
                 "7ad88c55fac4e4c6873a137adf9f59685251524b1a4d40c3d5071a76d65fda3a",
                 "918bfe7a713bc190dcc7b71da6fd1b7840a710df538ce7d60f5a8680e8c0ea08",
                 "8431b6a3fbb44e694dba008aa20c7333495c7a2c4ea57acdf5d833f13c522110",
-                "4bd2128231cafcbdb8d1d25e8fb04836691bd11d9285a53067c5730350e7c1b6"
+                "4bd2128231cafcbdb8d1d25e8fb04836691bd11d9285a53067c5730350e7c1b6",
+                "c5fb484edbf7b848fd31d17b7d4eab88d19b729d57358a3219e8aeccf0ef9182",
+                "870d8a3f8f02aec60372276367677c7edc70fe2509cb8cc937eee641661c51e4"
             ],
             "category": "vcs",
             "critical": false,
@@ -180,8 +215,14 @@
         },
         {
             "path": "Dockerfile",
-            "current_sha256": "c63f9d1211ab93d8b8fc4dfb1d5c91f6581b7a6bdb0065c4a1d8c7a5ef3c7e38",
+            "current_sha256": "a427b842ca159ba814864f0a58c8f7a08076cefacdb2d7af2e29dcd14be70e55",
             "previous_sha256": [
+                "23a9a25a0b15db8b85504ff634d740a693780cc6bd507f17b3a67e2e7a59ab0d",
+                "9f73d16ce0854999bcd041b3e0017876f19450358421204e2736df1bfa6c7257",
+                "b30d542f0a0783563dca8be7b0afbc5d1143e55f768b80d6191bc48e88d1efc1",
+                "5e9cdf90b7a68b7b0a3ca86ab32c802f75cc0a94bf9586bca14928e55dd24ab0",
+                "dd8611980340acb6aa1961873a388d234ed49c92665570eda7d4f64cc3cf854e",
+                "c63f9d1211ab93d8b8fc4dfb1d5c91f6581b7a6bdb0065c4a1d8c7a5ef3c7e38",
                 "4d08c73dc86172ee5cf50a3f697a57042570bd1fa31c565de326fddf5ef2b0eb",
                 "de70575cf55d4e8766ff6baac6039c8a36051458a977bbcba8d0ae61a5abf81f",
                 "8065c5d7a372616fdf3f6fd047f8575e984622ec4446ccb1721a74d0935b944b",
@@ -196,8 +237,16 @@
         },
         {
             "path": "bin/semitexa",
-            "current_sha256": "21c335027d565f36159d0f3c472d6de3e5dcfb64e2ad3ab1f58bc1dd240955de",
+            "current_sha256": "63db9c7894dd6720b7a1b7c40a64572f525c55249a55b5a12757d8e87a0ebe48",
             "previous_sha256": [
+                "3f1d16af6aee7b89ed0686aa1718e1f7f7ad766c87f0e9b628ffd7c871460111",
+                "24996e5e23098ea6449e78d0b3f31cf870c82056a7d635e4684aeb663f6a5c7f",
+                "028b7ee286681b32622fb0a161930720907b077b86e3b520a356444eeead0163",
+                "7e3d6bb9e0141b1111c3402a888ed4088b899894465a04e2774d33e69f451cd4",
+                "1c168c108b7dc7b74708af60d05f598c37cb90215208c3e9e34bd1deb13c5e00",
+                "f9a0ccb401d29cb1d1811d54bc4129530213ddd4e41d084a1c25cc3341e2bd15",
+                "2f38d84d0542db47681dfd1c6a19ad554e3295908722f30b6c1ccc1fd27dd1b0",
+                "21c335027d565f36159d0f3c472d6de3e5dcfb64e2ad3ab1f58bc1dd240955de",
                 "a6b3c14a265a6b619eed5176cca0d1b67c5b777adfc862ea227c8e5638e9552c",
                 "90daef193c479d3c748a26a84d47dde2061ae7e61ac0f6d1501303201990ee5d",
                 "b07234b57864c8fd5ff8f0217ab772fd801e14b649edae9c305f96e7b8f2fa3c",
@@ -329,9 +378,28 @@
             "notes": ""
         },
         {
-            "path": "docker-compose.yml",
-            "current_sha256": "fcaf044935eaeb74faa9bc66112eff9d164a100dd38e7817eef503982f00d705",
+            "path": "docker-compose.worker.yml",
+            "current_sha256": "e81bc65575f6cb9f5cbfafe9aa3a2ebde68ab6d7dada4d9862ac7366ccd4562c",
             "previous_sha256": [
+                "c6b0ef32d8b3e78b4cae6cb90af44f80d2e56a1eaefc1e8fe9a7867e18de3bf1",
+                "18e8772c09639ef501ed20004840926019b3fad9532406e0abb541e17c948a9b",
+                "e984013c45247a74ba5208a1442c0137dc7c1d6df49f3a2ccf5cb87e1ebb01b0",
+                "93712e0ccb747cad16dd85f077daf5b8d8d179073a999a5f92af95e25a8097ef",
+                "467b9f3fc23cff746384b6df71c164fa646dc356001df813580b4870d7cc2739",
+                "9d62d9ee3243086947b8ccefd06922df5d0d2b62718c0bdacf47cf4bdfbdc354"
+            ],
+            "category": "infrastructure",
+            "critical": false,
+            "auto_update": true,
+            "preserve_executable": false,
+            "notes": "The worker service, which runs what worker:processes lists. Self-contained: no other compose file names it, so a project keeping an older edited docker-compose.yml still gets a valid stack."
+        },
+        {
+            "path": "docker-compose.yml",
+            "current_sha256": "669f62b8e1766f8682bb580a09865a9b1df0c90c53b5be18072820390077c04d",
+            "previous_sha256": [
+                "13e082a2ed610534f1ed54f26b0d5bc5ea8dff38e61efce8b4d2d3215081d653",
+                "fcaf044935eaeb74faa9bc66112eff9d164a100dd38e7817eef503982f00d705",
                 "3c3f63c831b13cfbed2c060663d578d4bd5798c4c318b52a02a4a4eac94c197b",
                 "742f914ec0fa0f85b98bdb17827cc97386c5fa9e1277fb18ed22009ad634e5e1",
                 "9e198b38ba1ad146b0beff15234c740cc50bd023a63c68bcecaaa365c95cf9d5",

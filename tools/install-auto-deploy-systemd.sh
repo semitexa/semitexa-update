@@ -20,7 +20,8 @@ Environment:
   SEMITEXA_AUTO_DEPLOY_TIMER_INTERVAL     Timer interval. Default: 15m
   SEMITEXA_AUTO_DEPLOY_SYSTEMD_DIR        Destination dir. Default: /etc/systemd/system
   SEMITEXA_AUTO_DEPLOY_RUN_AS_USER        Service user. Default: root
-  SEMITEXA_AUTO_DEPLOY_ENABLE             Enable and start timer when set to 1. Default: 0
+  SEMITEXA_AUTO_DEPLOY_ENABLE             Enable and start the timer when set to 1 (the install.sh
+                                          refresh timer too, on a host with packages/semitexa-ultimate). Default: 0
   SEMITEXA_REFRESH_INSTALL_SH_UNIT_PREFIX Refresh unit prefix. Default: semitexa-refresh-install-sh
   SEMITEXA_REFRESH_INSTALL_SH_INTERVAL    Refresh interval. Default: 10m
 EOF
@@ -85,18 +86,43 @@ escape_sed() {
     printf '%s' "$1" | sed -e 's/[&\\|]/\\&/g'
 }
 
-project_root_escaped="$(escape_sed "${PROJECT_ROOT}")"
+# A value inside a unit file: systemd reads % as a specifier (%h, %n) and $
+# as a variable, so both are doubled, and the paths are quoted there, so a
+# quote, a backslash or a newline in one is refused rather than written into
+# a broken unit.
+escape_unit() {
+    case "$1" in
+        *'"'*|*'\'*|*"
+"*)
+            echo "Refusing a path systemd cannot quote: $1" >&2
+            exit 1
+            ;;
+    esac
+    escape_sed "$(printf '%s' "$1" | sed -e 's/%/%%/g' -e 's/\$/$$/g')"
+}
+
+# For WorkingDirectory= and Environment=: systemd reads `$` as a variable only
+# in ExecStart=, so a doubled `$$` stayed literal there and named another
+# directory. `%` is a specifier everywhere.
+escape_unit_value() {
+    escape_unit "$1" >/dev/null
+    escape_sed "$(printf '%s' "$1" | sed -e 's/%/%%/g')"
+}
+
+project_root_escaped="$(escape_unit_value "${PROJECT_ROOT}")"
+project_root_exec_escaped="$(escape_unit "${PROJECT_ROOT}")"
 unit_prefix_escaped="$(escape_sed "${UNIT_PREFIX}")"
 interval_escaped="$(escape_sed "${INTERVAL}")"
 run_as_user_escaped="$(escape_sed "${RUN_AS_USER}")"
 home_dir="$(getent passwd "${RUN_AS_USER}" | cut -d: -f6)"
-home_dir_escaped="$(escape_sed "${home_dir}")"
-run_script_escaped="$(escape_sed "${RUN_SCRIPT_PATH}")"
+home_dir_escaped="$(escape_unit_value "${home_dir}")"
+run_script_escaped="$(escape_unit "${RUN_SCRIPT_PATH}")"
 refresh_unit_prefix_escaped="$(escape_sed "${REFRESH_UNIT_PREFIX}")"
 refresh_interval_escaped="$(escape_sed "${REFRESH_INTERVAL}")"
-refresh_script_escaped="$(escape_sed "${REFRESH_SCRIPT_PATH}")"
+refresh_script_escaped="$(escape_unit "${REFRESH_SCRIPT_PATH}")"
 
 sed \
+    -e "s|@@PROJECT_ROOT_EXEC@@|${project_root_exec_escaped}|g" \
     -e "s|@@PROJECT_ROOT@@|${project_root_escaped}|g" \
     -e "s|@@RUN_AS_USER@@|${run_as_user_escaped}|g" \
     -e "s|@@HOME_DIR@@|${home_dir_escaped}|g" \
@@ -109,6 +135,7 @@ sed \
     "${TIMER_TEMPLATE}" > "${TIMER_PATH}"
 
 sed \
+    -e "s|@@PROJECT_ROOT_EXEC@@|${project_root_exec_escaped}|g" \
     -e "s|@@PROJECT_ROOT@@|${project_root_escaped}|g" \
     -e "s|@@RUN_AS_USER@@|${run_as_user_escaped}|g" \
     -e "s|@@HOME_DIR@@|${home_dir_escaped}|g" \
@@ -125,9 +152,22 @@ install -m 0755 "${RUN_SCRIPT_TEMPLATE}" "${RUN_SCRIPT_PATH}"
 install -m 0755 "${REFRESH_SCRIPT_TEMPLATE}" "${REFRESH_SCRIPT_PATH}"
 systemctl daemon-reload
 
+# The install.sh refresh only applies to the host that serves the public
+# installer (a packages/semitexa-ultimate checkout); anywhere else its service
+# refuses to run, so enabling it there failed every interval.
+SERVES_INSTALLER=0
+if [ -d "${PROJECT_ROOT}/packages/semitexa-ultimate" ]; then
+    SERVES_INSTALLER=1
+fi
+
 if [ "${ENABLE}" = "1" ]; then
     systemctl enable --now "${UNIT_PREFIX}.timer"
-    systemctl enable --now "${REFRESH_UNIT_PREFIX}.timer"
+    if [ "${SERVES_INSTALLER}" = "1" ]; then
+        systemctl enable --now "${REFRESH_UNIT_PREFIX}.timer"
+    else
+        # An earlier install enabled it here too.
+        systemctl disable --now "${REFRESH_UNIT_PREFIX}.timer" >/dev/null 2>&1 || true
+    fi
 fi
 
 printf 'Installed: %s\n' "${SERVICE_PATH}"
@@ -139,7 +179,11 @@ printf 'Installed: %s\n' "${REFRESH_SCRIPT_PATH}"
 
 if [ "${ENABLE}" = "1" ]; then
     printf 'Enabled timer: %s.timer\n' "${UNIT_PREFIX}"
-    printf 'Enabled timer: %s.timer\n' "${REFRESH_UNIT_PREFIX}"
+    if [ "${SERVES_INSTALLER}" = "1" ]; then
+        printf 'Enabled timer: %s.timer\n' "${REFRESH_UNIT_PREFIX}"
+    else
+        printf 'Not enabled: %s.timer (only for a host serving the public installer).\n' "${REFRESH_UNIT_PREFIX}"
+    fi
 else
-    printf 'Timers installed but not enabled. Set SEMITEXA_AUTO_DEPLOY_ENABLE=1 to enable both.\n'
+    printf 'Timers installed but not enabled. Set SEMITEXA_AUTO_DEPLOY_ENABLE=1 to enable them.\n'
 fi

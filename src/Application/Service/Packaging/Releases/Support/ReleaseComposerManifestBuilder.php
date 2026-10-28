@@ -25,7 +25,7 @@ final class ReleaseComposerManifestBuilder
         $composer = $this->decodeJsonFile($composerPath);
         $versions = (new InstalledSemitexaPackageReader())->read($projectRoot);
         if ($versions === []) {
-            throw new \RuntimeException('No installable Semitexa package versions were discovered in composer.lock.');
+            throw new \RuntimeException('No installable Semitexa package versions were found in vendor/composer/installed.json or composer.lock.');
         }
 
         $this->materializeSemitexaConstraints($composer, $versions);
@@ -97,7 +97,7 @@ final class ReleaseComposerManifestBuilder
                 $version = $versions[$packageName] ?? null;
                 if (!is_string($version) || $version === '') {
                     throw new \RuntimeException(sprintf(
-                        'Locked version for package "%s" was not found in composer.lock.',
+                        'Installed version for package "%s" was not found in vendor/composer/installed.json or composer.lock.',
                         $packageName,
                     ));
                 }

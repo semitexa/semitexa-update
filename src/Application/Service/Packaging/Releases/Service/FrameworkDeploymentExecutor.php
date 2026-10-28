@@ -15,6 +15,7 @@ use Semitexa\Update\Domain\Enum\RunOutcome;
 use Semitexa\Update\Domain\Model\DeploymentPlan;
 use Semitexa\Update\Application\Service\Packaging\Releases\Support\ComposerStateSnapshot;
 use Semitexa\Update\Application\Service\Packaging\Releases\Support\DeploymentLogWriter;
+use Semitexa\Update\Application\Service\Packaging\Releases\Support\InstalledSemitexaPackageReader;
 
 final class FrameworkDeploymentExecutor
 {
@@ -68,12 +69,41 @@ final class FrameworkDeploymentExecutor
         $lock = null;
         $snapshot = null;
         $composerUpdated = false;
+        $composerStarted = false;
+        $lockBefore = false;
+        $installedBefore = false;
+        /** @var array<string, string>|null $unhealthySet what vendor/ held when the health check failed */
+        $unhealthySet = null;
         try {
             if (!$plan->config->enabled) {
                 return $this->finalize($projectRoot, $result, 'skipped');
             }
 
             if (!$plan->updateAvailable) {
+                return $this->finalize($projectRoot, $result, 'noop');
+            }
+
+            // The planner reads the newest releases, not composer.json. A
+            // project made from semitexa/ultimate pins every semitexa/*
+            // exactly: composer could move none of them, yet every tick ran
+            // it and reported "updated" with versions that were never
+            // installed. Said, and composer not run, when nothing can move.
+            $pinned = self::pinnedWhereTheyAre($projectRoot, $plan);
+            if ($pinned !== null) {
+                $result['reason'] = sprintf(
+                    'Newer releases exist, but composer.json pins %s at the installed version, so nothing can move. Take them with bin/semitexa update, which moves the pins.',
+                    count($pinned) === 1 ? $pinned[0] : count($pinned) . ' packages',
+                );
+
+                return $this->finalize($projectRoot, $result, 'noop');
+            }
+
+            // The release update:packages:rollback backed out is "newer" again
+            // once vendor/ is back: every tick deployed it, restarted, failed
+            // the wrapper's health check and rolled back, two outages a tick.
+            if (ComposerStateSnapshot::rejects($projectRoot, $plan)) {
+                $result['reason'] = 'These releases were rolled back after a failed health check; waiting for newer ones. Delete var/update/rollback/rejected.json to try them again.';
+
                 return $this->finalize($projectRoot, $result, 'noop');
             }
 
@@ -92,11 +122,34 @@ final class FrameworkDeploymentExecutor
             $runId = $this->beginRunRecord($result);
 
             $snapshot = ComposerStateSnapshot::capture($projectRoot);
+            $lockBefore = @file_get_contents($projectRoot . '/composer.lock');
+            $installedBefore = @file_get_contents($projectRoot . '/vendor/composer/installed.json');
 
-            $this->run($this->composerUpdateCommand($projectRoot), $projectRoot);
+            $composerCommand = $this->composerUpdateCommand($projectRoot);
+            $composerStarted = true;
+            $this->run($composerCommand, $projectRoot);
             $composerUpdated = true;
 
             $this->assertVendorMatchesLock($projectRoot);
+
+            // What was installed, not what was planned: a constraint can hold
+            // a package back, and the journal said it moved.
+            $installed = self::installedVersions($projectRoot);
+            $moved = false;
+            foreach ($result['updated_packages'] as $i => $update) {
+                $deployed = $installed[$update['package']] ?? null;
+                $result['updated_packages'][$i]['deployed_version'] = $deployed;
+                $moved = $moved || ($deployed !== null && $deployed !== $update['installed_version']);
+            }
+            // Composer ran and installed none of them (a constraint held one
+            // back, or a pinned package the newer one needs) and nothing else
+            // in the lock changed: nothing to sync or restart. Taken for an
+            // update, it restarted the app every tick.
+            if (!$moved && is_string($lockBefore) && $lockBefore === @file_get_contents($projectRoot . '/composer.lock')) {
+                $result['reason'] = 'Newer releases exist, but composer installed none of them: a constraint in composer.json holds them back. bin/semitexa update moves the pins to the newest release set.';
+
+                return $this->finalize($projectRoot, $result, 'noop', $plan, $runId);
+            }
 
             $this->run($this->projectCliCommand($projectRoot, 'orm:sync'), $projectRoot);
             $this->run($this->projectCliCommand($projectRoot, 'cache:clear'), $projectRoot);
@@ -106,10 +159,23 @@ final class FrameworkDeploymentExecutor
             $result['restart_status'] = $restartStatus['message'];
 
             // Mandatory when configured: a deploy that cannot prove the app
-            // answers is a failed deploy, restart or not.
+            // answers is a failed deploy, restart or not. Without a restart
+            // (inside the app container) it asks workers cache:clear reloaded
+            // on the new vendor/; it is the only check that can roll back.
+            // After a restart the server is given a few seconds to come up.
             if ($plan->config->healthcheckUrl !== null) {
-                $check = $this->healthChecker->check($plan->config->healthcheckUrl);
+                $attempts = $restartStatus['performed'] ? 4 : 1;
+                for ($attempt = 1; ; $attempt++) {
+                    $check = $this->healthChecker->check($plan->config->healthcheckUrl);
+                    if ($check->ok || $attempt >= $attempts) {
+                        break;
+                    }
+                    sleep(3);
+                }
                 if (!$check->ok) {
+                    // Read before the rollback puts vendor/ back: this is the
+                    // set the release proved broken with.
+                    $unhealthySet = (new InstalledSemitexaPackageReader())->read($projectRoot);
                     throw new \RuntimeException($check->message);
                 }
                 $result['healthcheck'] = $check->message;
@@ -117,17 +183,103 @@ final class FrameworkDeploymentExecutor
                 $result['healthcheck'] = 'skipped: SEMITEXA_AUTO_DEPLOY_HEALTHCHECK_URL not configured';
             }
 
+            // Kept for update:packages:rollback: the wrapper's own health
+            // check, after its restart, has nothing else to go back to.
+            $installedLock = @file_get_contents($projectRoot . '/composer.lock');
+            $result['rollback_snapshot'] = is_string($installedLock) && $snapshot !== null && $snapshot->keep(sha1($installedLock))
+                ? 'kept'
+                : 'unavailable';
+
             return $this->finalize($projectRoot, $result, 'updated', $plan, $runId);
         } catch (\Throwable $e) {
             $result['status'] = 'failed';
             $result['reason'] = $e->getMessage();
-            if ($composerUpdated && $snapshot !== null) {
-                $result['rollback'] = $this->rollback($projectRoot, $snapshot, $plan->config->restartCommand);
+            if ($composerStarted && !$composerUpdated
+                && $lockBefore === @file_get_contents($projectRoot . '/composer.lock')
+                && $installedBefore === @file_get_contents($projectRoot . '/vendor/composer/installed.json')
+            ) {
+                // Composer failed before it changed the lock or vendor/
+                // (Packagist unreachable, a token expired): nothing to roll
+                // back, and no restart every tick for as long as that lasts.
+                // vendor/ is compared too: with a lock already ahead of it, or
+                // --no-dev removing packages, the install half-changes vendor/
+                // and leaves the lock as it was.
+                $result['rollback'] = 'not needed: composer failed before it changed composer.lock or vendor/.';
+            } elseif ($composerStarted && $snapshot !== null) {
+                // Also when composer failed half-way: it may already have
+                // rewritten the lock or part of vendor/.
+                [$result['rollback'], $restartStillRequired] = $this->rollback($projectRoot, $snapshot, $plan->config->restartCommand);
+                $result['restart_required'] = $restartStillRequired;
+                // A release that failed this health check is newer again once
+                // vendor/ is back, and only update:packages:rollback recorded
+                // it: every tick deployed it, failed and rolled back again.
+                // Other failures (a database down for orm:sync) may pass on
+                // the next tick, so they reject nothing.
+                if ($unhealthySet !== null && $unhealthySet !== [] && !str_starts_with((string) $result['rollback'], 'FAILED')) {
+                    $result['rejected'] = ComposerStateSnapshot::reject($projectRoot, $unhealthySet)
+                        ? 'recorded'
+                        : 'not recorded: the next tick may deploy the same releases again';
+                }
+                // Rolled back: vendor/ no longer holds what was read after the update.
+                foreach ($result['updated_packages'] as $i => $update) {
+                    unset($result['updated_packages'][$i]['deployed_version']);
+                }
             }
             return $this->finalize($projectRoot, $result, 'failed', $plan, $runId);
         } finally {
             $lock?->release();
         }
+    }
+
+    /**
+     * Put back the state the last deploy replaced, as kept on disk: what the
+     * systemd wrapper runs when its health check fails after its restart.
+     * Nothing to do when no state is kept, or composer.lock is no longer the
+     * one that deploy installed.
+     *
+     * @return array<string, mixed>
+     */
+    public function rollbackLastDeploy(string $projectRoot, ?string $restartCommand = null): array
+    {
+        $result = ['started_at' => gmdate(DATE_ATOM), 'finished_at' => null, 'status' => 'nothing', 'reason' => '', 'restart_required' => false];
+        $lock = $this->lock ?? new UpdateLock($projectRoot);
+        try {
+            $acquired = $lock->acquire('rollback');
+        } catch (\Throwable $e) {
+            $result['reason'] = $e->getMessage();
+
+            return $this->finalize($projectRoot, $result, 'failed');
+        }
+        if (!$acquired) {
+            $result['reason'] = sprintf('Another update run is in progress (%s).', $lock->holderDescription());
+
+            return $this->finalize($projectRoot, $result, 'failed');
+        }
+        // Read and dropped under the lock: an update finishing in between
+        // had its new composer.lock overwritten with the old one.
+        try {
+            $snapshot = ComposerStateSnapshot::kept($projectRoot);
+            if ($snapshot === null) {
+                $result['reason'] = 'Nothing to roll back: no deploy state is kept, or composer.lock has changed since the deploy that kept it.';
+
+                return $this->finalize($projectRoot, $result, 'nothing');
+            }
+            [$result['rollback'], $result['restart_required']] = $this->rollback($projectRoot, $snapshot, $restartCommand);
+            if (str_starts_with((string) $result['rollback'], 'FAILED')) {
+                $result['reason'] = (string) $result['rollback'];
+
+                return $this->finalize($projectRoot, $result, 'failed');
+            }
+            // Unrecorded, the next tick deploys the same releases again.
+            $result['rejected'] = ComposerStateSnapshot::rejectKept($projectRoot)
+                ? 'recorded'
+                : 'not recorded: the next tick may deploy the same releases again';
+        } finally {
+            $lock->release();
+        }
+        $result['reason'] = 'The release before the last deploy is back.';
+
+        return $this->finalize($projectRoot, $result, 'rolled_back');
     }
 
     /**
@@ -151,13 +303,18 @@ final class FrameworkDeploymentExecutor
             return;
         }
 
+        // The deploy installs with --no-dev, which takes require-dev packages
+        // out of vendor/ while the lock keeps them: semitexa/testing, which
+        // every project made from semitexa/ultimate requires for dev, was
+        // "missing" after every update and every deploy was rolled back.
+        $devOnly = self::devPackagesLeftOut($projectRoot);
         $stale = array_values(array_filter(
             (new PackageDriftInspector())->inspect($projectRoot)->entries,
             static fn (PackageDriftEntry $entry): bool => in_array($entry->status, [
                 PackageDriftStatus::VendorStale,
                 PackageDriftStatus::MissingFromVendor,
                 PackageDriftStatus::VersionMismatch,
-            ], true),
+            ], true) && !($entry->status === PackageDriftStatus::MissingFromVendor && isset($devOnly[$entry->name])),
         ));
 
         if ($stale === []) {
@@ -180,30 +337,128 @@ final class FrameworkDeploymentExecutor
     }
 
     /**
-     * Best-effort revert to the pre-update dependency state after a failure
-     * that happened once vendor/ was already upgraded: restore composer
-     * files, reinstall vendor from the restored lock, restart. The returned
-     * string lands in the deployment log + run journal either way.
+     * The planned packages, when composer.json pins every one of them at the
+     * version installed (`"2026.10.19.0811"`, `"==…"`, `"v…"`); null when any
+     * could move.
+     *
+     * @return list<string>|null
      */
-    private function rollback(string $projectRoot, ComposerStateSnapshot $snapshot, ?string $restartCommand): string
+    private static function pinnedWhereTheyAre(string $projectRoot, DeploymentPlan $plan): ?array
+    {
+        $manifest = json_decode((string) @file_get_contents($projectRoot . '/composer.json'), true);
+        if (!is_array($manifest) || $plan->packageUpdates === []) {
+            return null;
+        }
+        $declared = array_merge(
+            is_array($manifest['require-dev'] ?? null) ? $manifest['require-dev'] : [],
+            is_array($manifest['require'] ?? null) ? $manifest['require'] : [],
+        );
+        $pinned = [];
+        foreach ($plan->packageUpdates as $update) {
+            $constraint = $declared[$update->packageName] ?? null;
+            if (!is_string($constraint) || self::bareVersion(ltrim(trim($constraint), '=')) !== self::bareVersion($update->installedVersion)) {
+                return null;
+            }
+            $pinned[] = $update->packageName;
+        }
+
+        return $pinned;
+    }
+
+    private static function bareVersion(string $version): string
+    {
+        return ltrim(trim($version), 'vV');
+    }
+
+    /** @return array<string, string> package => version, as vendor/composer/installed.json has it */
+    private static function installedVersions(string $projectRoot): array
+    {
+        $installed = json_decode((string) @file_get_contents($projectRoot . '/vendor/composer/installed.json'), true);
+        $versions = [];
+        foreach ((is_array($installed) ? ($installed['packages'] ?? []) : []) as $package) {
+            if (is_array($package) && is_string($package['name'] ?? null) && is_string($package['version'] ?? null)) {
+                $versions[$package['name']] = self::bareVersion($package['version']);
+            }
+        }
+
+        return $versions;
+    }
+
+    /**
+     * The lock's require-dev packages, when vendor/ was installed without
+     * them (installed.json says "dev": false); none otherwise, so a dev
+     * install that lost one still fails.
+     *
+     * @return array<string, true>
+     */
+    private static function devPackagesLeftOut(string $projectRoot): array
+    {
+        $installed = json_decode((string) @file_get_contents($projectRoot . '/vendor/composer/installed.json'), true);
+        $lock = json_decode((string) @file_get_contents($projectRoot . '/composer.lock'), true);
+        if (!is_array($installed) || ($installed['dev'] ?? true) !== false || !is_array($lock) || !is_array($lock['packages-dev'] ?? null)) {
+            return [];
+        }
+
+        $names = [];
+        foreach ($lock['packages-dev'] as $package) {
+            if (is_array($package) && is_string($package['name'] ?? null)) {
+                $names[$package['name']] = true;
+            }
+        }
+        foreach (is_array($lock['packages'] ?? null) ? $lock['packages'] : [] as $package) {
+            if (is_array($package) && is_string($package['name'] ?? null)) {
+                unset($names[$package['name']]);
+            }
+        }
+
+        return $names;
+    }
+
+    /**
+     * Best-effort revert to the pre-update dependency state after a failure
+     * once composer had changed something (a later step failed, or composer
+     * failed after rewriting the lock): restore composer files, reinstall
+     * vendor from the restored lock, restart. The message lands in the
+     * deployment log + run journal either way; the flag says whether a
+     * restart is still owed (the wrapper on the host then makes it). Never
+     * after a FAILED rollback: vendor/ is half-written then, and a restart
+     * would take the site from the old code still in memory to none.
+     *
+     * @return array{0: string, 1: bool}
+     */
+    private function rollback(string $projectRoot, ComposerStateSnapshot $snapshot, ?string $restartCommand): array
     {
         if (!$snapshot->restoreFiles()) {
-            return 'FAILED: could not restore composer.json/lock — system left on the new version; operator intervention required.';
+            return ['FAILED: could not restore composer.json/lock — system left on the new version; operator intervention required.', false];
         }
 
         try {
             $this->run($this->composerInstallCommand($projectRoot), $projectRoot);
         } catch (\Throwable $e) {
-            return 'FAILED: composer files restored but composer install failed — vendor/ still on the new version: ' . $e->getMessage();
+            return ['FAILED: composer files restored but composer install failed — vendor/ still on the new version: ' . $e->getMessage(), false];
         }
 
         try {
-            $this->restartRuntime($projectRoot, $restartCommand);
+            $restart = $this->restartRuntime($projectRoot, $restartCommand);
         } catch (\Throwable $e) {
-            return 'partial: dependency state restored, but restart failed — restart manually: ' . $e->getMessage();
+            return ['partial: dependency state restored, but restart failed — restart manually: ' . $e->getMessage(), true];
         }
 
-        return 'performed: composer.json/lock and vendor/ restored to the pre-update state.';
+        if (!$restart['performed']) {
+            // Inside the app container nothing restarts: the workers
+            // cache:clear reloaded onto the new vendor/ kept running it, and
+            // the journal said "performed". They are reloaded again, onto the
+            // restored one; the full restart is still owed.
+            try {
+                $this->run($this->projectCliCommand($projectRoot, 'cache:clear'), $projectRoot);
+            } catch (\Throwable $e) {
+                return ['partial: dependency state restored, but the workers still run the new code — restart required: ' . $e->getMessage(), true];
+            }
+
+            return ['partial: composer.json/lock and vendor/ restored and the workers reloaded (cache:clear); a restart is still required.', true];
+        }
+
+        return ['performed: composer.json/lock and vendor/ restored to the pre-update state, and the runtime restarted.', false];
     }
 
     private function composerInstallCommand(string $projectRoot): string
@@ -244,19 +499,26 @@ final class FrameworkDeploymentExecutor
             return;
         }
 
+        // An update journals what vendor/ now holds (nothing for a package it
+        // cannot read there); a failed one what it attempted, rolled back; a
+        // noop nothing.
         $deltas = [];
-        foreach ($plan->packageUpdates as $update) {
-            $deltas[$update->packageName] = [
-                'from' => $update->installedVersion,
-                'to'   => $update->latestVersion,
-            ];
+        foreach ($status === 'noop' ? [] : ($result['updated_packages'] ?? []) as $update) {
+            $to = $status === 'updated' ? ($update['deployed_version'] ?? null) : $update['latest_version'];
+            if ($to !== null && $to !== $update['installed_version']) {
+                $deltas[$update['package']] = ['from' => $update['installed_version'], 'to' => $to];
+            }
         }
 
-        $outcome = $status === 'updated' ? RunOutcome::Success : RunOutcome::Failed;
+        $outcome = match ($status) {
+            'updated' => RunOutcome::Success,
+            'noop' => RunOutcome::Noop,
+            default => RunOutcome::Failed,
+        };
         $stage = [
             'name'    => 'auto-deploy',
-            'success' => $outcome === RunOutcome::Success,
-            'message' => (string) ($result['restart_status'] ?? ''),
+            'success' => $outcome !== RunOutcome::Failed,
+            'message' => (string) ($outcome === RunOutcome::Noop ? $result['reason'] : ($result['restart_status'] ?? '')),
         ];
         if (isset($result['healthcheck'])) {
             $stage['healthcheck'] = (string) $result['healthcheck'];
