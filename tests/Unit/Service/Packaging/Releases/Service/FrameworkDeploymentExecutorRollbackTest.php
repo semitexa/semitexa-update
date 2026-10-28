@@ -516,9 +516,11 @@ final class FrameworkDeploymentExecutorRollbackTest extends TestCase
         $ran = [];
         $deploy = new FrameworkDeploymentExecutor(new DeploymentLogWriter(), null, new UpdateLock($this->projectRoot), self::composerInstalling2($ran));
         self::assertSame('updated', $deploy->execute($this->projectRoot, $this->plan())['status']);
-        $rollback = (new FrameworkDeploymentExecutor(new DeploymentLogWriter(), null, new UpdateLock($this->projectRoot), static function (): void {}))
+        // Each rollback's composer install puts vendor/ back on the lock it restored.
+        $rollback = (new FrameworkDeploymentExecutor(new DeploymentLogWriter(), null, new UpdateLock($this->projectRoot), self::installingTheLock(...)))
             ->rollbackLastDeploy($this->projectRoot);
         self::assertSame(['rolled_back', 'recorded'], [$rollback['status'], $rollback['rejected']]);
+        self::assertSame('1.0.0', $this->vendorVersion(), 'vendor/ back on 1.0.0');
         $rejected = json_decode((string) file_get_contents($this->projectRoot . '/var/update/rollback/rejected.json'), true);
         self::assertSame(['semitexa/core' => '2.0.0'], is_array($rejected) ? $rejected['installed'] : null);
 
@@ -539,9 +541,11 @@ final class FrameworkDeploymentExecutorRollbackTest extends TestCase
                 @mkdir($projectRoot . '/vendor/composer', 0777, true);
                 file_put_contents($projectRoot . '/vendor/composer/installed.json', '{"packages":[{"name":"semitexa/core","version":"3.0.0"}],"dev":false}');
             }
+            self::installingTheLock($command, $projectRoot);
         });
         $failed = $to3->execute($this->projectRoot, $unhealthy);
         self::assertSame(['failed', 'recorded'], [$failed['status'], $failed['rejected']]);
+        self::assertSame('1.0.0', $this->vendorVersion(), 'the failed 3.0.0 is rolled back to 1.0.0, not to 2.0.0');
 
         $rejected = json_decode((string) file_get_contents($this->projectRoot . '/var/update/rollback/rejected.json'), true);
         self::assertSame(['semitexa/core' => '3.0.0'], is_array($rejected) ? $rejected['installed'] : null);
@@ -656,6 +660,25 @@ final class FrameworkDeploymentExecutorRollbackTest extends TestCase
                 file_put_contents($projectRoot . '/vendor/composer/installed.json', '{"packages":[{"name":"semitexa/core","version":"2.0.0"}],"dev":false}');
             }
         };
+    }
+
+    /** composer install: vendor/ becomes what composer.lock says. */
+    private static function installingTheLock(string $command, string $projectRoot): void
+    {
+        if (!str_contains($command, ' install ')) {
+            return;
+        }
+        $lock = json_decode((string) file_get_contents($projectRoot . '/composer.lock'), true);
+        $version = is_array($lock) ? $lock['packages'][0]['version'] : null;
+        @mkdir($projectRoot . '/vendor/composer', 0777, true);
+        file_put_contents($projectRoot . '/vendor/composer/installed.json', (string) json_encode(['packages' => [['name' => 'semitexa/core', 'version' => $version]], 'dev' => false]));
+    }
+
+    private function vendorVersion(): ?string
+    {
+        $vendor = json_decode((string) file_get_contents($this->projectRoot . '/vendor/composer/installed.json'), true);
+
+        return is_array($vendor) ? $vendor['packages'][0]['version'] : null;
     }
 
     private function plan(?string $restartCommand = null, string $latest = '2.0.0'): DeploymentPlan
