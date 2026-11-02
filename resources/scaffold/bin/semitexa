@@ -402,6 +402,14 @@ wait_for_service() {
     return 1
 }
 
+# MySQL answers within seconds on a warm volume and in up to ~40 s on a first
+# init. Polled from the start, every 2 s for 40 s: it used to sleep 20 s before
+# the first look, so every server:start waited 20 s on a database that had been
+# up all along (bench-server-start-sleeps-20s). The ceiling is the same.
+wait_for_mysql() {
+    wait_for_service "MySQL" "mysql" "3306" 20 2 0 && verify_mysql_auth
+}
+
 # A TCP-reachable MySQL is NOT proof the app can use it. `mysql_data` is a
 # project-scoped Docker named volume that SURVIVES deleting/recreating the
 # project dir, so a "fresh" re-install of the same dir name silently inherits a
@@ -2036,7 +2044,7 @@ cmd_server_start() {
 
     _db="$(env_val DB_DRIVER "")"
     if [ "$_db" = "mysql" ] && [ -f "$PROJECT_ROOT/docker-compose.mysql.yml" ]; then
-        wait_for_service "MySQL" "mysql" "3306" 5 4 20 && verify_mysql_auth || true
+        wait_for_mysql || true
     fi
 
     _redis="$(env_val REDIS_HOST "")"
@@ -2540,6 +2548,24 @@ ETD_SQL
     info "Test database '$3' is ready for '$_etd_user'."
 }
 
+# A PHPUnit option whose value is the NEXT argument (`--filter X`, `-c file`).
+# The value is no test path: counted as one, `test:run -- --filter X` stopped
+# discovering the test paths and PHPUnit ran nothing in a fresh install, whose
+# module tests sit outside phpunit.xml.dist (bench-test-run-filter-noop).
+phpunit_option_takes_value() {
+    case "$1" in
+        --filter|--exclude-filter|--group|--exclude-group|--testsuite|--exclude-testsuite|\
+        --covers|--uses|--test-suffix|-c|--configuration|--bootstrap|--cache-directory|\
+        --order-by|--random-order-seed|--log-junit|--log-teamcity|--log-events-text|\
+        --log-events-verbose-text|--testdox-html|--testdox-text|--coverage-clover|\
+        --coverage-cobertura|--coverage-crap4j|--coverage-html|--coverage-php|--coverage-xml|\
+        --coverage-filter|--include-path|-d|--extension|--columns|--generate-baseline|--use-baseline|\
+        --default-time-limit|--list-tests-xml|--coverage-cache|--cache-result-file)
+            return 0 ;;
+    esac
+    return 1
+}
+
 cmd_test_run() {
     [ "${1:-}" != "--" ] || shift
     _test_information=0
@@ -2607,16 +2633,48 @@ cmd_test_run() {
     # (phpunit.xml.dist stays minimal and environment-agnostic).
     _has_positional=0
     _broad_packages_run=0
+    _option_value=0
+    # A suite named from phpunit.xml.dist (--testsuite / --exclude-testsuite)
+    # is the selection: positional paths would replace the XML suites, so
+    # nothing is discovered for it.
+    _suite_selected=0
+    # A run that picks tests (--filter, --group, a suite...) is as focused as
+    # one that names paths: neither runs the E2E phase after it. Its value no
+    # longer counts as a path, so this is tracked on its own.
+    _focused=0
     for _arg in "$@"; do
+        if [ "$_option_value" -eq 1 ]; then
+            _option_value=0
+            continue
+        fi
+        case "$_arg" in
+            --testsuite|--testsuite=*|--exclude-testsuite|--exclude-testsuite=*) _suite_selected=1; _focused=1 ;;
+            --filter|--filter=*|--exclude-filter|--exclude-filter=*|--group|--group=*|--exclude-group|--exclude-group=*|\
+            --covers|--covers=*|--uses|--uses=*|--test-suffix|--test-suffix=*) _focused=1 ;;
+        esac
+        if phpunit_option_takes_value "$_arg"; then
+            _option_value=1
+            continue
+        fi
         case "$_arg" in
             -*) ;;
             packages|packages/|./packages|./packages/) _has_positional=1; _broad_packages_run=1 ;;
             *) _has_positional=1 ;;
         esac
     done
-    # Auto-discovery (no positional args) is also a broad packages run.
-    if [ "$_has_positional" -eq 0 ]; then
+    # Auto-discovery (no positional args) is also a broad packages run. A
+    # named suite is not: it needs no path repository, so neither the audit
+    # nor discovery below applies to it.
+    if [ "$_has_positional" -eq 0 ] && [ "$_suite_selected" -eq 0 ]; then
         _broad_packages_run=1
+    fi
+    # `packages` asks for the discovered package tests, a suite for the XML's:
+    # PHPUnit can take only one, and dropping either silently runs less than
+    # was asked. Say so instead.
+    if [ "$_suite_selected" -eq 1 ] && [ "$_broad_packages_run" -eq 1 ]; then
+        error "test:run packages cannot be combined with --testsuite or --exclude-testsuite."
+        info "Run the packages (bin/semitexa test:run packages) or the suite (bin/semitexa test:run --testsuite <name>), not both at once."
+        exit 1
     fi
 
     # Collect external composer path-repo URLs (those declared in composer.json
@@ -2651,7 +2709,16 @@ cmd_test_run() {
     # (a) explicit positional path validation. If the user named an external
     #     path-repo path, refuse to proceed when the source isn't there.
     if [ "$_has_positional" -eq 1 ]; then
+        _option_value=0
         for _arg in "$@"; do
+            if [ "$_option_value" -eq 1 ]; then
+                _option_value=0
+                continue
+            fi
+            if phpunit_option_takes_value "$_arg"; then
+                _option_value=1
+                continue
+            fi
             case "$_arg" in
                 -*) continue ;;
             esac
@@ -2748,8 +2815,16 @@ $_url_clean"
     fi
 
     _test_paths=""
-    if [ "$_has_positional" -eq 0 ] || [ "$_broad_packages_run" -eq 1 ]; then
+    if [ "$_suite_selected" -eq 0 ] && { [ "$_has_positional" -eq 0 ] || [ "$_broad_packages_run" -eq 1 ]; }; then
         _discovered=""
+        # The project's own tests/ first: discovered paths replace the XML
+        # suites, so a run that also found module or package tests dropped it
+        # (the phpunit.xml.dist suite is `tests`). Pure discovery only, as for
+        # src/modules: an explicit `packages` target means the packages.
+        if [ "$_has_positional" -eq 0 ] && [ -d "$PROJECT_ROOT/tests" ] \
+            && find "$PROJECT_ROOT/tests" -mindepth 1 -name '*Test.php' -print -quit 2>/dev/null | grep -q .; then
+            _discovered="tests"
+        fi
         if [ -d "$PROJECT_ROOT/packages" ]; then
             for _dir in "$PROJECT_ROOT"/packages/*/tests; do
                 [ -d "$_dir" ] || continue
@@ -2925,8 +3000,8 @@ ${_url_clean}/tests"
     # ── Phase 2: E2E (Playwright) ───────────────────────────────────────
     # When the operator passed positional PHPUnit targets, this is a
     # focused PHPUnit run; do NOT auto-run the full E2E suite.
-    if [ "$_has_positional" -eq 1 ]; then
-        info "Positional PHPUnit targets supplied — E2E phase skipped."
+    if [ "$_has_positional" -eq 1 ] || [ "$_focused" -eq 1 ]; then
+        info "Focused PHPUnit run (named targets or a test selection) — E2E phase skipped."
         exit 0
     fi
 
