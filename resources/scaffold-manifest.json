@@ -1,6 +1,6 @@
 {
     "schema_version": "semitexa.scaffold-manifest/v1",
-    "generated_at": "2026-11-02T07:36:45+00:00",
+    "generated_at": "2026-11-02T08:38:07+00:00",
     "files": [
         {
             "path": ".env.default",
@@ -85,8 +85,9 @@
         },
         {
             "path": "AGENTS.md",
-            "current_sha256": "e747059cfb8f0fcc10665bdcd12823a5250598e1da38c307998f322fb68fa3db",
+            "current_sha256": "5146b595d57cb884558865e369c8eabc7089ca3342f372a3006cb7083ce3d6a0",
             "previous_sha256": [
+                "e747059cfb8f0fcc10665bdcd12823a5250598e1da38c307998f322fb68fa3db",
                 "adbe5fdf10bfebff4e67ed70856406d600d7a42360e1ca3e9eed990df9ab18ab",
                 "92b4174b9dc8a34122daf1400a1893d13655ed828fb7b7043194c3257cd4eed5",
                 "932a060d0068fe648c1618ea855d11662cc9da201fb932bcea2e64228eab7511",
@@ -157,8 +158,9 @@
         },
         {
             "path": "AI_ENTRY.md",
-            "current_sha256": "3465807eb5427c447214a653e7e2bd961a585655a83f8088c4b1d6bca56ff9ef",
+            "current_sha256": "14542d74f7bd3894b3f711207854b9fdbff1b351d7781c7ea5b5c743254e3cb8",
             "previous_sha256": [
+                "3465807eb5427c447214a653e7e2bd961a585655a83f8088c4b1d6bca56ff9ef",
                 "4b9d38cdf16c6345074e65fb6895c831751705f1a2d78e0cea06db796b5cc7ec",
                 "dd12c052d7857289479b4895bb65fbfa1437e9c71f74511a070ba80317ddb73f",
                 "ad1d57c159fc3e8308499aa1a8a22c74888ee1da5b86af56387236ce50a92882",
@@ -190,8 +192,9 @@
         },
         {
             "path": "AI_REFERENCE.md",
-            "current_sha256": "d4ee3881ab7d9c72533dda42cac29216c9ac56436bf106f6d9b4f3a8cd400ddf",
+            "current_sha256": "65b5aad8736df3e5e75eaad795620ff26e9a5032f093f810c02c7d02a998a9ad",
             "previous_sha256": [
+                "d4ee3881ab7d9c72533dda42cac29216c9ac56436bf106f6d9b4f3a8cd400ddf",
                 "7475a00b80787341263818e154efab1fcda8a0a6093ce06101c59ba1903a2d1d",
                 "01cb3edbe787a3b0f8ce4da796a16cd3a51ad5d7fa665c05b9fb9614382dfdaf"
             ],
