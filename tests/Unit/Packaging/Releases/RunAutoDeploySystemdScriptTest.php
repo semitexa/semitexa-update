@@ -230,7 +230,9 @@ final class RunAutoDeploySystemdScriptTest extends TestCase
         // Asked of the kernel: a random port is sometimes taken, and then the
         // server never starts and an unrelated run goes red.
         $probe = stream_socket_server('tcp://127.0.0.1:0');
-        self::assertIsResource($probe);
+        if (!is_resource($probe)) {
+            self::fail('No free port for the test HTTP server.');
+        }
         $port = (int) substr(strrchr((string) stream_socket_get_name($probe, false), ':') ?: ':0', 1);
         fclose($probe);
         $command = sprintf(
