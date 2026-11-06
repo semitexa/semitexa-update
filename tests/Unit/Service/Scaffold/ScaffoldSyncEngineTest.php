@@ -12,6 +12,8 @@ use Semitexa\Update\Domain\Enum\ScaffoldFileCategory;
 use Semitexa\Update\Domain\Enum\ScaffoldSyncAction;
 use Semitexa\Update\Domain\Enum\ScaffoldSyncOutcome;
 use Semitexa\Update\Domain\Enum\ScaffoldSyncStatus;
+use Semitexa\Update\Domain\Model\Scaffold\ScaffoldSyncReport;
+use Semitexa\Update\Domain\Model\Scaffold\ScaffoldSyncResult;
 use Semitexa\Update\Domain\Model\Scaffold\ScaffoldFileEntry;
 use Semitexa\Update\Domain\Model\Scaffold\ScaffoldManifest;
 
@@ -333,6 +335,60 @@ final class ScaffoldSyncEngineTest extends TestCase
         self::assertStringStartsWith('bin/semitexa.new.', $r->newFilePath);
         self::assertFileExists($this->project . '/' . $r->newFilePath);
         self::assertSame("operator-also-tweaked-the-new-file\n", file_get_contents($this->project . '/bin/semitexa.new'));
+    }
+
+    public function testAStaleNewAddsNoSecondCandidateOnTheNextRun(): void
+    {
+        $current = "current\n";
+        $this->writeScaffold('bin/semitexa', $current);
+        $this->writeProject('bin/semitexa', "operator-edited\n");
+        $this->writeProject('bin/semitexa.new', "operator-also-tweaked-the-new-file\n");
+        $manifest = $this->binManifest($current);
+
+        (new ScaffoldSyncEngine())->execute($this->classify($manifest, writeCandidates: true), $this->project, $this->scaffold, now: $this->now);
+        (new ScaffoldSyncEngine())->execute($this->classify($manifest, writeCandidates: true), $this->project, $this->scaffold, now: $this->now->modify('+1 hour'));
+
+        self::assertCount(1, glob($this->project . '/bin/semitexa.new.*') ?: [], 'the same candidate must not pile up, update after update');
+    }
+
+    public function testAFailureOfAFileTheUpdateCanDoWithoutStopsNothing(): void
+    {
+        $failed = static fn (bool $critical): ScaffoldSyncResult => new ScaffoldSyncResult(
+            path: 'x',
+            status: ScaffoldSyncStatus::Missing,
+            action: ScaffoldSyncAction::Create,
+            outcome: ScaffoldSyncOutcome::Failed,
+            oldHash: null,
+            newHash: 'h',
+            backupPath: null,
+            newFilePath: null,
+            message: 'Failed: no',
+            critical: $critical,
+        );
+
+        self::assertTrue((new ScaffoldSyncReport([$failed(false)], false, []))->isSuccess());
+        self::assertFalse((new ScaffoldSyncReport([$failed(true)], false, []))->isSuccess());
+    }
+
+    public function testAFailedWriteCarriesTheManifestsCriticalFlag(): void
+    {
+        $this->writeScaffold('sub/file.txt', "x\n");
+        file_put_contents($this->project . '/sub', 'a file where the directory should be');
+        $manifest = $this->manifest([new ScaffoldFileEntry(
+            path: 'sub/file.txt',
+            currentSha256: hash('sha256', "x\n"),
+            previousSha256: [],
+            category: ScaffoldFileCategory::AgentSkill,
+            critical: false,
+            autoUpdate: true,
+            preserveExecutable: false,
+            notes: '',
+        )]);
+
+        $report = (new ScaffoldSyncEngine())->execute($this->classify($manifest), $this->project, $this->scaffold, now: $this->now);
+
+        self::assertSame(ScaffoldSyncOutcome::Failed, $report->resultByPath('sub/file.txt')->outcome);
+        self::assertTrue($report->isSuccess());
     }
 
     private function classify(

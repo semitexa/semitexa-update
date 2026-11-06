@@ -29,7 +29,9 @@ final readonly class ScaffoldSyncReport
             return false;
         }
         foreach ($this->results as $result) {
-            if ($result->outcome === ScaffoldSyncOutcome::Failed) {
+            // A file the update can do without is reported, and stops nothing:
+            // composer has already moved vendor, and patches still have to run.
+            if ($result->outcome === ScaffoldSyncOutcome::Failed && $result->critical) {
                 return false;
             }
         }

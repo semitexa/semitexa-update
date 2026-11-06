@@ -1,6 +1,6 @@
 ---
 name: make-it
-description: Work on this Semitexa project until nothing is left. Use when the user says "make it", "/make-it", "давай make it", or asks to keep working through the backlog. Semitexa decides what happens next: an interview on an empty backlog, the next approved task, ideas to offer, or all done.
+description: 'Work on this Semitexa project until nothing is left. Use when the user says "make it", "/make-it", "давай make it", or asks to keep working through the backlog. Semitexa decides what comes next: an interview on an empty backlog, the next approved task, ideas to offer, or all done.'
 ---
 
 # Make it

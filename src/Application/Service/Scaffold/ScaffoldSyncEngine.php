@@ -81,6 +81,7 @@ final class ScaffoldSyncEngine
                 backupPath: null,
                 newFilePath: null,
                 message: 'Failed: ' . $e->getMessage(),
+                critical: $entry->critical,
             );
         }
     }
@@ -184,12 +185,16 @@ final class ScaffoldSyncEngine
         $newPath = $entry->newFilePath ?? ($entry->path . '.new');
         $newAbsolute = $projectRoot . '/' . $newPath;
 
+        // Dated candidates count too, or a stale .new adds a file on every update.
         $existingMatchesCurrent = false;
         if (file_exists($newAbsolute)) {
-            $existingHash = $this->hasher->hashFile($newAbsolute);
-            if ($existingHash === $entry->newHash) {
-                $existingMatchesCurrent = true;
-            } else {
+            foreach ([$newAbsolute, ...(glob($newAbsolute . '.*') ?: [])] as $candidate) {
+                if ($this->hasher->hashFile($candidate) === $entry->newHash) {
+                    $existingMatchesCurrent = true;
+                    break;
+                }
+            }
+            if (!$existingMatchesCurrent) {
                 $newPath = $entry->path . '.new.' . $now->format('Ymd\THis\Z');
                 $newAbsolute = $projectRoot . '/' . $newPath;
             }
