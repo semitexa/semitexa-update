@@ -348,7 +348,11 @@ final class ScaffoldSyncEngineTest extends TestCase
         (new ScaffoldSyncEngine())->execute($this->classify($manifest, writeCandidates: true), $this->project, $this->scaffold, now: $this->now);
         (new ScaffoldSyncEngine())->execute($this->classify($manifest, writeCandidates: true), $this->project, $this->scaffold, now: $this->now->modify('+1 hour'));
 
-        self::assertCount(1, glob($this->project . '/bin/semitexa.new.*') ?: [], 'the same candidate must not pile up, update after update');
+        $dated = glob($this->project . '/bin/semitexa.new.*') ?: [];
+        self::assertCount(1, $dated, 'the same candidate must not pile up, update after update');
+
+        $report = (new ScaffoldSyncEngine())->execute($this->classify($manifest, writeCandidates: true), $this->project, $this->scaffold, now: $this->now->modify('+2 hours'));
+        self::assertSame('bin/semitexa.new.' . pathinfo($dated[0], PATHINFO_EXTENSION), $report->resultByPath('bin/semitexa')->newFilePath, 'the report names the file that holds it');
     }
 
     public function testAFailureOfAFileTheUpdateCanDoWithoutStopsNothing(): void

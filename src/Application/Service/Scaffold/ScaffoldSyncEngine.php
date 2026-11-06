@@ -188,9 +188,12 @@ final class ScaffoldSyncEngine
         // Dated candidates count too, or a stale .new adds a file on every update.
         $existingMatchesCurrent = false;
         if (file_exists($newAbsolute)) {
-            foreach ([$newAbsolute, ...(glob($newAbsolute . '.*') ?: [])] as $candidate) {
+            $dated = array_filter(scandir(dirname($newAbsolute)) ?: [], static fn (string $name): bool => str_starts_with($name, basename($newAbsolute) . '.'));
+            foreach ([$newAbsolute, ...array_map(static fn (string $name): string => dirname($newAbsolute) . '/' . $name, $dated)] as $candidate) {
                 if ($this->hasher->hashFile($candidate) === $entry->newHash) {
                     $existingMatchesCurrent = true;
+                    // The report names the file that really holds it.
+                    $newPath = substr($candidate, strlen($projectRoot) + 1);
                     break;
                 }
             }
