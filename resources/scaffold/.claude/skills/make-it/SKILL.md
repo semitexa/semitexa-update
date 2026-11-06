@@ -9,8 +9,8 @@ What to do next is Semitexa's answer, not yours to work out. This skill only kee
 
 1. Run `bin/semitexa ai:make-it --json`.
 2. Tell the architect what `say` says, in their language, and do the `steps`.
-3. While `go_on` is true, go back to 1. When it is false, stop.
+3. While `go_on` is true, go back to 1. When it is false, finish its steps and stop; go back to 1 only if a step says so.
 
-To keep it going unattended in Claude Code: `/loop /make-it`, paced by itself. A tick that finds work still running only re-arms. When `go_on` is false, end the loop: do not schedule another tick.
+To keep it going unattended in Claude Code: `/loop /make-it`, paced by itself. A tick that finds work still running only re-arms. When `go_on` is false, end the loop, and finish the steps with the architect: an interview needs their answers, not a tick.
 
 Do not take a task the command did not name, and do not approve anything yourself: that is the architect's word.
