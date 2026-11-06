@@ -355,6 +355,19 @@ final class ScaffoldSyncEngineTest extends TestCase
         self::assertSame('bin/semitexa.new.' . pathinfo($dated[0], PATHINFO_EXTENSION), $report->resultByPath('bin/semitexa')->newFilePath, 'the report names the file that holds it');
     }
 
+    public function testADirectoryBesideTheCandidateIsNoCandidate(): void
+    {
+        $current = "current\n";
+        $this->writeScaffold('bin/semitexa', $current);
+        $this->writeProject('bin/semitexa', "operator-edited\n");
+        $this->writeProject('bin/semitexa.new', "operator-also-tweaked-the-new-file\n");
+        mkdir($this->project . '/bin/semitexa.new.old');
+
+        $report = (new ScaffoldSyncEngine())->execute($this->classify($this->binManifest($current), writeCandidates: true), $this->project, $this->scaffold, now: $this->now);
+
+        self::assertNotSame(ScaffoldSyncOutcome::Failed, $report->resultByPath('bin/semitexa')->outcome);
+    }
+
     public function testAFailureOfAFileTheUpdateCanDoWithoutStopsNothing(): void
     {
         $failed = static fn (bool $critical): ScaffoldSyncResult => new ScaffoldSyncResult(
