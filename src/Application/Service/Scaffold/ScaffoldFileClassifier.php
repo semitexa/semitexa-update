@@ -174,9 +174,9 @@ final class ScaffoldFileClassifier
             manifestEntry: $manifestEntry,
             status: ScaffoldSyncStatus::LocallyModified,
             projectHash: $projectHash,
-            // An edited manual still has to learn the new rules: the new version
-            // always lands beside it as .new, never over the project's edits.
-            writeCandidates: $writeCandidates || $manifestEntry->category === ScaffoldFileCategory::AgentDocs,
+            // An edited manual or skill still has to learn the new rules: the new
+            // version always lands beside it as .new, never over the project's edits.
+            writeCandidates: $writeCandidates || in_array($manifestEntry->category, [ScaffoldFileCategory::AgentDocs, ScaffoldFileCategory::AgentSkill], true),
             manualReason: 'Project file is locally modified — live file untouched. '
                 . 'Run `bin/semitexa update --write-scaffold-candidates` to generate '
                 . $manifestEntry->path . '.new.',

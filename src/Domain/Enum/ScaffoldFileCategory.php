@@ -52,4 +52,13 @@ enum ScaffoldFileCategory: string
      * installed with — one five months old, without the presence directive.
      */
     case AgentDocs = 'agent_docs';
+
+    /**
+     * A skill an agent runtime loads from the project (.claude/skills).
+     *
+     * Not agent docs, because the policy differs where it matters: an agent doc
+     * a project lacks was deleted on purpose and stays gone, while a project
+     * installed before the skill existed lacks it too, and has to get it.
+     */
+    case AgentSkill = 'agent_skill';
 }

@@ -276,13 +276,35 @@ final class ScaffoldFileClassifierTest extends TestCase
         self::assertSame(ScaffoldSyncAction::None, $entry->action);
     }
 
-    private function docEntry(string $currentBytes, string $path = 'CLAUDE.md'): ScaffoldFileEntry
+    public function testAProjectInstalledBeforeASkillExistedGetsIt(): void
+    {
+        $this->writeScaffold('SKILL.md', "skill\n");
+
+        $entry = (new ScaffoldFileClassifier())->plan($this->project, $this->scaffold, $this->manifest([$this->docEntry("skill\n", 'SKILL.md', ScaffoldFileCategory::AgentSkill)]))->entries[0] ?? null;
+
+        self::assertNotNull($entry);
+        self::assertSame(ScaffoldSyncAction::Create, $entry->action);
+    }
+
+    public function testAnEditedSkillGetsTheNewVersionAsDotNewWithoutTheFlag(): void
+    {
+        $this->writeScaffold('SKILL.md', "new skill\n");
+        $this->writeProject('SKILL.md', "the project's own skill\n");
+
+        $entry = (new ScaffoldFileClassifier())->plan($this->project, $this->scaffold, $this->manifest([$this->docEntry("new skill\n", 'SKILL.md', ScaffoldFileCategory::AgentSkill)]))->entries[0] ?? null;
+
+        self::assertNotNull($entry);
+        self::assertSame(ScaffoldSyncAction::WriteNew, $entry->action);
+        self::assertSame('SKILL.md.new', $entry->newFilePath);
+    }
+
+    private function docEntry(string $currentBytes, string $path = 'CLAUDE.md', ScaffoldFileCategory $category = ScaffoldFileCategory::AgentDocs): ScaffoldFileEntry
     {
         return new ScaffoldFileEntry(
             path: $path,
             currentSha256: hash('sha256', $currentBytes),
             previousSha256: [],
-            category: ScaffoldFileCategory::AgentDocs,
+            category: $category,
             critical: false,
             autoUpdate: true,
             preserveExecutable: false,

@@ -1,7 +1,17 @@
 {
     "schema_version": "semitexa.scaffold-manifest/v1",
-    "generated_at": "2026-11-06T09:49:20+00:00",
+    "generated_at": "2026-11-06T10:18:35+00:00",
     "files": [
+        {
+            "path": ".claude/skills/make-it/SKILL.md",
+            "current_sha256": "4274f37451c10bae29ea3ad732f94a1977951e98fb25b89a2bde971291608c25",
+            "previous_sha256": [],
+            "category": "agent_skill",
+            "critical": false,
+            "auto_update": true,
+            "preserve_executable": false,
+            "notes": "Thin skill: it only keeps asking ai:make-it. Created when missing; a project that edited it gets the new version as .new to merge."
+        },
         {
             "path": ".env.default",
             "current_sha256": "3ad07daac394248bb6d58879854ce2d380d1b2ae697bffc747adcf458ba68c65",
