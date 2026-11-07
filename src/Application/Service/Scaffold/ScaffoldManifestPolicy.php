@@ -146,6 +146,13 @@ final class ScaffoldManifestPolicy
                 'preserve_executable' => false,
                 'notes' => 'Template only. The project-managed docker-compose.override.yml is never touched.',
             ],
+            '.claude/skills/make-it/SKILL.md' => [
+                'category' => ScaffoldFileCategory::AgentSkill,
+                'critical' => false,
+                'auto_update' => true,
+                'preserve_executable' => false,
+                'notes' => 'Thin skill: it only keeps asking ai:make-it. Created when missing; a project that edited it gets the new version as .new to merge.',
+            ],
             'AGENTS.md' => [
                 'category' => ScaffoldFileCategory::AgentDocs,
                 'critical' => false,

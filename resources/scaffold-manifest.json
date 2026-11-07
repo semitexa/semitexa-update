@@ -1,7 +1,20 @@
 {
     "schema_version": "semitexa.scaffold-manifest/v1",
-    "generated_at": "2026-11-06T00:55:16+00:00",
+    "generated_at": "2026-11-06T19:09:52+00:00",
     "files": [
+        {
+            "path": ".claude/skills/make-it/SKILL.md",
+            "current_sha256": "7c6da554fe25564418748fe12f1fd0e521d9041fc9923c457f32c16bb5ec8876",
+            "previous_sha256": [
+                "372282037ca2f01b4b6ff82023fed02d8ac5745f1ad5f04dad4e9d8044f9f0e4",
+                "4274f37451c10bae29ea3ad732f94a1977951e98fb25b89a2bde971291608c25"
+            ],
+            "category": "agent_skill",
+            "critical": false,
+            "auto_update": true,
+            "preserve_executable": false,
+            "notes": "Thin skill: it only keeps asking ai:make-it. Created when missing; a project that edited it gets the new version as .new to merge."
+        },
         {
             "path": ".env.default",
             "current_sha256": "3ad07daac394248bb6d58879854ce2d380d1b2ae697bffc747adcf458ba68c65",
@@ -85,8 +98,16 @@
         },
         {
             "path": "AGENTS.md",
-            "current_sha256": "e10bc7c475d4280f71089416b1ac275941edf76d44059a04cb7949dd78bd4f7c",
+            "current_sha256": "770c380d426fb04e0d4329f260657277e0096fd8998fdc9f11e9bc8d26bfafb7",
             "previous_sha256": [
+                "50cd8b3cddf45b1a902c53a02a917b3cc6cf2f0216abe7bc6346a9fc05b15e7d",
+                "7cfcfc28de4f55374ed87ba2a6538a701e7a620477e25b46b8a68eb6bceeeb0a",
+                "783787ae4a2319320c30e013159d88d745d5c39a1a9273703012fc9f87561134",
+                "8682479ae72009fbb9ab3eb3957ab76aefa45dc126699f90346ba9f891916fed",
+                "b7ea927ea8103bbca274a2d30022d0d44962257244943ee794d11ace18a10333",
+                "1bb271515f096ad8ec4ca7e61a44d6c1cc45c4f922dc79d4c7372f1ee3f25397",
+                "f672247bf45e3b736c59ead24ef35bd951f7245644eef6f159df83a0b73037f9",
+                "e10bc7c475d4280f71089416b1ac275941edf76d44059a04cb7949dd78bd4f7c",
                 "8db113a207804e0a7b94a62e1612043b98541e5981b014c15d2a8094419d1237",
                 "5e43c458b98401452f890ed544823a8a3a2cae107c87a5e6132635e65c07a19c",
                 "5146b595d57cb884558865e369c8eabc7089ca3342f372a3006cb7083ce3d6a0",
@@ -133,8 +154,11 @@
         },
         {
             "path": "AGENTS_DOCTRINE.md",
-            "current_sha256": "9c6b610f61ceed4e7c9a713c353ccaaff9f0dce2d0fbae74571f54ba6dd1cbf5",
+            "current_sha256": "e31d6560a6dd9b715fb6d11dc3672ebca576f84d5d51253dd5d89ff89343a28f",
             "previous_sha256": [
+                "32c39cd23dd4124c12fbf2e9ff977a5aef4f5854a474eec85be1a8f93ba8de76",
+                "7234af365719ccea7144199c6bb08f5355ac222849ced9995c0d84d5069b14a8",
+                "9c6b610f61ceed4e7c9a713c353ccaaff9f0dce2d0fbae74571f54ba6dd1cbf5",
                 "2ebe086d5ab0b4352ff5bbbc53fdac27d9b37584898acdcc0db558f761578324",
                 "5d9b961e34dc6cea2b68b880d5e66c3c130ab2de32fbd63bd0c8264669445030"
             ],

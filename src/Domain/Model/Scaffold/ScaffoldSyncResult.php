@@ -24,6 +24,7 @@ final readonly class ScaffoldSyncResult
         public ?string $backupPath,
         public ?string $newFilePath,
         public string $message,
+        public bool $critical = true,
     ) {
     }
 }

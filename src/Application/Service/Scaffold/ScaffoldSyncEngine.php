@@ -81,6 +81,7 @@ final class ScaffoldSyncEngine
                 backupPath: null,
                 newFilePath: null,
                 message: 'Failed: ' . $e->getMessage(),
+                critical: $entry->critical,
             );
         }
     }
@@ -184,12 +185,20 @@ final class ScaffoldSyncEngine
         $newPath = $entry->newFilePath ?? ($entry->path . '.new');
         $newAbsolute = $projectRoot . '/' . $newPath;
 
+        // Dated candidates count too, or a stale .new adds a file on every update.
+        // Only the ones this engine names: an operator's .new.backup is theirs.
         $existingMatchesCurrent = false;
         if (file_exists($newAbsolute)) {
-            $existingHash = $this->hasher->hashFile($newAbsolute);
-            if ($existingHash === $entry->newHash) {
-                $existingMatchesCurrent = true;
-            } else {
+            $dated = array_filter(scandir(dirname($newAbsolute)) ?: [], static fn (string $name): bool => preg_match('/^' . preg_quote(basename($newAbsolute), '/') . '\.\d{8}T\d{6}Z$/', $name) === 1 && is_file(dirname($newAbsolute) . '/' . $name));
+            foreach ([$newAbsolute, ...array_map(static fn (string $name): string => dirname($newAbsolute) . '/' . $name, $dated)] as $candidate) {
+                if ($this->hasher->hashFile($candidate) === $entry->newHash) {
+                    $existingMatchesCurrent = true;
+                    // The report names the file that really holds it.
+                    $newPath = substr($candidate, strlen($projectRoot) + 1);
+                    break;
+                }
+            }
+            if (!$existingMatchesCurrent) {
                 $newPath = $entry->path . '.new.' . $now->format('Ymd\THis\Z');
                 $newAbsolute = $projectRoot . '/' . $newPath;
             }
