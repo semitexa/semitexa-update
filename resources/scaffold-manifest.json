@@ -1,6 +1,6 @@
 {
     "schema_version": "semitexa.scaffold-manifest/v1",
-    "generated_at": "2026-11-06T19:09:52+00:00",
+    "generated_at": "2026-11-07T09:29:34+00:00",
     "files": [
         {
             "path": ".claude/skills/make-it/SKILL.md",
@@ -19,6 +19,9 @@
             "path": ".env.default",
             "current_sha256": "3ad07daac394248bb6d58879854ce2d380d1b2ae697bffc747adcf458ba68c65",
             "previous_sha256": [
+                "7e58d61b83cb73abb8469d231e4356ea67afd682b3cbb3895275bad0fef95e33",
+                "ca6129b2f1495b88d95e332e9548ca4e87e763b7735ef8583c6eb3dbe8f5f70c",
+                "3ad07daac394248bb6d58879854ce2d380d1b2ae697bffc747adcf458ba68c65",
                 "958f01eafaf6bfc8145535b54f71666983e0a4a7945a42a8ea7f562b95cafa1b",
                 "8c2a07684379575a7f0dcd42aef4c3a531c4abe58de350a3b51ce5660d4088de",
                 "6045a21e38ee31be97c5ed50f4e20463cde94f3857359f0dc046a3c7a4fb5afa",
@@ -272,8 +275,11 @@
         },
         {
             "path": "bin/semitexa",
-            "current_sha256": "e288111d85510fbbf111b73ad4a9254bbc9dea3237944f93eb51cc577487c106",
+            "current_sha256": "515029d754c5f8a5168df79a04a92914e5b81695f014737f141e4ac16c2087d0",
             "previous_sha256": [
+                "408900cb781eab656d269d5ee90be42f9a85be4ef5a4a92a67e3cb75914d5398",
+                "5949ff99c0797189cca4ffcac50400acb25c0302f04e590cbb2f44040363bce8",
+                "e288111d85510fbbf111b73ad4a9254bbc9dea3237944f93eb51cc577487c106",
                 "7457007b50ebe32d9e28b8c8e66bc5c8def387cfd422e63745b605f646114d32",
                 "02da4d425fb9fd839f6bc540755db3aad316a8f3705db5792d3752cd0e3e4400",
                 "2ab5b632468ed563d6021398b58140954e4fd0142499b287e6c85c3f7421a973",
@@ -393,8 +399,10 @@
         },
         {
             "path": "docker-compose.redis.yml",
-            "current_sha256": "96405fd0222f0b53bd0a64f1603cc0435c5709c184f4e4c766ed24a1ab848f9a",
-            "previous_sha256": [],
+            "current_sha256": "fbd611f457f2f24fc18945d5fa2305868cb437fa352c6c3dad8ac8e73eed8f05",
+            "previous_sha256": [
+                "96405fd0222f0b53bd0a64f1603cc0435c5709c184f4e4c766ed24a1ab848f9a"
+            ],
             "category": "infrastructure",
             "critical": false,
             "auto_update": true,
