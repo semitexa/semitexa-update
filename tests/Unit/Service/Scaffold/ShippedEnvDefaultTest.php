@@ -30,11 +30,14 @@ final class ShippedEnvDefaultTest extends TestCase
 
     public function test_the_worker_gets_the_same_cache_as_the_app(): void
     {
-        self::assertStringContainsString('echo "CACHE_DRIVER=$(env_val CACHE_DRIVER redis)"', $this->scaffold('bin/semitexa'));
+        // .env first, then the caller's own CACHE_DRIVER, then Redis: what Compose gives the app.
+        self::assertStringContainsString('echo "CACHE_DRIVER=$(env_val CACHE_DRIVER "${CACHE_DRIVER:-redis}")"', $this->scaffold('bin/semitexa'));
     }
 
     public function test_env_default_does_not_name_a_cache_a_project_may_not_have(): void
     {
-        self::assertDoesNotMatchRegularExpression('/^CACHE_DRIVER=/m', $this->scaffold('.env.default'));
+        $default = $this->scaffold('.env.default');
+        self::assertMatchesRegularExpression('/^APP_ENV=/m', $default, 'the shipped .env.default was read, not an empty string');
+        self::assertDoesNotMatchRegularExpression('/^CACHE_DRIVER=/m', $default);
     }
 }
