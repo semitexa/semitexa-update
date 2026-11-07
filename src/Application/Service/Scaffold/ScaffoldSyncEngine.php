@@ -186,9 +186,10 @@ final class ScaffoldSyncEngine
         $newAbsolute = $projectRoot . '/' . $newPath;
 
         // Dated candidates count too, or a stale .new adds a file on every update.
+        // Only the ones this engine names: an operator's .new.backup is theirs.
         $existingMatchesCurrent = false;
         if (file_exists($newAbsolute)) {
-            $dated = array_filter(scandir(dirname($newAbsolute)) ?: [], static fn (string $name): bool => str_starts_with($name, basename($newAbsolute) . '.') && is_file(dirname($newAbsolute) . '/' . $name));
+            $dated = array_filter(scandir(dirname($newAbsolute)) ?: [], static fn (string $name): bool => preg_match('/^' . preg_quote(basename($newAbsolute), '/') . '\.\d{8}T\d{6}Z$/', $name) === 1 && is_file(dirname($newAbsolute) . '/' . $name));
             foreach ([$newAbsolute, ...array_map(static fn (string $name): string => dirname($newAbsolute) . '/' . $name, $dated)] as $candidate) {
                 if ($this->hasher->hashFile($candidate) === $entry->newHash) {
                     $existingMatchesCurrent = true;

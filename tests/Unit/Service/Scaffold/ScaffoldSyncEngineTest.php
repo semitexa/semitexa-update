@@ -365,7 +365,22 @@ final class ScaffoldSyncEngineTest extends TestCase
 
         $report = (new ScaffoldSyncEngine())->execute($this->classify($this->binManifest($current), writeCandidates: true), $this->project, $this->scaffold, now: $this->now);
 
-        self::assertNotSame(ScaffoldSyncOutcome::Failed, $report->resultByPath('bin/semitexa')->outcome);
+        $result = $report->resultByPath('bin/semitexa');
+        self::assertNotSame(ScaffoldSyncOutcome::Failed, $result->outcome);
+        self::assertSame($current, file_get_contents($this->project . '/' . $result->newFilePath), 'a candidate holding the scaffold was written');
+    }
+
+    public function testAnOperatorsOwnBackupIsNoCandidate(): void
+    {
+        $current = "current\n";
+        $this->writeScaffold('bin/semitexa', $current);
+        $this->writeProject('bin/semitexa', "operator-edited\n");
+        $this->writeProject('bin/semitexa.new', "operator-also-tweaked-the-new-file\n");
+        $this->writeProject('bin/semitexa.new.backup', $current);
+
+        $report = (new ScaffoldSyncEngine())->execute($this->classify($this->binManifest($current), writeCandidates: true), $this->project, $this->scaffold, now: $this->now);
+
+        self::assertMatchesRegularExpression('/^bin\/semitexa\.new\.\d{8}T\d{6}Z$/', (string) $report->resultByPath('bin/semitexa')->newFilePath);
     }
 
     public function testAFailureOfAFileTheUpdateCanDoWithoutStopsNothing(): void
