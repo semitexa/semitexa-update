@@ -139,6 +139,13 @@ final class ScaffoldManifestPolicy
                 'preserve_executable' => false,
                 'notes' => 'Image for the e2e-runner service in docker-compose.test.yml. Its FROM tag and the pinned @playwright/test version move together.',
             ],
+            'playwright.config.ts' => [
+                'category' => ScaffoldFileCategory::Infrastructure,
+                'critical' => false,
+                'auto_update' => true,
+                'preserve_executable' => false,
+                'notes' => 'What the e2e-runner runs: specs under src/modules/*/tests/E2E. Created when missing; a project that edited it keeps its own.',
+            ],
             'docker-compose.override.yml.example' => [
                 'category' => ScaffoldFileCategory::Example,
                 'critical' => false,

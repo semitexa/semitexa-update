@@ -1,6 +1,6 @@
 {
     "schema_version": "semitexa.scaffold-manifest/v1",
-    "generated_at": "2026-11-07T18:26:20+00:00",
+    "generated_at": "2026-11-08T01:09:25+00:00",
     "files": [
         {
             "path": ".claude/skills/make-it/SKILL.md",
@@ -275,8 +275,14 @@
         },
         {
             "path": "bin/semitexa",
-            "current_sha256": "3956b9675bf5e44d63627b27ccc5e7201e524715c125c1c4a0fb8638aaa6d39f",
+            "current_sha256": "efc7012aba553571f35c7af95aa5293063bcb0ff0e622a654852b111eae5c472",
             "previous_sha256": [
+                "ac27d7008d60050c8f56b5f8ad0db29b58ba19aa4b3dda08603394a6f835ac68",
+                "996cbb5ee15bca8cd644e5983430d9508be67575cd0062a80d4aafa5b574ab6b",
+                "cb0fb8d7b51b4311a90c93cdeed225746f31fb3850d1f9ee111e4b763769b4f4",
+                "16e17238f8ba8f0c9a94242b08e541a311d487dd4135d31f197148319fbfd997",
+                "9decbf9353d7990d9d12a08cb302101631363ae98c59a361fa5fef44783f22fb",
+                "3956b9675bf5e44d63627b27ccc5e7201e524715c125c1c4a0fb8638aaa6d39f",
                 "5c602a5c0e4f59709ed19af54210e4509e03dfe017f3ec0d1fc68f311933bd20",
                 "515029d754c5f8a5168df79a04a92914e5b81695f014737f141e4ac16c2087d0",
                 "408900cb781eab656d269d5ee90be42f9a85be4ef5a4a92a67e3cb75914d5398",
@@ -510,6 +516,16 @@
             "auto_update": false,
             "preserve_executable": false,
             "notes": "The project owns this: it adds paths and uncomments its baseline include. An update offers a candidate as .new rather than replacing it."
+        },
+        {
+            "path": "playwright.config.ts",
+            "current_sha256": "1c1390cb7cf9b838cb070ddcdedfeeca7c5d66bd2d093954fa35ead9ce9ac309",
+            "previous_sha256": [],
+            "category": "infrastructure",
+            "critical": false,
+            "auto_update": true,
+            "preserve_executable": false,
+            "notes": "What the e2e-runner runs: specs under src/modules/*/tests/E2E. Created when missing; a project that edited it keeps its own."
         }
     ]
 }
