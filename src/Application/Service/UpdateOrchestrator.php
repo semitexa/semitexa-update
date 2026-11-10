@@ -367,7 +367,7 @@ final class UpdateOrchestrator
     /**
      * Read-only inspection of the current sweep state.
      */
-    public function plan(bool $writeCandidates = false): OrchestratorPlanReport
+    public function plan(bool $writeCandidates = false, bool $skipScaffold = false): OrchestratorPlanReport
     {
         $patchPlan = $this->runner->plan();
         $schemaStatus = $this->migrationGateway->inspect($this->connection);
@@ -376,7 +376,9 @@ final class UpdateOrchestrator
             patchPlan: $patchPlan,
             schemaStatus: $schemaStatus,
             packageDrift: $this->inspectPackageDrift(),
-            scaffoldPlan: $this->planScaffoldSync($writeCandidates),
+            // Not even read under --no-scaffold: a missing or broken manifest
+            // must not stop a run that only touches the database.
+            scaffoldPlan: $skipScaffold ? null : $this->planScaffoldSync($writeCandidates),
             composerPlan: $this->planComposerUpdate(),
             advisories: $this->advisories?->collect() ?? [],
         );

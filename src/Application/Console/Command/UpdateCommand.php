@@ -70,9 +70,10 @@ final class UpdateCommand extends BaseCommand
                 'no-scaffold',
                 null,
                 InputOption::VALUE_NONE,
-                'Skip the scaffold-sync phase: no project file is written. For a run that only seeds '
-                . 'a database, such as the E2E phase\'s own; with --no-composer, only the patch and '
-                . 'ORM stages run.',
+                'Skip the scaffold-sync phase: no scaffold-managed file is written (and the scaffold '
+                . 'manifest is not read). The Composer phase can still rewrite composer.json and '
+                . 'composer.lock: add --no-composer for a database-only run, such as seeding the E2E '
+                . 'phase\'s own database, where only the patch and ORM stages run.',
             )
             ->addOption(
                 'composer-only',
@@ -107,7 +108,7 @@ final class UpdateCommand extends BaseCommand
 
         try {
             $orchestrator = $this->runnerFactory->orchestrator($connection);
-            $planReport = $orchestrator->plan($writeCandidates);
+            $planReport = $orchestrator->plan($writeCandidates, $skipScaffold);
         } catch (UpdateException $e) {
             $io->error($e->getMessage());
             return Command::FAILURE;
