@@ -3223,17 +3223,24 @@ ${_url_clean}/tests"
     # The runner writes test-results as the host user now; a directory an
     # earlier root run left behind would refuse it (EACCES on .last-run.json).
     project_ownership_reclaim || exit 1
-    e2e_runner_preflight "$_compose" "$_overlays" || { [ -z "$_e2e_isolated" ] || docker rm -f "$_e2e_isolated" >/dev/null 2>&1; exit 1; }
+    # On its own app, the runner is checked in that app's network namespace too:
+    # with no developer app running, the plain file set cannot start it at all,
+    # and a check that could not run lets the phase go on (review, installer#79).
+    _e2e_runner_overlays="$_overlays"
+    if [ -n "$_e2e_isolated" ]; then
+        SEMITEXA_E2E_APP_CONTAINER="$_e2e_isolated"
+        export SEMITEXA_E2E_APP_CONTAINER
+        _e2e_runner_overlays="$_overlays -f docker-compose.e2e.yml"
+    fi
+    e2e_runner_preflight "$_compose" "$_e2e_runner_overlays" || exit 1
     _e2e_rc=0
     if [ -n "$_e2e_isolated" ]; then
         (
             env_export_compose_context
             # The runner joins the E2E app's network namespace (docker-compose.e2e.yml);
             # --no-deps: the developer's app is not this run's target.
-            SEMITEXA_E2E_APP_CONTAINER="$_e2e_isolated"
-            export SEMITEXA_E2E_APP_CONTAINER
             # shellcheck disable=SC2086
-            $_compose $_overlays -f docker-compose.e2e.yml run --rm --no-deps e2e-runner npx --no-install playwright test --config=playwright.config.ts $_e2e_spec_args
+            $_compose $_e2e_runner_overlays run --rm --no-deps e2e-runner npx --no-install playwright test --config=playwright.config.ts $_e2e_spec_args
         ) || _e2e_rc=$?
         docker rm -f "$_e2e_isolated" >/dev/null 2>&1 || true
     else
@@ -3830,7 +3837,8 @@ e2e_app_start() {
     # shellcheck disable=SC2046,SC2086
     ( env_export_compose_context; $1 $2 run -d --no-deps --name "$_e2e_container" $(e2e_app_args) app >/dev/null < /dev/null ) \
         || { error "Could not start the E2E app."; return 1; }
-    _e2e_port="${SWOOLE_PORT:-$(env_val SWOOLE_PORT 9502)}"
+    # As Compose resolves it (.env first), the port the app and the runner use (review, update#81).
+    _e2e_port="$(e2e_compose_val SWOOLE_PORT 9502)"
     _e2e_try=0
     while [ "$_e2e_try" -lt 90 ]; do
         docker exec "$_e2e_container" curl -fsS -o /dev/null "http://127.0.0.1:${_e2e_port}/" >/dev/null 2>&1 && { printf '%s' "$_e2e_container"; return 0; }
