@@ -381,6 +381,7 @@ final class UpdateOrchestratorWiringTest extends TestCase
         $stages = $orchestrator->run(dryRun: false, skipComposer: true, skipScaffold: true);
         $names = array_map(static fn (\Semitexa\Update\Domain\Model\OrchestratorStage $s) => $s->name, $stages);
 
+        // verify:accept-test-change four membership checks become one exact sequence, which fails on every case they caught and on a missing or extra stage too (review, update#80)
         // The whole sequence, not members of it (review, update#80): composer is
         // reported skipped, scaffold-sync is absent, every database stage runs.
         self::assertSame(['composer-update', 'pre-patches', 'orm-sync', 'apply-patches', 'post-patches'], $names);
