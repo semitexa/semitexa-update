@@ -67,6 +67,15 @@ final class UpdateCommand extends BaseCommand
                 . 'The default is Composer-first.',
             )
             ->addOption(
+                'no-scaffold',
+                null,
+                InputOption::VALUE_NONE,
+                'Skip the scaffold-sync phase: no scaffold-managed file is written (and the scaffold '
+                . 'manifest is not read). The Composer phase can still rewrite composer.json and '
+                . 'composer.lock: add --no-composer for a database-only run, such as seeding the E2E '
+                . 'phase\'s own database, where only the patch and ORM stages run.',
+            )
+            ->addOption(
                 'composer-only',
                 null,
                 InputOption::VALUE_NONE,
@@ -95,10 +104,11 @@ final class UpdateCommand extends BaseCommand
         $skipComposer = (bool) $input->getOption('no-composer');
         $composerOnly = (bool) $input->getOption('composer-only');
         $allowPartialComposer = (bool) $input->getOption('allow-partial-composer-update');
+        $skipScaffold = (bool) $input->getOption('no-scaffold');
 
         try {
             $orchestrator = $this->runnerFactory->orchestrator($connection);
-            $planReport = $orchestrator->plan($writeCandidates);
+            $planReport = $orchestrator->plan($writeCandidates, $skipScaffold);
         } catch (UpdateException $e) {
             $io->error($e->getMessage());
             return Command::FAILURE;
@@ -114,6 +124,7 @@ final class UpdateCommand extends BaseCommand
                     writeCandidates: $writeCandidates,
                     skipComposer: $skipComposer,
                     composerOnly: $composerOnly,
+                    skipScaffold: $skipScaffold,
                     allowPartialComposer: $allowPartialComposer,
                 );
             } catch (UpdateException $e) {
@@ -142,6 +153,7 @@ final class UpdateCommand extends BaseCommand
                 writeCandidates: $writeCandidates,
                 skipComposer: $skipComposer,
                 composerOnly: $composerOnly,
+                skipScaffold: $skipScaffold,
                 allowPartialComposer: $allowPartialComposer,
             );
         } catch (UpdateException $e) {

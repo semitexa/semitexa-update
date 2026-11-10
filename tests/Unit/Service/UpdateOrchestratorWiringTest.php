@@ -366,6 +366,51 @@ final class UpdateOrchestratorWiringTest extends TestCase
         self::assertContains('pre-patches', $names);
     }
 
+    public function testNoScaffoldFlagLeavesTheProjectFilesAndRunsTheDatabaseStages(): void
+    {
+        // A run that only seeds a database (the E2E phase's own) must write no
+        // project file: without the flag this very run rewrites bin/semitexa.
+        $this->writeProjectFile('bin/semitexa', "#!/bin/sh\necho old\n");
+        $orchestrator = $this->orchestratorWithComposer(
+            available: true,
+            anchor: '2026.05.12.0744',
+            installedBefore: '2026.05.10.1449',
+            installedAfter: '2026.05.10.1449',
+        );
+
+        $stages = $orchestrator->run(dryRun: false, skipComposer: true, skipScaffold: true);
+        $names = array_map(static fn (\Semitexa\Update\Domain\Model\OrchestratorStage $s) => $s->name, $stages);
+
+        // verify:accept-test-change four membership checks become one exact sequence, which fails on every case they caught and on a missing or extra stage too (review, update#80)
+        // The whole sequence, not members of it (review, update#80): composer is
+        // reported skipped, scaffold-sync is absent, every database stage runs.
+        self::assertSame(['composer-update', 'pre-patches', 'orm-sync', 'apply-patches', 'post-patches'], $names);
+        self::assertSame("#!/bin/sh\necho old\n", file_get_contents($this->projectRoot . '/bin/semitexa'), 'the project file is as it was');
+    }
+
+    public function testNoScaffoldDoesNotReadTheManifestEvenToPlan(): void
+    {
+        // Review, update#80: the command plans before it runs, and planning read
+        // the scaffold manifest; a broken one stopped a database-only run there.
+        $orchestrator = $this->orchestratorWithComposer(
+            available: true,
+            anchor: '2026.05.12.0744',
+            installedBefore: '2026.05.10.1449',
+            installedAfter: '2026.05.10.1449',
+        );
+        file_put_contents($this->manifestPath, '{not json');
+
+        self::assertNull($orchestrator->plan(skipScaffold: true)->scaffoldPlan);
+        $names = array_map(
+            static fn (\Semitexa\Update\Domain\Model\OrchestratorStage $s) => $s->name,
+            $orchestrator->run(dryRun: false, skipComposer: true, skipScaffold: true),
+        );
+        self::assertSame(['composer-update', 'pre-patches', 'orm-sync', 'apply-patches', 'post-patches'], $names);
+
+        $this->expectException(\Throwable::class);
+        $orchestrator->plan();
+    }
+
     public function testUnresolvedUpstreamBlocksScaffoldAndDbStagesByDefault(): void
     {
         $this->writeProjectFile('bin/semitexa', "#!/bin/sh\necho old\n");
