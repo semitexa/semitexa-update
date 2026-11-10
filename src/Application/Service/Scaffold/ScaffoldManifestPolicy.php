@@ -132,6 +132,13 @@ final class ScaffoldManifestPolicy
                 'preserve_executable' => false,
                 'notes' => '',
             ],
+            'docker-compose.e2e.yml' => [
+                'category' => ScaffoldFileCategory::Infrastructure,
+                'critical' => false,
+                'auto_update' => true,
+                'preserve_executable' => false,
+                'notes' => 'Points the e2e-runner at the E2E phase\'s own app container (tk-e2e-own-database). Only overrides a service docker-compose.test.yml defines; bin/semitexa test:run adds it to the file set for that run.',
+            ],
             'docker/e2e-runner/Dockerfile' => [
                 'category' => ScaffoldFileCategory::Infrastructure,
                 'critical' => false,

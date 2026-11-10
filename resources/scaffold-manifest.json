@@ -1,6 +1,6 @@
 {
     "schema_version": "semitexa.scaffold-manifest/v1",
-    "generated_at": "2026-11-10T08:07:03+00:00",
+    "generated_at": "2026-11-10T17:30:03+00:00",
     "files": [
         {
             "path": ".claude/skills/make-it/SKILL.md",
@@ -76,8 +76,9 @@
         },
         {
             "path": ".gitignore",
-            "current_sha256": "8b6f1c20a9671b34435ed53ecf28ee9b4caca5fceb5eff1fd2ac3793e25bbdde",
+            "current_sha256": "1dd06079debab19d277b54282fbf02649701cb4a3cfe4b6c840b933965ed9216",
             "previous_sha256": [
+                "8b6f1c20a9671b34435ed53ecf28ee9b4caca5fceb5eff1fd2ac3793e25bbdde",
                 "7a9f8d814e8d998d51b092bf4ed4ffb1f87ccfd6fb3cfde74092817d53b19116",
                 "00f368b72de30bb80e53ce395c1eb7a1788d448460e025a5ecf681e1865ba905",
                 "2a1a6399052acdf6d527c5c762736a327d2c1b81cd6c197c7c2d0a1e2dfc5b8f",
@@ -276,8 +277,9 @@
         },
         {
             "path": "bin/semitexa",
-            "current_sha256": "4867b710c5bf7c88bd88da6a2465f33e91f2ee2d3e9f35e2021ed4be156da576",
+            "current_sha256": "845b97ec94266352dd44335808a606e4545e939d6d8f9e6a60daf819240289fb",
             "previous_sha256": [
+                "4867b710c5bf7c88bd88da6a2465f33e91f2ee2d3e9f35e2021ed4be156da576",
                 "efc7012aba553571f35c7af95aa5293063bcb0ff0e622a654852b111eae5c472",
                 "ac27d7008d60050c8f56b5f8ad0db29b58ba19aa4b3dda08603394a6f835ac68",
                 "996cbb5ee15bca8cd644e5983430d9508be67575cd0062a80d4aafa5b574ab6b",
@@ -363,6 +365,16 @@
             "auto_update": true,
             "preserve_executable": true,
             "notes": "Project CLI entry point. Auto-replace only when the project file matches a recorded prior hash; preserve +x; backup before replace."
+        },
+        {
+            "path": "docker-compose.e2e.yml",
+            "current_sha256": "3a3e8a858f9e35140ac4b1f242cdb0789508bdece306dfbb155e4efd593f4af0",
+            "previous_sha256": [],
+            "category": "infrastructure",
+            "critical": false,
+            "auto_update": true,
+            "preserve_executable": false,
+            "notes": "Points the e2e-runner at the E2E phase's own app container (tk-e2e-own-database). Only overrides a service docker-compose.test.yml defines; bin/semitexa test:run adds it to the file set for that run."
         },
         {
             "path": "docker-compose.mysql.yml",

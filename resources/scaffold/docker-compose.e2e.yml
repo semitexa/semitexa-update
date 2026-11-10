@@ -1,0 +1,11 @@
+# The E2E phase of `bin/semitexa test:run` runs on an app of its own: a second
+# container of the app service, started by test:run with its own database
+# (DB_E2E_DATABASE, default semitexa_e2e), var/, cache namespace and NATS
+# namespace, so a run's specs never write into the database you work in.
+#
+# This file only points the runner at that container's network namespace;
+# test:run adds it to the file set for that run and exports the name. Do NOT
+# start anything from it by hand.
+services:
+  e2e-runner:
+    network_mode: "container:${SEMITEXA_E2E_APP_CONTAINER:-semitexa-e2e-app-not-started}"
