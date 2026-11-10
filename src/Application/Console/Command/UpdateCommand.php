@@ -67,6 +67,14 @@ final class UpdateCommand extends BaseCommand
                 . 'The default is Composer-first.',
             )
             ->addOption(
+                'no-scaffold',
+                null,
+                InputOption::VALUE_NONE,
+                'Skip the scaffold-sync phase: no project file is written. For a run that only seeds '
+                . 'a database, such as the E2E phase\'s own; with --no-composer, only the patch and '
+                . 'ORM stages run.',
+            )
+            ->addOption(
                 'composer-only',
                 null,
                 InputOption::VALUE_NONE,
@@ -95,6 +103,7 @@ final class UpdateCommand extends BaseCommand
         $skipComposer = (bool) $input->getOption('no-composer');
         $composerOnly = (bool) $input->getOption('composer-only');
         $allowPartialComposer = (bool) $input->getOption('allow-partial-composer-update');
+        $skipScaffold = (bool) $input->getOption('no-scaffold');
 
         try {
             $orchestrator = $this->runnerFactory->orchestrator($connection);
@@ -114,6 +123,7 @@ final class UpdateCommand extends BaseCommand
                     writeCandidates: $writeCandidates,
                     skipComposer: $skipComposer,
                     composerOnly: $composerOnly,
+                    skipScaffold: $skipScaffold,
                     allowPartialComposer: $allowPartialComposer,
                 );
             } catch (UpdateException $e) {
@@ -142,6 +152,7 @@ final class UpdateCommand extends BaseCommand
                 writeCandidates: $writeCandidates,
                 skipComposer: $skipComposer,
                 composerOnly: $composerOnly,
+                skipScaffold: $skipScaffold,
                 allowPartialComposer: $allowPartialComposer,
             );
         } catch (UpdateException $e) {

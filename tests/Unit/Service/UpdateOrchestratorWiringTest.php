@@ -366,6 +366,28 @@ final class UpdateOrchestratorWiringTest extends TestCase
         self::assertContains('pre-patches', $names);
     }
 
+    public function testNoScaffoldFlagLeavesTheProjectFilesAndRunsTheDatabaseStages(): void
+    {
+        // A run that only seeds a database (the E2E phase's own) must write no
+        // project file: without the flag this very run rewrites bin/semitexa.
+        $this->writeProjectFile('bin/semitexa', "#!/bin/sh\necho old\n");
+        $orchestrator = $this->orchestratorWithComposer(
+            available: true,
+            anchor: '2026.05.12.0744',
+            installedBefore: '2026.05.10.1449',
+            installedAfter: '2026.05.10.1449',
+        );
+
+        $stages = $orchestrator->run(dryRun: false, skipComposer: true, skipScaffold: true);
+        $names = array_map(static fn (\Semitexa\Update\Domain\Model\OrchestratorStage $s) => $s->name, $stages);
+
+        self::assertNotContains('scaffold-sync', $names);
+        self::assertContains('pre-patches', $names);
+        self::assertContains('orm-sync', $names);
+        self::assertContains('apply-patches', $names);
+        self::assertSame("#!/bin/sh\necho old\n", file_get_contents($this->projectRoot . '/bin/semitexa'), 'the project file is as it was');
+    }
+
     public function testUnresolvedUpstreamBlocksScaffoldAndDbStagesByDefault(): void
     {
         $this->writeProjectFile('bin/semitexa', "#!/bin/sh\necho old\n");

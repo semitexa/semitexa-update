@@ -92,6 +92,7 @@ final class UpdateOrchestrator
         bool $skipComposer = false,
         bool $composerOnly = false,
         bool $allowPartialComposer = false,
+        bool $skipScaffold = false,
     ): array {
         $lock = $dryRun ? null : $this->lock;
         if ($lock !== null && !$lock->acquire($this->actor ?? 'update')) {
@@ -110,6 +111,7 @@ final class UpdateOrchestrator
                 $skipComposer,
                 $composerOnly,
                 $allowPartialComposer,
+                $skipScaffold,
             );
         } finally {
             $lock?->release();
@@ -126,6 +128,7 @@ final class UpdateOrchestrator
         bool $skipComposer,
         bool $composerOnly,
         bool $allowPartialComposer,
+        bool $skipScaffold,
     ): array {
         $journal = $dryRun ? null : $this->runJournal;
         $runId = null;
@@ -146,6 +149,7 @@ final class UpdateOrchestrator
                 $skipComposer,
                 $composerOnly,
                 $allowPartialComposer,
+                $skipScaffold,
             );
         } catch (\Throwable $e) {
             if ($journal !== null && $runId !== null) {
@@ -261,6 +265,7 @@ final class UpdateOrchestrator
         bool $skipComposer,
         bool $composerOnly,
         bool $allowPartialComposer,
+        bool $skipScaffold,
     ): array {
         $stages = [];
 
@@ -301,7 +306,10 @@ final class UpdateOrchestrator
             }
         }
 
-        $scaffoldReport = $this->runScaffoldSync($dryRun, $writeCandidates);
+        // --no-scaffold: the database stages alone, for a run that must not
+        // touch the project's files — seeding a second database (the E2E
+        // phase's) from the same checkout the developer works in.
+        $scaffoldReport = $skipScaffold ? null : $this->runScaffoldSync($dryRun, $writeCandidates);
         if ($scaffoldReport !== null) {
             $stages[] = new OrchestratorStage('scaffold-sync', null, null, $scaffoldReport);
             if (!$scaffoldReport->isSuccess()) {
