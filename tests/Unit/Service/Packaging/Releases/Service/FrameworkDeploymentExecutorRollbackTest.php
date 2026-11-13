@@ -277,6 +277,64 @@ final class FrameworkDeploymentExecutorRollbackTest extends TestCase
     }
 
     /**
+     * Production froze on 2026-11-13: core refuses a reload when a file the
+     * master loaded changed, which every deploy that updates core does, and the
+     * deploy's cache:clear reloaded. It clears the disk only now; the restart
+     * puts the new code in.
+     */
+    public function testTheDeployClearsTheDiskCacheWithoutReloadingBeforeItsRestart(): void
+    {
+        $ran = [];
+        $executor = new FrameworkDeploymentExecutor(
+            new DeploymentLogWriter(),
+            null,
+            new UpdateLock($this->projectRoot),
+            static function (string $command, string $projectRoot) use (&$ran): void {
+                $ran[] = $command;
+                if (str_contains($command, ' update ')) {
+                    file_put_contents($projectRoot . '/composer.lock', '{"packages":[{"name":"semitexa/core","version":"2.0.0"}]}');
+                }
+                if (str_contains($command, 'cache:clear') && !str_contains($command, '--no-reload')) {
+                    throw new \RuntimeException('There is no readable record of the PHP files the master process loaded');
+                }
+            },
+        );
+
+        $result = $executor->execute($this->projectRoot, $this->plan(restartCommand: 'restart-the-stack'));
+
+        self::assertSame('updated', $result['status'], (string) ($result['reason'] ?? ''));
+        $clears = array_values(array_filter($ran, static fn (string $c): bool => str_contains($c, 'cache:clear')));
+        self::assertCount(1, $clears);
+        self::assertStringEndsWith(' --no-reload', $clears[0]);
+        self::assertSame([], array_values(array_filter($ran, static fn (string $c): bool => str_contains($c, 'server:reload'))), 'the restart replaces the reload');
+    }
+
+    /** Inside the app container a refused reload leaves the restart owed, not the deploy failed. */
+    public function testWithoutARestartARefusedReloadOwesTheRestart(): void
+    {
+        $executor = new FrameworkDeploymentExecutor(
+            new DeploymentLogWriter(),
+            null,
+            new UpdateLock($this->projectRoot),
+            static function (string $command, string $projectRoot): void {
+                if (str_contains($command, ' update ')) {
+                    file_put_contents($projectRoot . '/composer.lock', '{"packages":[{"name":"semitexa/core","version":"2.0.0"}]}');
+                }
+                if (str_contains($command, 'server:reload')) {
+                    throw new \RuntimeException("1 PHP file(s) the server's master process loaded changed\nRun server:restart app.");
+                }
+            },
+        );
+
+        $result = $executor->execute($this->projectRoot, $this->plan());
+
+        self::assertSame('updated', $result['status'], (string) ($result['reason'] ?? ''));
+        self::assertTrue($result['restart_required']);
+        self::assertStringContainsString('were not reloaded either', (string) $result['restart_status']);
+        self::assertStringContainsString("master process loaded changed", (string) $result['restart_status']);
+    }
+
+    /**
      * A rollback whose composer install failed leaves vendor/ half-written:
      * restarting onto it took the site from the old code still in memory to
      * none. It owes no restart; the operator steps in.
