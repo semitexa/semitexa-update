@@ -152,11 +152,30 @@ final class FrameworkDeploymentExecutor
             }
 
             $this->run($this->projectCliCommand($projectRoot, 'orm:sync'), $projectRoot);
-            $this->run($this->projectCliCommand($projectRoot, 'cache:clear'), $projectRoot);
+            // Disk only: core's cache:clear also reloads the workers, and core
+            // refuses a reload (exit 1) when the master's loaded-files record is
+            // missing or a file it lists changed, which is every deploy that
+            // updates core. That refusal failed the whole deploy before the
+            // restart that fixes it, on every tick, freezing production on its
+            // version (2026-11-13). The restart puts the new code in.
+            $this->run($this->projectCliCommand($projectRoot, 'cache:clear') . ' --no-reload', $projectRoot);
 
             $restartStatus = $this->restartRuntime($projectRoot, $plan->config->restartCommand);
             $result['restart_required'] = !$restartStatus['performed'];
             $result['restart_status'] = $restartStatus['message'];
+            if (!$restartStatus['performed']) {
+                // Nothing restarts inside the app container: reload the workers so
+                // the health check below asks the new code. A refused reload is not
+                // a failed deploy; the restart it needs is owed, and said so.
+                try {
+                    $this->run($this->projectCliCommand($projectRoot, 'server:reload'), $projectRoot);
+                } catch (\Throwable $e) {
+                    // The whole diagnostic: run() puts "Command failed: ..." first and the
+                    // refusal reason after it (review, update#91). On one line, bounded.
+                    $why = mb_substr(trim((string) preg_replace('/\s+/', ' ', $e->getMessage())), 0, 600);
+                    $result['restart_status'] .= ' The workers were not reloaded either (' . $why . '): they run the old code until the restart.';
+                }
+            }
 
             // Mandatory when configured: a deploy that cannot prove the app
             // answers is a failed deploy, restart or not. Without a restart
