@@ -321,7 +321,8 @@ final class FrameworkDeploymentExecutorRollbackTest extends TestCase
                     file_put_contents($projectRoot . '/composer.lock', '{"packages":[{"name":"semitexa/core","version":"2.0.0"}]}');
                 }
                 if (str_contains($command, 'server:reload')) {
-                    throw new \RuntimeException("1 PHP file(s) the server's master process loaded changed\nRun server:restart app.");
+                    // As run() throws it: the command first, the refusal after it.
+                    throw new \RuntimeException("Command failed: {$command}\n [ERROR] 1 PHP file(s) the server's master process loaded changed\n Run server:restart app.");
                 }
             },
         );

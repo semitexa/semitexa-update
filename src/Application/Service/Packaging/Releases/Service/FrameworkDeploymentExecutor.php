@@ -170,7 +170,10 @@ final class FrameworkDeploymentExecutor
                 try {
                     $this->run($this->projectCliCommand($projectRoot, 'server:reload'), $projectRoot);
                 } catch (\Throwable $e) {
-                    $result['restart_status'] .= ' The workers were not reloaded either (' . strtok($e->getMessage(), "\n") . '): they run the old code until the restart.';
+                    // The whole diagnostic: run() puts "Command failed: ..." first and the
+                    // refusal reason after it (review, update#91). On one line, bounded.
+                    $why = mb_substr(trim((string) preg_replace('/\s+/', ' ', $e->getMessage())), 0, 600);
+                    $result['restart_status'] .= ' The workers were not reloaded either (' . $why . '): they run the old code until the restart.';
                 }
             }
 
