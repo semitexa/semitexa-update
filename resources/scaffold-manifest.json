@@ -1,6 +1,6 @@
 {
     "schema_version": "semitexa.scaffold-manifest/v1",
-    "generated_at": "2026-11-13T17:46:56+00:00",
+    "generated_at": "2026-11-13T17:51:01+00:00",
     "files": [
         {
             "path": ".claude/skills/make-it/SKILL.md",
@@ -284,8 +284,9 @@
         },
         {
             "path": "bin/semitexa",
-            "current_sha256": "8b8c2d9c9925a13791ea77a6f02ffa0defb68530f63b1e3524dcd7d2164d7c64",
+            "current_sha256": "6c8eac06b37559197ff24b7515d00410878c597eed50d3bf50ecd40a1631de27",
             "previous_sha256": [
+                "8b8c2d9c9925a13791ea77a6f02ffa0defb68530f63b1e3524dcd7d2164d7c64",
                 "d44939d0a8bb045aab96e493dffd98891c244c279df61201c075c498647c6170",
                 "c0f3dcb0024af6eb2acac8cbd598866fd62af0c0d28bcde73f8c9d5adf16f64c",
                 "12f7a2130696353b29259bdb53c8b04cfd921945b25be567da07df55f2b78531",
