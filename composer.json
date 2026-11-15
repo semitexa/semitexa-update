@@ -12,7 +12,7 @@
     "require": {
         "php": "^8.4",
         "semitexa/core": ">=2026.10.31.0849 || dev-master",
-        "semitexa/orm": ">=2026.09.28.1812 || dev-master",
+        "semitexa/orm": ">=2026.11.14.1040 || dev-master",
         "symfony/console": "^6.0 || ^7.0"
     },
     "autoload": {
@@ -31,7 +31,7 @@
         },
         "semitexa": {
             "floors": {
-                "semitexa/orm": "2026.09.28.1812",
+                "semitexa/orm": "2026.11.14.1040",
                 "semitexa/core": "2026.10.31.0849"
             }
         }

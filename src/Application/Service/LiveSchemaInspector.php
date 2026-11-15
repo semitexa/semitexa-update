@@ -5,8 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Update\Application\Service;
 
 use Semitexa\Orm\Adapter\DatabaseAdapterInterface;
-use Semitexa\Orm\Adapter\MysqlAdapter;
-use Semitexa\Orm\Adapter\SqliteAdapter;
+use Semitexa\Orm\Adapter\DialectResolver;
 use Semitexa\Update\Exception\UpdateException;
 
 /**
@@ -55,7 +54,7 @@ final class LiveSchemaInspector
      */
     private function loadTableSet(): array
     {
-        if ($this->adapter instanceof SqliteAdapter) {
+        if ($this->dialect() === 'sqlite') {
             $rows = $this->adapter->query(
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             )->fetchAll();
@@ -69,7 +68,7 @@ final class LiveSchemaInspector
             return $set;
         }
 
-        if ($this->adapter instanceof MysqlAdapter) {
+        if ($this->dialect() === 'mysql') {
             $rows = $this->adapter->query(
                 'SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE()'
             )->fetchAll();
@@ -84,8 +83,8 @@ final class LiveSchemaInspector
         }
 
         throw new UpdateException(sprintf(
-            'Unsupported database adapter: %s. LiveSchemaInspector supports MySQL and SQLite.',
-            $this->adapter::class,
+            'Unsupported database dialect: %s. LiveSchemaInspector supports MySQL and SQLite.',
+            $this->dialect(),
         ));
     }
 
@@ -94,7 +93,7 @@ final class LiveSchemaInspector
      */
     private function loadColumnSet(string $table): array
     {
-        if ($this->adapter instanceof SqliteAdapter) {
+        if ($this->dialect() === 'sqlite') {
             $rows = $this->adapter->query(
                 sprintf("SELECT name FROM pragma_table_info(%s)", $this->quoteSqliteString($table))
             )->fetchAll();
@@ -108,7 +107,7 @@ final class LiveSchemaInspector
             return $set;
         }
 
-        if ($this->adapter instanceof MysqlAdapter) {
+        if ($this->dialect() === 'mysql') {
             $rows = $this->adapter->execute(
                 'SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS '
                 . 'WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table',
@@ -125,9 +124,19 @@ final class LiveSchemaInspector
         }
 
         throw new UpdateException(sprintf(
-            'Unsupported database adapter: %s. LiveSchemaInspector supports MySQL and SQLite.',
-            $this->adapter::class,
+            'Unsupported database dialect: %s. LiveSchemaInspector supports MySQL and SQLite.',
+            $this->dialect(),
         ));
+    }
+
+    /**
+     * The dialect the adapter answers, not its class: a TransactionAwareAdapter or a
+     * transaction's single connection is neither MysqlAdapter nor SqliteAdapter, and was
+     * refused (tk-orm-dialect-layer step 8; found reading the prompt override table).
+     */
+    private function dialect(): string
+    {
+        return DialectResolver::for($this->adapter)->name();
     }
 
     private function quoteSqliteString(string $value): string
