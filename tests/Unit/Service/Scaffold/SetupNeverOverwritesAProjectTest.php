@@ -45,6 +45,9 @@ final class SetupNeverOverwritesAProjectTest extends TestCase
             exit 0
             SH);
         chmod($this->tmp . '/bin/composer', 0755);
+        // Ownership cannot change without root: the stub records what setup hands back.
+        file_put_contents($this->tmp . '/bin/chown', "#!/bin/sh\nprintf '%s\\n' \"\$*\" >> \"\$CHOWN_STUB_LOG\"\n");
+        chmod($this->tmp . '/bin/chown', 0755);
     }
 
     protected function tearDown(): void
@@ -91,6 +94,36 @@ final class SetupNeverOverwritesAProjectTest extends TestCase
         self::assertStringContainsString('composer install failed', $out);
         self::assertFileDoesNotExist($this->target() . '/vendor/autoload.php', 'the next start installs again');
         $this->assertTheProjectIsUntouched();
+    }
+
+    #[Test]
+    public function a_skeleton_copy_cut_off_midway_is_done_again(): void
+    {
+        // What an interrupted first install leaves: the skeleton's composer.json, no marker.
+        file_put_contents($this->target() . '/composer.json', '{"name": "semitexa/ultimate"}' . "\n");
+        mkdir($this->target() . '/var/install', 0777, true);
+        touch($this->target() . '/var/install/bootstrap-copying');
+
+        [$exit, $out] = $this->runSetup();
+
+        self::assertSame(0, $exit, $out);
+        self::assertStringStartsWith('create-project semitexa/ultimate ', $this->composerCalls()[0] ?? '', 'the bootstrap runs again');
+        self::assertFileExists($this->target() . '/README.md', 'the rest of the skeleton is there now');
+        self::assertFileExists($this->target() . '/var/install/bootstrap-complete.json');
+        self::assertFileDoesNotExist($this->target() . '/var/install/bootstrap-copying');
+    }
+
+    #[Test]
+    public function the_runtime_directories_a_run_makes_go_to_the_directory_owner(): void
+    {
+        $this->project(withMarker: true, withVendor: true);
+        $owner = fileowner($this->target()) . ':' . filegroup($this->target());
+
+        [$exit, $out] = $this->runSetup();
+
+        self::assertSame(0, $exit, $out);
+        self::assertContains('-R ' . $owner . ' ' . $this->target() . '/var/log', $this->chownCalls(), 'the first log line made var/log, as root');
+        self::assertNotContains('-R ' . $owner . ' ' . $this->target() . '/var', $this->chownCalls(), 'var/ was there before');
     }
 
     #[Test]
@@ -149,6 +182,7 @@ final class SetupNeverOverwritesAProjectTest extends TestCase
 
         $command = 'PATH=' . escapeshellarg($this->tmp . '/bin:' . getenv('PATH'))
             . ' COMPOSER_STUB_LOG=' . escapeshellarg($this->tmp . '/composer.log')
+            . ' CHOWN_STUB_LOG=' . escapeshellarg($this->tmp . '/chown.log')
             . ' SEMITEXA_GIT_INIT=0';
         foreach ($env as $name => $value) {
             $command .= ' ' . $name . '=' . escapeshellarg($value);
@@ -163,6 +197,21 @@ final class SetupNeverOverwritesAProjectTest extends TestCase
     private function composerCalls(): array
     {
         $log = $this->tmp . '/composer.log';
+        if (!is_file($log)) {
+            return [];
+        }
+        $lines = file($log, FILE_IGNORE_NEW_LINES);
+        if ($lines === false) {
+            self::fail('cannot read ' . $log);
+        }
+
+        return $lines;
+    }
+
+    /** @return list<string> */
+    private function chownCalls(): array
+    {
+        $log = $this->tmp . '/chown.log';
         if (!is_file($log)) {
             return [];
         }
