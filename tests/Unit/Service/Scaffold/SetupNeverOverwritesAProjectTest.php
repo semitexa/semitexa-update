@@ -36,7 +36,9 @@ final class SetupNeverOverwritesAProjectTest extends TestCase
             case "$1" in
               install)
                 for a in "$@"; do case "$a" in --working-dir=*) dir="${a#--working-dir=}" ;; esac; done
-                mkdir -p "$dir/vendor" && echo '<?php' > "$dir/vendor/autoload.php" ;;
+                mkdir -p "$dir/vendor" && echo '<?php' > "$dir/vendor/autoload.php"
+                # A script hook that fails after the autoloader was written.
+                [ "${COMPOSER_STUB_FAIL_INSTALL:-}" != 1 ] || exit 1 ;;
               create-project)
                 mkdir -p "$3" && echo '{"name": "semitexa/ultimate"}' > "$3/composer.json" && echo 'the skeleton' > "$3/README.md" ;;
             esac
@@ -79,6 +81,19 @@ final class SetupNeverOverwritesAProjectTest extends TestCase
     }
 
     #[Test]
+    public function an_install_that_fails_leaves_no_autoloader_to_read_as_done(): void
+    {
+        $this->project(withMarker: true, withVendor: false);
+
+        [$exit, $out] = $this->runSetup(['COMPOSER_STUB_FAIL_INSTALL' => '1']);
+
+        self::assertSame(2, $exit, $out);
+        self::assertStringContainsString('composer install failed', $out);
+        self::assertFileDoesNotExist($this->target() . '/vendor/autoload.php', 'the next start installs again');
+        $this->assertTheProjectIsUntouched();
+    }
+
+    #[Test]
     public function an_empty_directory_gets_the_skeleton(): void
     {
         [$exit, $out] = $this->runSetup();
@@ -112,8 +127,11 @@ final class SetupNeverOverwritesAProjectTest extends TestCase
         self::assertSame("Guard\n", file_get_contents($this->target() . '/README.md'));
     }
 
-    /** @return array{int, string} */
-    private function runSetup(): array
+    /**
+     * @param array<string, string> $env
+     * @return array{int, string}
+     */
+    private function runSetup(array $env = []): array
     {
         $compose = (string) file_get_contents(dirname(__DIR__, 4) . '/resources/scaffold/docker-compose.yml');
         self::assertSame(
@@ -131,7 +149,11 @@ final class SetupNeverOverwritesAProjectTest extends TestCase
 
         $command = 'PATH=' . escapeshellarg($this->tmp . '/bin:' . getenv('PATH'))
             . ' COMPOSER_STUB_LOG=' . escapeshellarg($this->tmp . '/composer.log')
-            . ' SEMITEXA_GIT_INIT=0 sh -eu ' . escapeshellarg($this->tmp . '/setup.sh') . ' 2>&1';
+            . ' SEMITEXA_GIT_INIT=0';
+        foreach ($env as $name => $value) {
+            $command .= ' ' . $name . '=' . escapeshellarg($value);
+        }
+        $command .= ' sh -eu ' . escapeshellarg($this->tmp . '/setup.sh') . ' 2>&1';
         exec($command, $lines, $exit);
 
         return [$exit, implode("\n", $lines)];

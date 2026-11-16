@@ -168,12 +168,22 @@ services:
             log "install this project's own dependencies (composer.json, no vendor/)"
             had_lock=0
             [ -f "$$TARGET_DIR/composer.lock" ] && had_lock=1
-            composer install --working-dir="$$TARGET_DIR" \
-              --no-interaction --prefer-dist --optimize-autoloader \
-              || fail "composer install failed"
             owner="$$(stat -c '%u:%g' "$$TARGET_DIR")"
-            chown -R "$$owner" "$$TARGET_DIR/vendor" 2>/dev/null || true
-            [ "$$had_lock" = 1 ] || chown "$$owner" "$$TARGET_DIR/composer.lock" 2>/dev/null || true
+            # What the install wrote as root goes to the directory's owner,
+            # a failed install included: a root-owned lock outlives the retry.
+            hand_back() {
+              chown -R "$$owner" "$$TARGET_DIR/vendor" 2>/dev/null || true
+              [ "$$had_lock" = 1 ] || chown "$$owner" "$$TARGET_DIR/composer.lock" 2>/dev/null || true
+            }
+            if ! composer install --working-dir="$$TARGET_DIR" \
+              --no-interaction --prefer-dist --optimize-autoloader; then
+              # Composer writes the autoloader before the scripts that can fail
+              # it: left behind, the next start would read the install as done.
+              rm -f "$$TARGET_DIR/vendor/autoload.php"
+              hand_back
+              fail "composer install failed"
+            fi
+            hand_back
           fi
           [ -f "$$MARKER_PATH" ] || write_marker
           exit 0
