@@ -127,6 +127,19 @@ final class SetupNeverOverwritesAProjectTest extends TestCase
     }
 
     #[Test]
+    public function the_runtime_directories_go_back_even_when_the_install_fails(): void
+    {
+        $this->project(withMarker: false, withVendor: false);
+        $owner = fileowner($this->target()) . ':' . filegroup($this->target());
+
+        [$exit, $out] = $this->runSetup(['COMPOSER_STUB_FAIL_INSTALL' => '1']);
+
+        self::assertSame(2, $exit, $out);
+        // On the next start var/ is no longer new: handed back now, or never.
+        self::assertContains('-R ' . $owner . ' ' . $this->target() . '/var', $this->chownCalls());
+    }
+
+    #[Test]
     public function an_empty_directory_gets_the_skeleton(): void
     {
         [$exit, $out] = $this->runSetup();
