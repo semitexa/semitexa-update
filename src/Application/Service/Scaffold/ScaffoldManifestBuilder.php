@@ -65,6 +65,12 @@ final class ScaffoldManifestBuilder
             $policy = $defaults[$relativePath];
 
             $previous = $this->mergePreviousHashes($prior, $relativePath, $currentHash);
+            // A retired path shipped again: the versions it shipped with before
+            // stay known, so an untouched old copy is replaced, not reported as
+            // edited (review, update#116).
+            if ($prior !== null && isset($prior->retired[$relativePath])) {
+                $previous = array_values(array_unique([...$previous, ...array_diff($prior->retired[$relativePath], [$currentHash])]));
+            }
 
             $entries[$relativePath] = new ScaffoldFileEntry(
                 path: $relativePath,

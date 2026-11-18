@@ -268,7 +268,12 @@ final class ScaffoldSyncEngine
         if (!is_link($file) && !file_exists($file)) {
             return $this->retiredResult($entry, ScaffoldSyncOutcome::NoOp, 'Already gone.');
         }
-        if (is_link($file) || !is_file($file) || $this->hasher->hashFile($file) !== $entry->oldHash) {
+        // The plan's check again, the whole path and not only its last part: a
+        // directory on the way that became a link since leads somewhere else
+        // (review, update#116).
+        $root = realpath($projectRoot);
+        if ($root === false || realpath($file) !== $root . '/' . $entry->path
+            || is_link($file) || !is_file($file) || $this->hasher->hashFile($file) !== $entry->oldHash) {
             return $this->retiredResult(
                 $entry,
                 ScaffoldSyncOutcome::ManualReview,

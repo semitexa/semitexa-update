@@ -175,6 +175,27 @@ final class UpdateRemovesRetiredScaffoldFilesTest extends TestCase
     }
 
     #[Test]
+    public function a_directory_that_became_a_link_after_the_plan_is_not_followed(): void
+    {
+        $retired = ['tools/stack-smoke.sh' => [hash('sha256', self::V1)]];
+        $this->writeProject('tools/stack-smoke.sh', self::V1);
+        $plan = $this->plan($retired);
+        self::assertNotNull($plan->entryByPath('tools/stack-smoke.sh'));
+        // Between the plan and the removal, tools/ becomes a link to another checkout holding the same bytes.
+        mkdir($this->base . '/other-checkout', 0777, true);
+        file_put_contents($this->base . '/other-checkout/stack-smoke.sh', self::V1);
+        unlink($this->project . '/tools/stack-smoke.sh');
+        rmdir($this->project . '/tools');
+        symlink($this->base . '/other-checkout', $this->project . '/tools');
+
+        $result = (new ScaffoldSyncEngine())->execute($plan, $this->project, $this->scaffold)->resultByPath('tools/stack-smoke.sh');
+
+        self::assertNotNull($result);
+        self::assertSame(ScaffoldSyncOutcome::ManualReview, $result->outcome);
+        self::assertSame(self::V1, file_get_contents($this->base . '/other-checkout/stack-smoke.sh'), 'the other checkout keeps its file');
+    }
+
+    #[Test]
     public function a_file_changed_after_the_plan_is_kept(): void
     {
         $this->writeProject('install.sh', self::V1);
@@ -270,6 +291,9 @@ final class UpdateRemovesRetiredScaffoldFilesTest extends TestCase
         $built = (new ScaffoldManifestBuilder())->buildFromFiles(['bin/semitexa' => $this->base . '/semitexa'], $prior);
 
         self::assertSame(['install.sh' => [$hash]], $built->retired);
+        $shippedAgain = $built->entryByPath('bin/semitexa');
+        self::assertNotNull($shippedAgain);
+        self::assertSame([$hash], $shippedAgain->previousSha256, 'the versions it shipped with before stay known (review, update#116)');
         self::assertSame([['path' => 'install.sh', 'shipped_sha256' => [$hash]]], $built->toArray()['retired']);
     }
 
