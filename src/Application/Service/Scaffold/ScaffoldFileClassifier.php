@@ -22,6 +22,15 @@ use Semitexa\Update\Domain\Model\Scaffold\ScaffoldSyncPlanEntry;
  */
 final class ScaffoldFileClassifier
 {
+    /**
+     * Beside the project in the framework's own workspace and in the release
+     * clone. There the retired paths are the framework's sources, not copies.
+     * A bare clone of semitexa-ultimate has no such marker (its .gitattributes
+     * ships in the archive too): an update run there would remove its own CI
+     * and tools, recoverable from git. Nothing runs one there today.
+     */
+    private const FRAMEWORK_CHECKOUT_MARKER = 'packages/semitexa-ultimate';
+
     public function __construct(
         private readonly ScaffoldHasher $hasher = new ScaffoldHasher(),
     ) {
@@ -41,8 +50,62 @@ final class ScaffoldFileClassifier
         foreach ($manifest->entries as $manifestEntry) {
             $entries[] = $this->classify($projectRoot, $manifestEntry, $now, $writeCandidates);
         }
+        foreach ($this->classifyRetired($projectRoot, $manifest) as $retiredEntry) {
+            $entries[] = $retiredEntry;
+        }
 
         return new ScaffoldSyncPlan($entries, $integrityErrors);
+    }
+
+    /**
+     * Files semitexa/ultimate shipped once and no longer does. A copy that is
+     * byte for byte one of its versions is the framework's and goes; any other
+     * is the project's and stays, with a note. A path the project lacks gives
+     * no entry. Only a regular file reached without a link is read: a link at
+     * the path or anywhere on the way to it is the project's own doing.
+     *
+     * @return list<ScaffoldSyncPlanEntry>
+     */
+    private function classifyRetired(string $projectRoot, ScaffoldManifest $manifest): array
+    {
+        if ($manifest->retired === [] || is_dir($projectRoot . '/' . self::FRAMEWORK_CHECKOUT_MARKER)) {
+            return [];
+        }
+        $root = realpath($projectRoot);
+        if ($root === false) {
+            return [];
+        }
+
+        $entries = [];
+        foreach ($manifest->retired as $path => $shipped) {
+            $file = $projectRoot . '/' . $path;
+            if (is_link($file) || !is_file($file)) {
+                continue;
+            }
+            // The resolved path is the path itself: no link on the way, inside
+            // the project or out of it.
+            if (realpath($file) !== $root . '/' . $path) {
+                continue;
+            }
+            $hash = $this->hasher->hashFile($file);
+            $theFrameworks = in_array($hash, $shipped, true);
+            $entries[] = new ScaffoldSyncPlanEntry(
+                path: $path,
+                status: ScaffoldSyncStatus::Retired,
+                action: $theFrameworks ? ScaffoldSyncAction::Remove : ScaffoldSyncAction::ManualReview,
+                oldHash: $hash,
+                newHash: null,
+                backupPath: null,
+                newFilePath: null,
+                preserveExecutable: false,
+                critical: false,
+                reason: $theFrameworks
+                    ? 'semitexa/ultimate no longer ships it, and this copy is one of its versions: it will be removed.'
+                    : 'Kept: semitexa/ultimate no longer ships it, and this copy differs from every version it shipped, so it is the project\'s. Delete it if nothing uses it.',
+            );
+        }
+
+        return $entries;
     }
 
     /**

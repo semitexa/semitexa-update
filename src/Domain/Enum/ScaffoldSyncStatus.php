@@ -15,4 +15,9 @@ enum ScaffoldSyncStatus: string
     case KnownPrevious = 'known_previous';
     case LocallyModified = 'locally_modified';
     case Missing = 'missing';
+    /**
+     * semitexa/ultimate shipped this path once and no longer does (the
+     * manifest's retired list), and the project still has it.
+     */
+    case Retired = 'retired';
 }

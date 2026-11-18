@@ -65,6 +65,12 @@ final class ScaffoldManifestBuilder
             $policy = $defaults[$relativePath];
 
             $previous = $this->mergePreviousHashes($prior, $relativePath, $currentHash);
+            // A retired path shipped again: the versions it shipped with before
+            // stay known, so an untouched old copy is replaced, not reported as
+            // edited (review, update#116).
+            if ($prior !== null && isset($prior->retired[$relativePath])) {
+                $previous = array_values(array_unique([...$previous, ...array_diff($prior->retired[$relativePath], [$currentHash])]));
+            }
 
             $entries[$relativePath] = new ScaffoldFileEntry(
                 path: $relativePath,
@@ -79,10 +85,15 @@ final class ScaffoldManifestBuilder
         }
         ksort($entries);
 
+        // Carried over as it is: the versions a retired path shipped with do not
+        // change. A path the scaffold ships again is managed again, not retired.
+        $retired = array_diff_key($prior->retired ?? [], $entries);
+
         return new ScaffoldManifest(
             schemaVersion: ScaffoldManifest::SCHEMA_VERSION,
             generatedAt: $generatedAt ?? (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))->format(\DateTimeInterface::ATOM),
             entries: $entries,
+            retired: $retired,
         );
     }
 

@@ -20,7 +20,7 @@ final readonly class ScaffoldSyncResult
         public ScaffoldSyncAction $action,
         public ScaffoldSyncOutcome $outcome,
         public ?string $oldHash,
-        public string $newHash,
+        public ?string $newHash,
         public ?string $backupPath,
         public ?string $newFilePath,
         public string $message,
