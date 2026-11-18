@@ -40,11 +40,41 @@ final class SetupNeverOverwritesAProjectTest extends TestCase
                 # A script hook that fails after the autoloader was written.
                 [ "${COMPOSER_STUB_FAIL_INSTALL:-}" != 1 ] || exit 1 ;;
               create-project)
-                mkdir -p "$3" && echo '{"name": "semitexa/ultimate"}' > "$3/composer.json" && echo 'the skeleton' > "$3/README.md" ;;
+                mkdir -p "$3" && echo '{"name": "semitexa/ultimate"}' > "$3/composer.json" && echo 'the skeleton' > "$3/README.md"
+                # The skeleton carries its own copies of the installer's files.
+                echo "the skeleton's Dockerfile" > "$3/Dockerfile" && echo "the skeleton's .env.default" > "$3/.env.default" \
+                  && mkdir -p "$3/bin" && echo "the skeleton's bin/semitexa" > "$3/bin/semitexa" ;;
             esac
             exit 0
             SH);
         chmod($this->tmp . '/bin/composer', 0755);
+        // A copy cut off midway, once: the skeleton is copied, its README is left
+        // half written (review, update#110), and cp fails, as a container
+        // stopped mid-copy would leave it.
+        file_put_contents($this->tmp . '/bin/cp', <<<'SH'
+            #!/bin/sh
+            /bin/cp "$@"; rc=$?
+            for target in "$@"; do :; done
+            case "$*" in
+              # The bulk copy only: a file of its own may start with a dot too.
+              *"/temp/. "*) if [ -n "${CP_STUB_FAIL_ONCE:-}" ] && [ ! -e "$CP_STUB_FAIL_ONCE" ]; then
+                  : > "$CP_STUB_FAIL_ONCE"
+                  printf 'the ske' > "${target%/}/README.md"
+                  exit 1
+                fi ;;
+            esac
+            # The write of one file cut off, once (review, update#110): by the bulk
+            # copy, half of it in the target; by a copy of its own, half of it
+            # under the name it is written to.
+            if [ -n "${CP_STUB_CUT:-}" ] && [ ! -e "$CP_STUB_CUT_DONE" ]; then
+              case "$*" in
+                *"/temp/. "*) : > "$CP_STUB_CUT_DONE"; printf 'half a ' > "${target%/}/$CP_STUB_CUT"; exit 1 ;;
+                *"/$CP_STUB_CUT "*) : > "$CP_STUB_CUT_DONE"; printf 'half a ' > "$target"; exit 1 ;;
+              esac
+            fi
+            exit $rc
+            SH);
+        chmod($this->tmp . '/bin/cp', 0755);
         // Ownership cannot change without root: the stub records what setup hands back.
         file_put_contents($this->tmp . '/bin/chown', "#!/bin/sh\nprintf '%s\\n' \"\$*\" >> \"\$CHOWN_STUB_LOG\"\n");
         chmod($this->tmp . '/bin/chown', 0755);
@@ -111,6 +141,113 @@ final class SetupNeverOverwritesAProjectTest extends TestCase
         self::assertFileExists($this->target() . '/README.md', 'the rest of the skeleton is there now');
         self::assertFileExists($this->target() . '/var/install/bootstrap-complete.json');
         self::assertFileDoesNotExist($this->target() . '/var/install/bootstrap-copying');
+    }
+
+    /**
+     * tk-setup-retry-keeps-the-first-backup (CodeRabbit, installer#101 and
+     * installer#107): the installer's own files went through the copy and were
+     * put back from a backup, which a copy cut off midway left written over,
+     * half written, or from another release. They are kept out of the copy now.
+     */
+    #[Test]
+    public function a_copy_cut_off_midway_never_touches_the_installers_files(): void
+    {
+        file_put_contents($this->target() . '/Dockerfile', "the installer's Dockerfile\n");
+        $failOnce = ['CP_STUB_FAIL_ONCE' => $this->tmp . '/cp-failed'];
+
+        [$exit, $out] = $this->runSetup($failOnce);
+        self::assertSame(2, $exit, 'the first try stops at the copy: ' . $out);
+        self::assertSame("the installer's Dockerfile\n", file_get_contents($this->target() . '/Dockerfile'), 'the cut-off copy did not touch it');
+        self::assertSame('the ske', file_get_contents($this->target() . '/README.md'), 'the copy was cut off with a file half written');
+        self::assertFileExists($this->target() . '/var/install/bootstrap-copying');
+
+        [$exit, $out] = $this->runSetup($failOnce);
+        self::assertSame(0, $exit, $out);
+        self::assertSame("the installer's Dockerfile\n", file_get_contents($this->target() . '/Dockerfile'));
+        self::assertSame("the skeleton\n", file_get_contents($this->target() . '/README.md'), 'the half-written skeleton file is copied again whole');
+        self::assertFileExists($this->target() . '/var/install/bootstrap-complete.json');
+        self::assertFileDoesNotExist($this->target() . '/var/install/bootstrap-copying');
+    }
+
+    /** Fable's review: nothing undoes an edit made between the tries. */
+    #[Test]
+    public function an_edit_made_between_the_tries_is_kept(): void
+    {
+        file_put_contents($this->target() . '/Dockerfile', "the installer's Dockerfile\n");
+        file_put_contents($this->target() . '/.env.default', "the installer's .env.default\n");
+        $failOnce = ['CP_STUB_FAIL_ONCE' => $this->tmp . '/cp-failed'];
+
+        [$exit, $out] = $this->runSetup($failOnce);
+        self::assertSame(2, $exit, $out);
+        // Between the tries the developer pins a release in .env.default.
+        file_put_contents($this->target() . '/.env.default', "SEMITEXA_ULTIMATE_VERSION=2026.11.17.2136\n");
+
+        [$exit, $out] = $this->runSetup($failOnce);
+        self::assertSame(0, $exit, $out);
+        self::assertSame("the installer's Dockerfile\n", file_get_contents($this->target() . '/Dockerfile'));
+        self::assertSame("SEMITEXA_ULTIMATE_VERSION=2026.11.17.2136\n", file_get_contents($this->target() . '/.env.default'), 'edited between the tries: as it stands');
+    }
+
+    /** A file the target does not have yet is the skeleton's, as before. */
+    #[Test]
+    public function a_file_the_target_lacks_comes_from_the_skeleton(): void
+    {
+        [$exit, $out] = $this->runSetup();
+
+        self::assertSame(0, $exit, $out);
+        self::assertSame("the skeleton's Dockerfile\n", file_get_contents($this->target() . '/Dockerfile'));
+        self::assertSame("the skeleton's .env.default\n", file_get_contents($this->target() . '/.env.default'));
+    }
+
+    /** @return iterable<string, array{string}> an installer's file at the top and one in a directory of its own */
+    public static function installersFiles(): iterable
+    {
+        yield 'Dockerfile' => ['Dockerfile'];
+        yield 'bin/semitexa' => ['bin/semitexa'];
+    }
+
+    /**
+     * Review, update#110: an installer's file the target lacked came from the
+     * skeleton through the bulk copy. A write cut off there left half of it,
+     * which the retry kept as the installer's. It is there whole or not at all.
+     */
+    #[Test]
+    #[\PHPUnit\Framework\Attributes\DataProvider('installersFiles')]
+    public function an_installers_file_the_target_lacked_is_there_whole_or_not_at_all(string $file): void
+    {
+        $cut = ['CP_STUB_CUT' => $file, 'CP_STUB_CUT_DONE' => $this->tmp . '/cut-done'];
+
+        [$exit, $out] = $this->runSetup($cut);
+        self::assertSame(2, $exit, 'the first try stops at the copy: ' . $out);
+        self::assertFileDoesNotExist($this->target() . '/' . $file, 'half a file is never there under its own name');
+
+        [$exit, $out] = $this->runSetup($cut);
+        self::assertSame(0, $exit, $out);
+        self::assertSame("the skeleton's {$file}\n", file_get_contents($this->target() . '/' . $file), 'the retry puts it there whole');
+        $left = array_merge(...array_map(static fn (string $pattern): array => glob($pattern) ?: [], [
+            $this->target() . '/*.semitexa-new',
+            $this->target() . '/.*.semitexa-new',
+            $this->target() . '/bin/*.semitexa-new',
+        ]));
+        self::assertSame([], $left, 'nothing is left under a name of its own');
+    }
+
+    /**
+     * The independent review of the fix: a copy cut off under the name of its
+     * own leaves that file behind, and the file may be there by the retry
+     * (put back by hand, say), so nothing copies over the leftover.
+     */
+    #[Test]
+    public function a_leftover_from_a_cut_off_copy_is_removed_when_the_file_is_there(): void
+    {
+        file_put_contents($this->target() . '/Dockerfile', "the installer's Dockerfile\n");
+        file_put_contents($this->target() . '/Dockerfile.semitexa-new', 'half a ');
+
+        [$exit, $out] = $this->runSetup();
+
+        self::assertSame(0, $exit, $out);
+        self::assertSame("the installer's Dockerfile\n", file_get_contents($this->target() . '/Dockerfile'));
+        self::assertFileDoesNotExist($this->target() . '/Dockerfile.semitexa-new');
     }
 
     #[Test]
@@ -186,11 +323,13 @@ final class SetupNeverOverwritesAProjectTest extends TestCase
             'the setup service runs one sh -euc script',
         );
         $script = str_replace('$$', '$', (string) preg_replace('/^ {8}/m', '', $m[1]));
+        // The backup lives under TARGET_DIR (var/install/bootstrap-backup), so it follows the target.
         $script = str_replace(
-            ['TARGET_DIR=/var/www/html', 'TEMP_DIR=/tmp/semitexa-bootstrap', 'BACKUP_DIR=/tmp/semitexa-bootstrap-backup'],
-            ['TARGET_DIR=' . $this->target(), 'TEMP_DIR=' . $this->tmp . '/temp', 'BACKUP_DIR=' . $this->tmp . '/backup'],
+            ['TARGET_DIR=/var/www/html', 'TEMP_DIR=/tmp/semitexa-bootstrap'],
+            ['TARGET_DIR=' . $this->target(), 'TEMP_DIR=' . $this->tmp . '/temp'],
             $script,
         );
+        self::assertStringContainsString('TARGET_DIR=' . $this->target(), $script, 'the script was pointed at the test target');
         file_put_contents($this->tmp . '/setup.sh', $script);
 
         $command = 'PATH=' . escapeshellarg($this->tmp . '/bin:' . getenv('PATH'))
