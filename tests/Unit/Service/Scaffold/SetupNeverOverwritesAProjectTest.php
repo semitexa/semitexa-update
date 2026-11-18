@@ -42,7 +42,8 @@ final class SetupNeverOverwritesAProjectTest extends TestCase
               create-project)
                 mkdir -p "$3" && echo '{"name": "semitexa/ultimate"}' > "$3/composer.json" && echo 'the skeleton' > "$3/README.md"
                 # The skeleton carries its own copies of the installer's files.
-                echo "the skeleton's Dockerfile" > "$3/Dockerfile" && echo "the skeleton's .env.default" > "$3/.env.default" ;;
+                echo "the skeleton's Dockerfile" > "$3/Dockerfile" && echo "the skeleton's .env.default" > "$3/.env.default" \
+                  && mkdir -p "$3/bin" && echo "the skeleton's bin/semitexa" > "$3/bin/semitexa" ;;
             esac
             exit 0
             SH);
@@ -198,29 +199,55 @@ final class SetupNeverOverwritesAProjectTest extends TestCase
         self::assertSame("the skeleton's .env.default\n", file_get_contents($this->target() . '/.env.default'));
     }
 
+    /** @return iterable<string, array{string}> an installer's file at the top and one in a directory of its own */
+    public static function installersFiles(): iterable
+    {
+        yield 'Dockerfile' => ['Dockerfile'];
+        yield 'bin/semitexa' => ['bin/semitexa'];
+    }
+
     /**
      * Review, update#110: an installer's file the target lacked came from the
      * skeleton through the bulk copy. A write cut off there left half of it,
      * which the retry kept as the installer's. It is there whole or not at all.
      */
     #[Test]
-    public function an_installers_file_the_target_lacked_is_there_whole_or_not_at_all(): void
+    #[\PHPUnit\Framework\Attributes\DataProvider('installersFiles')]
+    public function an_installers_file_the_target_lacked_is_there_whole_or_not_at_all(string $file): void
     {
-        $cut = ['CP_STUB_CUT' => 'Dockerfile', 'CP_STUB_CUT_DONE' => $this->tmp . '/cut-done'];
+        $cut = ['CP_STUB_CUT' => $file, 'CP_STUB_CUT_DONE' => $this->tmp . '/cut-done'];
 
         [$exit, $out] = $this->runSetup($cut);
         self::assertSame(2, $exit, 'the first try stops at the copy: ' . $out);
-        self::assertFileDoesNotExist($this->target() . '/Dockerfile', 'half a file is never there under its own name');
+        self::assertFileDoesNotExist($this->target() . '/' . $file, 'half a file is never there under its own name');
 
         [$exit, $out] = $this->runSetup($cut);
         self::assertSame(0, $exit, $out);
-        self::assertSame("the skeleton's Dockerfile\n", file_get_contents($this->target() . '/Dockerfile'), 'the retry puts it there whole');
+        self::assertSame("the skeleton's {$file}\n", file_get_contents($this->target() . '/' . $file), 'the retry puts it there whole');
         $left = array_merge(...array_map(static fn (string $pattern): array => glob($pattern) ?: [], [
             $this->target() . '/*.semitexa-new',
             $this->target() . '/.*.semitexa-new',
             $this->target() . '/bin/*.semitexa-new',
         ]));
         self::assertSame([], $left, 'nothing is left under a name of its own');
+    }
+
+    /**
+     * The independent review of the fix: a copy cut off under the name of its
+     * own leaves that file behind, and the file may be there by the retry
+     * (put back by hand, say), so nothing copies over the leftover.
+     */
+    #[Test]
+    public function a_leftover_from_a_cut_off_copy_is_removed_when_the_file_is_there(): void
+    {
+        file_put_contents($this->target() . '/Dockerfile', "the installer's Dockerfile\n");
+        file_put_contents($this->target() . '/Dockerfile.semitexa-new', 'half a ');
+
+        [$exit, $out] = $this->runSetup();
+
+        self::assertSame(0, $exit, $out);
+        self::assertSame("the installer's Dockerfile\n", file_get_contents($this->target() . '/Dockerfile'));
+        self::assertFileDoesNotExist($this->target() . '/Dockerfile.semitexa-new');
     }
 
     #[Test]
