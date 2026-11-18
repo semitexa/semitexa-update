@@ -233,6 +233,24 @@ final class SetupNeverOverwritesAProjectTest extends TestCase
     }
 
     /**
+     * Review, ultimate#163: an installer's file kept as a link to one outside
+     * the project, such as an .env.default shared between projects, leads
+     * nowhere inside the setup container. It read as missing, and the
+     * skeleton's copy was renamed over the link.
+     */
+    #[Test]
+    public function a_link_the_target_has_is_kept_where_it_leads_nowhere_here(): void
+    {
+        symlink('/nowhere/shared/.env.default', $this->target() . '/.env.default');
+
+        [$exit, $out] = $this->runSetup();
+
+        self::assertSame(0, $exit, $out);
+        self::assertTrue(is_link($this->target() . '/.env.default'), 'still the link it was');
+        self::assertSame('/nowhere/shared/.env.default', readlink($this->target() . '/.env.default'));
+    }
+
+    /**
      * The independent review of the fix: a copy cut off under the name of its
      * own leaves that file behind, and the file may be there by the retry
      * (put back by hand, say), so nothing copies over the leftover.
