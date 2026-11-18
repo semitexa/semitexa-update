@@ -53,14 +53,24 @@ final class SetupNeverOverwritesAProjectTest extends TestCase
         file_put_contents($this->tmp . '/bin/cp', <<<'SH'
             #!/bin/sh
             /bin/cp "$@"; rc=$?
+            for target in "$@"; do :; done
             case "$*" in
-              */temp/.*) if [ -n "${CP_STUB_FAIL_ONCE:-}" ] && [ ! -e "$CP_STUB_FAIL_ONCE" ]; then
+              # The bulk copy only: a file of its own may start with a dot too.
+              *"/temp/. "*) if [ -n "${CP_STUB_FAIL_ONCE:-}" ] && [ ! -e "$CP_STUB_FAIL_ONCE" ]; then
                   : > "$CP_STUB_FAIL_ONCE"
-                  for target in "$@"; do :; done
                   printf 'the ske' > "${target%/}/README.md"
                   exit 1
                 fi ;;
             esac
+            # The write of one file cut off, once (review, update#110): by the bulk
+            # copy, half of it in the target; by a copy of its own, half of it
+            # under the name it is written to.
+            if [ -n "${CP_STUB_CUT:-}" ] && [ ! -e "$CP_STUB_CUT_DONE" ]; then
+              case "$*" in
+                *"/temp/. "*) : > "$CP_STUB_CUT_DONE"; printf 'half a ' > "${target%/}/$CP_STUB_CUT"; exit 1 ;;
+                *"/$CP_STUB_CUT "*) : > "$CP_STUB_CUT_DONE"; printf 'half a ' > "$target"; exit 1 ;;
+              esac
+            fi
             exit $rc
             SH);
         chmod($this->tmp . '/bin/cp', 0755);
@@ -186,6 +196,31 @@ final class SetupNeverOverwritesAProjectTest extends TestCase
         self::assertSame(0, $exit, $out);
         self::assertSame("the skeleton's Dockerfile\n", file_get_contents($this->target() . '/Dockerfile'));
         self::assertSame("the skeleton's .env.default\n", file_get_contents($this->target() . '/.env.default'));
+    }
+
+    /**
+     * Review, update#110: an installer's file the target lacked came from the
+     * skeleton through the bulk copy. A write cut off there left half of it,
+     * which the retry kept as the installer's. It is there whole or not at all.
+     */
+    #[Test]
+    public function an_installers_file_the_target_lacked_is_there_whole_or_not_at_all(): void
+    {
+        $cut = ['CP_STUB_CUT' => 'Dockerfile', 'CP_STUB_CUT_DONE' => $this->tmp . '/cut-done'];
+
+        [$exit, $out] = $this->runSetup($cut);
+        self::assertSame(2, $exit, 'the first try stops at the copy: ' . $out);
+        self::assertFileDoesNotExist($this->target() . '/Dockerfile', 'half a file is never there under its own name');
+
+        [$exit, $out] = $this->runSetup($cut);
+        self::assertSame(0, $exit, $out);
+        self::assertSame("the skeleton's Dockerfile\n", file_get_contents($this->target() . '/Dockerfile'), 'the retry puts it there whole');
+        $left = array_merge(...array_map(static fn (string $pattern): array => glob($pattern) ?: [], [
+            $this->target() . '/*.semitexa-new',
+            $this->target() . '/.*.semitexa-new',
+            $this->target() . '/bin/*.semitexa-new',
+        ]));
+        self::assertSame([], $left, 'nothing is left under a name of its own');
     }
 
     #[Test]
