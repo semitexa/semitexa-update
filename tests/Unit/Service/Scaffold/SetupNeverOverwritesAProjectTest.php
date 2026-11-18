@@ -47,13 +47,19 @@ final class SetupNeverOverwritesAProjectTest extends TestCase
             exit 0
             SH);
         chmod($this->tmp . '/bin/composer', 0755);
-        // A copy cut off midway: the skeleton's files are written over the target,
-        // then cp fails, once, as a container stopped mid-copy would leave it.
+        // A copy cut off midway, once: the skeleton is copied, its README is left
+        // half written (review, update#110), and cp fails, as a container
+        // stopped mid-copy would leave it.
         file_put_contents($this->tmp . '/bin/cp', <<<'SH'
             #!/bin/sh
             /bin/cp "$@"; rc=$?
             case "$*" in
-              */temp/.*) if [ -n "${CP_STUB_FAIL_ONCE:-}" ] && [ ! -e "$CP_STUB_FAIL_ONCE" ]; then : > "$CP_STUB_FAIL_ONCE"; exit 1; fi ;;
+              */temp/.*) if [ -n "${CP_STUB_FAIL_ONCE:-}" ] && [ ! -e "$CP_STUB_FAIL_ONCE" ]; then
+                  : > "$CP_STUB_FAIL_ONCE"
+                  for target in "$@"; do :; done
+                  printf 'the ske' > "${target%/}/README.md"
+                  exit 1
+                fi ;;
             esac
             exit $rc
             SH);
@@ -127,36 +133,32 @@ final class SetupNeverOverwritesAProjectTest extends TestCase
     }
 
     /**
-     * tk-setup-retry-keeps-the-first-backup (CodeRabbit, installer#101): the
-     * backup of the installer's own files was in the container's /tmp, and
-     * fail() and every retry removed it, so the retry backed up what the
-     * cut-off copy had written over them and "restored" the skeleton's.
+     * tk-setup-retry-keeps-the-first-backup (CodeRabbit, installer#101 and
+     * installer#107): the installer's own files went through the copy and were
+     * put back from a backup, which a copy cut off midway left written over,
+     * half written, or from another release. They are kept out of the copy now.
      */
     #[Test]
-    public function a_retry_after_a_copy_cut_off_midway_restores_the_installers_files(): void
+    public function a_copy_cut_off_midway_never_touches_the_installers_files(): void
     {
         file_put_contents($this->target() . '/Dockerfile', "the installer's Dockerfile\n");
         $failOnce = ['CP_STUB_FAIL_ONCE' => $this->tmp . '/cp-failed'];
 
         [$exit, $out] = $this->runSetup($failOnce);
         self::assertSame(2, $exit, 'the first try stops at the copy: ' . $out);
-        self::assertSame("the skeleton's Dockerfile\n", file_get_contents($this->target() . '/Dockerfile'), 'the cut-off copy wrote over it');
+        self::assertSame("the installer's Dockerfile\n", file_get_contents($this->target() . '/Dockerfile'), 'the cut-off copy did not touch it');
+        self::assertSame('the ske', file_get_contents($this->target() . '/README.md'), 'the copy was cut off with a file half written');
         self::assertFileExists($this->target() . '/var/install/bootstrap-copying');
 
         [$exit, $out] = $this->runSetup($failOnce);
         self::assertSame(0, $exit, $out);
-        self::assertSame("the installer's Dockerfile\n", file_get_contents($this->target() . '/Dockerfile'), 'the retry restores the first try\'s backup');
+        self::assertSame("the installer's Dockerfile\n", file_get_contents($this->target() . '/Dockerfile'));
+        self::assertSame("the skeleton\n", file_get_contents($this->target() . '/README.md'), 'the half-written skeleton file is copied again whole');
         self::assertFileExists($this->target() . '/var/install/bootstrap-complete.json');
         self::assertFileDoesNotExist($this->target() . '/var/install/bootstrap-copying');
-        self::assertDirectoryDoesNotExist($this->target() . '/var/install/bootstrap-backup', 'removed once the install is done');
     }
 
-    /**
-     * Fable's review of the fix: the kept backup must not undo an edit made
-     * between the tries. A file that still reads as the skeleton's was written
-     * over by the cut-off copy and comes from the first try's backup; one the
-     * developer changed since is taken as it stands.
-     */
+    /** Fable's review: nothing undoes an edit made between the tries. */
     #[Test]
     public function an_edit_made_between_the_tries_is_kept(): void
     {
@@ -171,8 +173,19 @@ final class SetupNeverOverwritesAProjectTest extends TestCase
 
         [$exit, $out] = $this->runSetup($failOnce);
         self::assertSame(0, $exit, $out);
-        self::assertSame("the installer's Dockerfile\n", file_get_contents($this->target() . '/Dockerfile'), 'written over by the cut-off copy: from the first try');
-        self::assertSame("SEMITEXA_ULTIMATE_VERSION=2026.11.17.2136\n", file_get_contents($this->target() . '/.env.default'), 'edited since: as it stands');
+        self::assertSame("the installer's Dockerfile\n", file_get_contents($this->target() . '/Dockerfile'));
+        self::assertSame("SEMITEXA_ULTIMATE_VERSION=2026.11.17.2136\n", file_get_contents($this->target() . '/.env.default'), 'edited between the tries: as it stands');
+    }
+
+    /** A file the target does not have yet is the skeleton's, as before. */
+    #[Test]
+    public function a_file_the_target_lacks_comes_from_the_skeleton(): void
+    {
+        [$exit, $out] = $this->runSetup();
+
+        self::assertSame(0, $exit, $out);
+        self::assertSame("the skeleton's Dockerfile\n", file_get_contents($this->target() . '/Dockerfile'));
+        self::assertSame("the skeleton's .env.default\n", file_get_contents($this->target() . '/.env.default'));
     }
 
     #[Test]

@@ -1,6 +1,6 @@
 {
     "schema_version": "semitexa.scaffold-manifest/v1",
-    "generated_at": "2026-11-18T02:14:11+00:00",
+    "generated_at": "2026-11-18T02:50:01+00:00",
     "files": [
         {
             "path": ".claude/skills/make-it/SKILL.md",
@@ -527,8 +527,9 @@
         },
         {
             "path": "docker-compose.yml",
-            "current_sha256": "1afce0892426659d4d0fe74dba2ae46bcb8d00061520efc65366f3888e104393",
+            "current_sha256": "20551d0556c7a4214edec37d1f210d29aea94ca96c56002d1a5f41ccf5f17df4",
             "previous_sha256": [
+                "1afce0892426659d4d0fe74dba2ae46bcb8d00061520efc65366f3888e104393",
                 "5c75d10b498bbdbdcef256e3e6dd9f67d160780565622eceece0503d39c73f65",
                 "8b49b236aed1917a5f75da9bcd0ab07e56bebc2cb3cf4c105bc7787679f3fdbf",
                 "8d136511379ea03fbf2461683b383e1d26af0717454229fdc1ae7c8a982fce8e",
