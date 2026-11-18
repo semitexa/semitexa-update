@@ -40,11 +40,24 @@ final class SetupNeverOverwritesAProjectTest extends TestCase
                 # A script hook that fails after the autoloader was written.
                 [ "${COMPOSER_STUB_FAIL_INSTALL:-}" != 1 ] || exit 1 ;;
               create-project)
-                mkdir -p "$3" && echo '{"name": "semitexa/ultimate"}' > "$3/composer.json" && echo 'the skeleton' > "$3/README.md" ;;
+                mkdir -p "$3" && echo '{"name": "semitexa/ultimate"}' > "$3/composer.json" && echo 'the skeleton' > "$3/README.md"
+                # The skeleton carries its own copies of the installer's files.
+                echo "the skeleton's Dockerfile" > "$3/Dockerfile" && echo "the skeleton's .env.default" > "$3/.env.default" ;;
             esac
             exit 0
             SH);
         chmod($this->tmp . '/bin/composer', 0755);
+        // A copy cut off midway: the skeleton's files are written over the target,
+        // then cp fails, once, as a container stopped mid-copy would leave it.
+        file_put_contents($this->tmp . '/bin/cp', <<<'SH'
+            #!/bin/sh
+            /bin/cp "$@"; rc=$?
+            case "$*" in
+              */temp/.*) if [ -n "${CP_STUB_FAIL_ONCE:-}" ] && [ ! -e "$CP_STUB_FAIL_ONCE" ]; then : > "$CP_STUB_FAIL_ONCE"; exit 1; fi ;;
+            esac
+            exit $rc
+            SH);
+        chmod($this->tmp . '/bin/cp', 0755);
         // Ownership cannot change without root: the stub records what setup hands back.
         file_put_contents($this->tmp . '/bin/chown', "#!/bin/sh\nprintf '%s\\n' \"\$*\" >> \"\$CHOWN_STUB_LOG\"\n");
         chmod($this->tmp . '/bin/chown', 0755);
@@ -111,6 +124,55 @@ final class SetupNeverOverwritesAProjectTest extends TestCase
         self::assertFileExists($this->target() . '/README.md', 'the rest of the skeleton is there now');
         self::assertFileExists($this->target() . '/var/install/bootstrap-complete.json');
         self::assertFileDoesNotExist($this->target() . '/var/install/bootstrap-copying');
+    }
+
+    /**
+     * tk-setup-retry-keeps-the-first-backup (CodeRabbit, installer#101): the
+     * backup of the installer's own files was in the container's /tmp, and
+     * fail() and every retry removed it, so the retry backed up what the
+     * cut-off copy had written over them and "restored" the skeleton's.
+     */
+    #[Test]
+    public function a_retry_after_a_copy_cut_off_midway_restores_the_installers_files(): void
+    {
+        file_put_contents($this->target() . '/Dockerfile', "the installer's Dockerfile\n");
+        $failOnce = ['CP_STUB_FAIL_ONCE' => $this->tmp . '/cp-failed'];
+
+        [$exit, $out] = $this->runSetup($failOnce);
+        self::assertSame(2, $exit, 'the first try stops at the copy: ' . $out);
+        self::assertSame("the skeleton's Dockerfile\n", file_get_contents($this->target() . '/Dockerfile'), 'the cut-off copy wrote over it');
+        self::assertFileExists($this->target() . '/var/install/bootstrap-copying');
+
+        [$exit, $out] = $this->runSetup($failOnce);
+        self::assertSame(0, $exit, $out);
+        self::assertSame("the installer's Dockerfile\n", file_get_contents($this->target() . '/Dockerfile'), 'the retry restores the first try\'s backup');
+        self::assertFileExists($this->target() . '/var/install/bootstrap-complete.json');
+        self::assertFileDoesNotExist($this->target() . '/var/install/bootstrap-copying');
+        self::assertDirectoryDoesNotExist($this->target() . '/var/install/bootstrap-backup', 'removed once the install is done');
+    }
+
+    /**
+     * Fable's review of the fix: the kept backup must not undo an edit made
+     * between the tries. A file that still reads as the skeleton's was written
+     * over by the cut-off copy and comes from the first try's backup; one the
+     * developer changed since is taken as it stands.
+     */
+    #[Test]
+    public function an_edit_made_between_the_tries_is_kept(): void
+    {
+        file_put_contents($this->target() . '/Dockerfile', "the installer's Dockerfile\n");
+        file_put_contents($this->target() . '/.env.default', "the installer's .env.default\n");
+        $failOnce = ['CP_STUB_FAIL_ONCE' => $this->tmp . '/cp-failed'];
+
+        [$exit, $out] = $this->runSetup($failOnce);
+        self::assertSame(2, $exit, $out);
+        // Between the tries the developer pins a release in .env.default.
+        file_put_contents($this->target() . '/.env.default', "SEMITEXA_ULTIMATE_VERSION=2026.11.17.2136\n");
+
+        [$exit, $out] = $this->runSetup($failOnce);
+        self::assertSame(0, $exit, $out);
+        self::assertSame("the installer's Dockerfile\n", file_get_contents($this->target() . '/Dockerfile'), 'written over by the cut-off copy: from the first try');
+        self::assertSame("SEMITEXA_ULTIMATE_VERSION=2026.11.17.2136\n", file_get_contents($this->target() . '/.env.default'), 'edited since: as it stands');
     }
 
     #[Test]
@@ -186,11 +248,13 @@ final class SetupNeverOverwritesAProjectTest extends TestCase
             'the setup service runs one sh -euc script',
         );
         $script = str_replace('$$', '$', (string) preg_replace('/^ {8}/m', '', $m[1]));
+        // The backup lives under TARGET_DIR (var/install/bootstrap-backup), so it follows the target.
         $script = str_replace(
-            ['TARGET_DIR=/var/www/html', 'TEMP_DIR=/tmp/semitexa-bootstrap', 'BACKUP_DIR=/tmp/semitexa-bootstrap-backup'],
-            ['TARGET_DIR=' . $this->target(), 'TEMP_DIR=' . $this->tmp . '/temp', 'BACKUP_DIR=' . $this->tmp . '/backup'],
+            ['TARGET_DIR=/var/www/html', 'TEMP_DIR=/tmp/semitexa-bootstrap'],
+            ['TARGET_DIR=' . $this->target(), 'TEMP_DIR=' . $this->tmp . '/temp'],
             $script,
         );
+        self::assertStringContainsString('TARGET_DIR=' . $this->target(), $script, 'the script was pointed at the test target');
         file_put_contents($this->tmp . '/setup.sh', $script);
 
         $command = 'PATH=' . escapeshellarg($this->tmp . '/bin:' . getenv('PATH'))
