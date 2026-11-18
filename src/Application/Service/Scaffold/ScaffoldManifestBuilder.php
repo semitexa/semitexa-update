@@ -79,10 +79,15 @@ final class ScaffoldManifestBuilder
         }
         ksort($entries);
 
+        // Carried over as it is: the versions a retired path shipped with do not
+        // change. A path the scaffold ships again is managed again, not retired.
+        $retired = array_diff_key($prior->retired ?? [], $entries);
+
         return new ScaffoldManifest(
             schemaVersion: ScaffoldManifest::SCHEMA_VERSION,
             generatedAt: $generatedAt ?? (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))->format(\DateTimeInterface::ATOM),
             entries: $entries,
+            retired: $retired,
         );
     }
 

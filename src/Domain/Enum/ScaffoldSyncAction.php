@@ -19,6 +19,10 @@ namespace Semitexa\Update\Domain\Enum;
  *                   opted in. Engine performs no filesystem work; the report
  *                   tells the operator what command to run if they want a
  *                   candidate file written.
+ *  - Remove       — the file is retired (semitexa/ultimate no longer ships it)
+ *                   and byte for byte a version it shipped. Engine deletes it;
+ *                   nothing of the project's is lost. Any other copy is the
+ *                   project's and gets ManualReview, with a note.
  */
 enum ScaffoldSyncAction: string
 {
@@ -27,4 +31,5 @@ enum ScaffoldSyncAction: string
     case Create = 'create';
     case WriteNew = 'write_new';
     case ManualReview = 'manual_review';
+    case Remove = 'remove';
 }

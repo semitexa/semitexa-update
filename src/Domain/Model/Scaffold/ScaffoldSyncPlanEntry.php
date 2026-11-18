@@ -12,7 +12,8 @@ use Semitexa\Update\Domain\Enum\ScaffoldSyncStatus;
  *
  *  - `oldHash`         is the project file's current SHA-256, or null if the
  *                      file does not exist.
- *  - `newHash`         is the scaffold manifest's current_sha256 for this path.
+ *  - `newHash`         is the scaffold manifest's current_sha256 for this path,
+ *                      or null for a retired file: nothing replaces it.
  *  - `backupPath`      is set iff `action === Replace` — the engine will write
  *                      the existing file's contents here before overwriting.
  *  - `newFilePath`     is set iff `action === WriteNew` — where the engine
@@ -27,7 +28,7 @@ final readonly class ScaffoldSyncPlanEntry
         public ScaffoldSyncStatus $status,
         public ScaffoldSyncAction $action,
         public ?string $oldHash,
-        public string $newHash,
+        public ?string $newHash,
         public ?string $backupPath,
         public ?string $newFilePath,
         public bool $preserveExecutable,

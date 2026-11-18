@@ -23,6 +23,8 @@ use Semitexa\Update\Domain\Model\Scaffold\ScaffoldSyncResult;
  *   - Idempotent: a second run after a clean Apply observes Current state
  *     and produces NoOp results.
  *   - Dry-run performs no filesystem mutations.
+ *   - Removes only a retired file that still hashes to the version the plan
+ *     found, a version semitexa/ultimate shipped; never a directory.
  */
 final class ScaffoldSyncEngine
 {
@@ -69,6 +71,7 @@ final class ScaffoldSyncEngine
                 ScaffoldSyncAction::Create       => $this->doCreate($entry, $projectRoot, $scaffoldRoot, $dryRun),
                 ScaffoldSyncAction::WriteNew     => $this->doWriteNew($entry, $projectRoot, $scaffoldRoot, $dryRun, $now),
                 ScaffoldSyncAction::ManualReview => $this->doManualReview($entry),
+                ScaffoldSyncAction::Remove       => $this->doRemove($entry, $projectRoot, $dryRun),
             };
         } catch (\Throwable $e) {
             return new ScaffoldSyncResult(
@@ -243,6 +246,64 @@ final class ScaffoldSyncEngine
             backupPath: null,
             newFilePath: $newPath,
             message: 'Live file untouched. Current scaffold written to ' . $newPath . ' for manual review.',
+        );
+    }
+
+    /**
+     * The file is read again first: a copy edited since the plan is the
+     * project's now. A directory the removal empties stays; nothing tracks an
+     * empty one, and a project's config may still name it.
+     */
+    private function doRemove(ScaffoldSyncPlanEntry $entry, string $projectRoot, bool $dryRun): ScaffoldSyncResult
+    {
+        $file = $projectRoot . '/' . $entry->path;
+
+        if ($dryRun) {
+            return $this->wouldApplyResult($entry, sprintf(
+                'Would remove %s: semitexa/ultimate no longer ships it, and this copy is one of its versions.',
+                $entry->path,
+            ));
+        }
+
+        if (!is_link($file) && !file_exists($file)) {
+            return $this->retiredResult($entry, ScaffoldSyncOutcome::NoOp, 'Already gone.');
+        }
+        if (is_link($file) || !is_file($file) || $this->hasher->hashFile($file) !== $entry->oldHash) {
+            return $this->retiredResult(
+                $entry,
+                ScaffoldSyncOutcome::ManualReview,
+                'Kept: it changed after the plan was made, so it is the project\'s now.',
+                ScaffoldSyncAction::ManualReview,
+            );
+        }
+        if (!@unlink($file)) {
+            throw new \RuntimeException("Unable to remove {$entry->path}");
+        }
+
+        return $this->retiredResult(
+            $entry,
+            ScaffoldSyncOutcome::Applied,
+            'Removed: semitexa/ultimate no longer ships it, and this copy was one of its versions, so nothing of the project\'s is lost.',
+        );
+    }
+
+    private function retiredResult(
+        ScaffoldSyncPlanEntry $entry,
+        ScaffoldSyncOutcome $outcome,
+        string $message,
+        ScaffoldSyncAction $action = ScaffoldSyncAction::Remove,
+    ): ScaffoldSyncResult {
+        return new ScaffoldSyncResult(
+            path: $entry->path,
+            status: $entry->status,
+            action: $action,
+            outcome: $outcome,
+            oldHash: $entry->oldHash,
+            newHash: null,
+            backupPath: null,
+            newFilePath: null,
+            message: $message,
+            critical: false,
         );
     }
 

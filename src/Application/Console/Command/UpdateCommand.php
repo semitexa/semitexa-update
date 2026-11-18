@@ -649,7 +649,10 @@ final class UpdateCommand extends BaseCommand
             if ($result->newFilePath !== null) {
                 $io->writeln('      .new:   ' . $result->newFilePath);
             }
-            if ($result->outcome === ScaffoldSyncOutcome::ManualReview) {
+            if ($result->status === ScaffoldSyncStatus::Retired) {
+                // Removed, or kept and why: there is no newer version to offer.
+                $io->writeln('      <comment>' . $result->message . '</comment>');
+            } elseif ($result->outcome === ScaffoldSyncOutcome::ManualReview) {
                 $io->writeln('      <comment>Live file left untouched.</comment>');
                 $io->writeln(sprintf(
                     '      <comment>Run `bin/semitexa update --write-scaffold-candidates` to generate %s.new.</comment>',

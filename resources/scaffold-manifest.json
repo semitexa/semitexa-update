@@ -630,5 +630,601 @@
             "preserve_executable": false,
             "notes": "What the e2e-runner runs: specs under src/modules/*/tests/E2E. Created when missing; a project that edited it keeps its own."
         }
+    ],
+    "retired": [
+        {
+            "path": ".github/workflows/published-install.yml",
+            "shipped_sha256": [
+                "31262d485f5a136f27e4bf6b5c282f94707d76bd173b403a00fb9b870e96dab2",
+                "92d8f5ab444a3a261327ad8d733dd22306c03d2983f0cc1fbf521cbd6267a869"
+            ]
+        },
+        {
+            "path": ".github/workflows/stack-smoke.yml",
+            "shipped_sha256": [
+                "019c887da4f4b89c203b42f99ee15e4a33acde750a472c70aa192167b4489886",
+                "1194c8592ff30288f72bca2a2676b74beb959ffd0735a1e22d7383dc8ee50f6c",
+                "497848c9e70e2c1a5ee6622d4541134c90ec592a2f8f02a8c59c6d18887e7481",
+                "57638ba8ad33d2fff0220b7ea4300229e734982e2c2036a1a7640e6a93983e08",
+                "613636c34bc31d0b1238051e4b269b58938088bb3220c9fc80a1d51d05b42e77",
+                "6442e8e6928ce59eb55aa025b2546a8973b5e5001c251b00fd525e8a6bc8ccfa",
+                "75de75aeb3084a5d449e577faa3a5b085bb4e1bd09cffb9950ec3846545d08a4",
+                "7e8eb006d906351fab24802ccd42f786d22c0721c596e4210a500f2547b14c26",
+                "a288caf270c566c0d8c4d1c03c98d433e8e12e2e1f899aa1cfe26b85bbe26272",
+                "d368304ef675de75a2b105c093b49de8fdd39041e55fe7482964c6a03c9bd34c",
+                "da87e918b62190eda74c54809bb5457d2d44a6e52e25aea555e0290ef35cbb69",
+                "fae58870a3b7a3e575de469bbecd9dad928568af3b82d4f5bdc8e9da8034ac0c"
+            ]
+        },
+        {
+            "path": "SECURITY.md",
+            "shipped_sha256": [
+                "620e72e2c6ea4656648e8cc35867afa35a43be18b7d9a55b93b985f78e216859"
+            ]
+        },
+        {
+            "path": "ci/stack-smoke.sh",
+            "shipped_sha256": [
+                "0d8a44759a753639815d2821f2bbea11b70c497f7b8b5b0bbdc1fcc5750e2776",
+                "4f9e3ce25c4971799cb7ec5ab71aa8ef6556d05513a6886fc8440e1e227fb9b1",
+                "a07d026c6d87932d57ac521062e17053280e801cecc096399f1da4167016349d"
+            ]
+        },
+        {
+            "path": "install.sh",
+            "shipped_sha256": [
+                "0c73b4e2302d019f594a3d1cd14db2b2c97a11d1f53fd2dd1445d6a00e5f8cb0",
+                "0caeb73ca6d4b019b5a91ea5ed0934f73ad7b94c66fb739d69681e21a59d2bf8",
+                "0d3e6c30773d2e23a9ab9e9326cbe13f25b5bc92b88281c000b3126b20fc72d5",
+                "1129a049e307b0f2a7c8bb5b1d48d2839bef0f6ae2472ef24950ada39be5a3ac",
+                "12da1c61b2421760927b49138202cd7a15404813575c56607988c13e42b6b09b",
+                "185cc8182b721b0d2d89dc98c5e0af4397a44494103307fffb037bc490d2a5e8",
+                "1cbba1ac3d043b72f4e6fb0d1c1b4ea4e31fd4f516439604da3188fd2b0143a4",
+                "1db96c463825f79ac65571edc69a90950a6fc2cf957bd0c6e5e47c389a4d1ba1",
+                "1ec90213f73ed4f0ab3ae37066a542f43ca7d0d7da41d9a59691733da9bb3f29",
+                "1ecaac0b7d86e3dfaeba7c66504b0ed2d48becfc07d24cb470e776e1c4283106",
+                "230e29ebee99c340052a065a431f5be0c13574bd5c32e73bb9cfe3d73009afbb",
+                "2c469a1d1aaa2ad661319642dde8d985dac0939a310e37ca012cc9c65958c995",
+                "5308a561d956e2e79d76c86472e8cce04ebd6b17d48db19b880a1d2a899192fd",
+                "56cde1873230a7b1f12e2050c61f296a910cd84b08ec8f519d1f3cf33782b635",
+                "65bb8c2ce0fb51ab6f4b64ffb3af9be31221afb8a892f6f82cc1afb690746592",
+                "680adb4f0645129ee4f65d89adbd08685dc442232f641e2998988cfdb5573db9",
+                "84b77fe5b796d41dbc175f4b0edad71234cbaee082fba38f37d99a1c56eb1910",
+                "9166fb53e2d0fafafb33fa9ee10911d352f480407e80f92dd04c24cd409e6263",
+                "92d5f3349ca576bd036d24738589007a8d8ad75e51912f27a2ac5379e7e2cfad",
+                "9ac06d8466c120d87a5e51fc91eb28b2eeceb0b70f2ebc3481debc43fe0d3536",
+                "a9dfa1e37f21d4e1ebc18cdf4d08b257045fe4bc2270841b4fac2bff7d84039a",
+                "accc7fa91901be368fd992dc0706b7c2725c0403c13761244e4645dd9b66d26f",
+                "afdc9c0eeebc3f0e959ee5f74801aab678f25f7df494ffd43114d63c4d7673ad",
+                "b6a9b6a8a79793143f326461e7c6f050e36a20d25c6c071191af12133603c8f7",
+                "c6179e8949661723a817412eb65ec1b88bf8311f325de3b72585b6c0644aef34",
+                "cf424dd8a5f06389d1c85f428abd7ab7689af06a39f4c4759b2f748bb03a8422",
+                "d9e583aa464558701c0bd9eafa9baffeba84cbdb217924510289990e24dd4931",
+                "e8506a47558b4d8298cefd1aaf603a2d6d3d8111cd22e3e7ecdbae1a83783f7e",
+                "ee26e147d597c576c4179db19c8e59b02c7f30ccfce3af562a6ee82d3e76d9ea",
+                "f95e8c488b19c1cae4e84647e5a14c679d151aede6f9d6f855b31511f4bd3e4e"
+            ]
+        },
+        {
+            "path": "src/Application/Console/Command/InitCommand.php",
+            "shipped_sha256": [
+                "2d631f5d4005b10f432ecc4fadd7abf0f8d83cfab21881391cd16272e9c4ae3b",
+                "881c170db3a30ccc51bda334b441da6720a5cb1aa2ad83f471ac612fa6044880",
+                "b1ca933c37794157bed02aaceb16a9cbc4be72498ef6d07d99df4d8004720bcf",
+                "d0628e79db14ab34438d6f75c907434598c45d4a7ba9b878de3df0d21e3d5f5a"
+            ]
+        },
+        {
+            "path": "src/Capabilities.php",
+            "shipped_sha256": [
+                "58ef1067909dde5e9f3c0c8f34aff3f16a87140135e732a99b90107d5c4ead69",
+                "cfd418c3f84bc6c6d7aa4bce8872d886acf38e69bdc4910b28af98fca5475491"
+            ]
+        },
+        {
+            "path": "src/Console/Command/InitCommand.php",
+            "shipped_sha256": [
+                "002722182c177604a57f1607b93ef7dc945f20ce3f2735ccb0861488804008ed",
+                "0b0255cef12cf5462d7cc03d884a4817488536ab824b91f5cb30cbc0dd93b8c7",
+                "0c3f287d53e9b149839f207c0321db2d932b8c3144e4bdd4d1b1faa4a721c31e",
+                "0dc713d95e94153cfe5187e1b290b0cb51ff88a9dd915f95b6596fb026358fc8",
+                "2b93070f253defbc229452da524fb4d48f7a6306fa10de8e6e13067c9cd4925c",
+                "3bba61c053ff0c3c0c3e0d9ad7e68663d43d148f205e04280ae614b64295d75f",
+                "4506174f4083654db04c54498e6fac1f6405c6f4027911e0cf598177cddcc72c",
+                "4c5e4ece8e513943125733882257254dba520a6b100dbdab82d4e8ac8c319f64",
+                "4dbd9a4db8a7bd216e3523c0c0b00f705c9b4d76cf810c949f9cbc02b5b9f3c6",
+                "4ef4c6af3ee779794a240afeca7303f1077e7aba3be3d48287e7cfa12b57ad79",
+                "53eb4fbb223845f330b2efa2615aa75b193c970a0576709d95ce3038a7cfc629",
+                "642bfc73435def95333e579929cdd4b20ff3109bb642ec16818130324bc0a334",
+                "64abf50411b2844f9ee7a0bd1c63377720f32835b8d37da3e04f39169ce768f0",
+                "6cc7cc127e7afd00212673a971bfe50febf6d52ecbe83c93a802961d38cbc29e",
+                "6f2d247684149ddd148a12c551e62876f54f3ca94f9003b1006c6e2b322053a1",
+                "762409c74fd79a18bb55b1fe4b55a71b36c944903aa934341fadb4fb10f72f92",
+                "85990c81f29282b93d1b83ef177b784984340e9a13b0bb7f60691012a4ae3fda",
+                "9d34f67680eaaf1593e2ff41f8b5bc2f298c8dc0e3f85615d08e779282a1b0bc",
+                "a30d06d5e6bcbf5c38b07186e102adc529a8de1bf4330acb6c6cd40b642c5704",
+                "a830840070e8e9228cf0c727f36b222b7ab998e3111037129298dc87db760df4",
+                "cae54a0d67e433a08d9d27f2d34823ae522ab1960917961d6e7ade5de735a4de",
+                "cf5979d424734303c767e797713130effa10f91df260e8e9ae001768a36193bd"
+            ]
+        },
+        {
+            "path": "tests/Unit/Ci/StackSmokeInstallerOverrideTest.php",
+            "shipped_sha256": [
+                "11c748485a9c67073ade60035b69180fda6807f7943f8e6205d9e4689d43945d",
+                "89d7aa5781f947817c0b68fbfc765d9313c3457467faa35e0c0a66bfbf73af01",
+                "cc0ff207125810ed9f8e7615b66cc5a6d18e23edbaa1f7a18061131b393035d7",
+                "e2f6279265c1731991676436e60dd5c696a83cf2e3a840f307d480d2425301ca",
+                "f3942e945be9c43fb38b91d18eb24d416080b12695ee590c11c72e3ec5133c7e"
+            ]
+        },
+        {
+            "path": "tests/Unit/Ci/StackSmokeRuntimeTest.php",
+            "shipped_sha256": [
+                "3cb496245e009297bff4c582cfbcfb04cf1f1f41104d2bd5422605a2656990b4",
+                "794cce76e680358c67780b913ed68ed66fca0265ba127b6d4bc0f27d442f206e",
+                "dde96414c0547aa8ca540be9c1d0d9b028f465ce391da93184f7820e607d7c6f"
+            ]
+        },
+        {
+            "path": "tests/Unit/Ci/WorkflowRunInjectionTest.php",
+            "shipped_sha256": [
+                "0b7edb4e2119b7b8868c8a58134a2326cbb80012219d378b8759899f5b74f4ba",
+                "31eb8ed385900769ee51f8c997d6c108fbed23f2784182d2098548d44d3614f6"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/ANewProjectGetsOnlyItsOwnFilesTest.php",
+            "shipped_sha256": [
+                "245424d263df28134a06753875f73ba7c0b542624ea56a17df54ca30f2b73d81",
+                "487b9270581a4f4dbe71a7c1976e0274f1b5614d4e117e4fbee013ce2b4e498b",
+                "531bc5d009cd28845edbb8f49713b9209cb1c6da94c22cc75f06c24ff82336c4",
+                "62f1cd481fea10c4b85ef42179053f6f0154eba98e812f33b19c38b5bec484ba",
+                "9ff1940c9c868cab899b8cddf94458e008fa9036a0d11c14d676cc9780299e9a",
+                "a09e9d0f7ca82cb62033ac2a81cbe3009c66ace81abc67a05b6f62b80baccf06",
+                "be22931e5f8021de62110bbb7aa3be3f87440cef0b897ea5ee57cf4a7d0d62fc"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/ARefusedRegistryWriteStopsTheRegistrationTest.php",
+            "shipped_sha256": [
+                "0aff824891df648f2ebe5657a6d9289a551a74a5951c3fe6679e165268bea2c3",
+                "0cd1f4fc5e4e0505dcae4757324e938770f39c9d7da3d1d3e8136970dc026db5",
+                "7bdafca7315ffed5059dd254366438a3d18e14a34b82514df5807be718772963",
+                "8260ff792971e700a6a26f35803a7762406a1e0747a3743e7eff6a693982bbc0",
+                "aa54598457bc2242b4c6700103ddb9f979b32e4d0c53fff2c01ed38b8b4fd8b8",
+                "bb3312f5dd9915bc129d3391f66bb1363b8cef6b014465b261b30c1f6f2e7d83",
+                "f3194745597320a0464ea0c1c8751b3aada488786bdd451d9d728b9083f4eed5",
+                "feff146d13b58bc24e3daf2732bf3efb0c12a62532bfa6c2dd33207566fda6c0"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/ARegistryEntryIsReadAsDataTest.php",
+            "shipped_sha256": [
+                "2270cb8be5d9d003ea7303fc7cf320be294b63bb7aff2ad9d3c8960dbd778030",
+                "3a2a73cd5cce36db369a9bf13340392ec80331f0dc0c8c2dcb3268b166e8eb1a",
+                "7c4bd33e07253db5522b9a5d392811d03f4ac606177ff7f4b45817b49df92ff1",
+                "a6d0fa4e2fae1104f00f72a6c9477fbdf81618689f9332dc52173baea92ca114",
+                "b734055eb9828760d551182630a94aaea89f81f615be29eb69f0ea7e4e55099f",
+                "f3db367c4f1df99da1c1663243151180d608056b8096c9c017e2e2b475ce9d1b"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/AgentsManualStaysShortTest.php",
+            "shipped_sha256": [
+                "913c1a904ca2a03fd1c3da7a54056ccb9513a824cc88a32b8473221376d5ae30",
+                "9480dd9da26dbfbd584ff3e817ae3e0a0c00142a9e4fc69207f9de7c1aa606a0",
+                "d6786cb7d47fae427d5d67a7ee6232908044a5aab8808ef7366110ce8d3e7850"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/AppPortStaysOnThisMachineTest.php",
+            "shipped_sha256": [
+                "61dbaee9679f220af56d3672b3f991678238700af9633269832afb0cdff610a7",
+                "7f9604cc04d0ec087c70ee259eae2ec467c4c04893bd65bfd86dff8fb33ad7ff",
+                "92be6a6514335a1b4f489ad43165b02b8ab71bc74f9238c12934472a6caee857"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/AskingWhoIsHereStartsNoServicesTest.php",
+            "shipped_sha256": [
+                "e285f822a564543827fbc311a16a5bfc78090dec1aca0968635023a7be877493"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/E2eOwnDatabaseTest.php",
+            "shipped_sha256": [
+                "332e614ffadc341bedab5581e10b9c0cf0ca239e2d139fa913e31a5762b4e67c",
+                "49248550dee89aa5c8ea86f14338d28e9ab545187be7da8653836c21ef9d7cfb",
+                "4da7f9f657cc59e6f6744eff1fd7e4f2ae40f4a7c8d208e715728cde744bd8a9",
+                "54e807e7f560be9dd153df3b3c86c39588f1f52e29a74c97c96c113c796d0a6e",
+                "5de807890ee23c9ec7b9c5b5e4ff9aef6365c7a8b383e3fd66fc3a5bc7400ff7",
+                "5f2c639461dee20ad87559703257cbb2ec8b942895b0d8272e0c7956d3131629",
+                "6e1b26c0462c69ac381f86a47c348e9298a1e193068a5ac1cea1f117ae335296",
+                "77adb4bd82c1cd3470a85ce20d5516d3e538c4f67f51cf4ddcd7f50579fcfc91",
+                "7ea78764ec3c5a84f344ee74e4bb97969d91eadde223dcdcc3ed9677cf35f77c",
+                "8c219adb430b5e3d2b9d72d77a7896a2c815ca3d024b8f9df3506e4e4bce98d1",
+                "8d877ad2fee44165899da777b97c041f58e9a788019e36ba3c2f282f1b456257",
+                "90f0b873bda6dd00a43f531b9cea6a36a0c53b87ce30bce583e7dd384b23ecbf",
+                "991ff17676cf9302e9c2e8c891e14b235d14d8386ef5c95255686704cb186f58",
+                "a35a2a0c903932eb923a8360672b6cb84f41320c69701994b46cff4f5eb74841",
+                "b1ef3709a0b49d797f6091ae7a327560a2363dc6666895422124b6cbf374986d",
+                "c5ea2261f0941d910e2c441bf98395eddbe8fbd00f098e3dc810ee4c21669648",
+                "cae14f1681a2456313b454a52abdf8edf693ecb9bc0cd741c9b5e07783cb3f33",
+                "cee4ee4ccdf3253c4cf85f6831b4d1e23f6f1343188cd2708e0fb2a648bf536b",
+                "d258aa0a9fbd93bed01adff670bc4a45875de5343d0a17f5d16dfea6778e644a",
+                "de2f6f46db1fafb3bf3c9bbfc48ec393571b50726eb970590c1032398e3766e2",
+                "f3b3cca55f39179e572312652095422e16a1089af69533c21701aa23578e1c6e",
+                "fc2df60557ce18711b16db6531ddaac312fbd9a0b49a351c1272b59de24f2047"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/E2eRunnerPreflightTest.php",
+            "shipped_sha256": [
+                "448ecddcf5a57ce4861a355c019b02129f3cb8bf125f20219baa804ad13afa9a",
+                "8118cecbaecab0a4d7cca6720ecd6d5bbb8220350501ee4adf9b3a2e3ab6ee6b",
+                "ab540a88049d409d22844f0c1328b8cd318163153a8006adc8c05a7f0eb9553e",
+                "f60a8619fa68608a0711a0a0edb779d70f61c11a7f00cf0ccc4825747d369712"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/EnvValueShellTest.php",
+            "shipped_sha256": [
+                "4c8568f87b6b7178d0d26709768528aacbc97d29faf0a9d2f61cab4df61c529f",
+                "abcf9ecb62d37a9768a84f03e0de2088eb3b199319f789890a4d30f1b4bfc56b",
+                "dc2f02e036dfd827b5a71526e0def7192f646fe8084ca0cc370887f9e46c1e8e"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/HostUserOwnershipShellTest.php",
+            "shipped_sha256": [
+                "03076eea6539c399139994ae9c7042a43f27b03bf968cfb82d8a0814baf7196e",
+                "372f9e4d564f2203b7af80f912d113684c2177582168d8b9f9e0c724ca526e33",
+                "3d9918c86ed86db460444e34fd6ba5dec8629aca4d117bb746a9dac041584a13",
+                "43499a8099b2f31132a6a7a0baa4fc7cd20a771c7cbff1b731853e2a60785a0c",
+                "50391476290b2cf6695c323ff6d7b360153cc7ac50c145aefd93972fcf95303b",
+                "5c7fc716f49a23660b07a45e73a0045b0251d7a107165a832322e3a8dcb876e2",
+                "9c7d3e69817820dd70bde677a0855173d24a51a0f2cd6fefce39630013f26901",
+                "d64071f5a63b2eba6d868c95729b40bbe9722bae733422e7b68c71c6b17a9c93",
+                "e5d4ca59065ce193e2581f6123081bc9c7c1b16cd63c6e6f095c8524250aa357"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/ImageMagickPolicyTest.php",
+            "shipped_sha256": [
+                "346cab5669b4bbb518be124a4f08b98b6c994e7cbe27eb6250ae45921f41ebc8",
+                "e2ac1913222e818c471525cfad37004014b1deffa6a32e271bedf4b280a97059"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/InitCommandIdempotencyTest.php",
+            "shipped_sha256": [
+                "03ea4c8a0d29c36296abaf8806f252abe7ce8834edc48ae76df7763801db78df",
+                "b1bc97965171eb5b1df7bfd8f6124458c7faca5de26f68b8f84e020c5829c53c"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/InitCommandNoRootDocsTest.php",
+            "shipped_sha256": [
+                "1e15138d3182641942ee28a1ed5ef46767ad31ad171ad5dbec395aa947752a17",
+                "4169141ee257d7c56ffcd2c9b8127fb6b7662ef1d68494fc8baacf092a24618e",
+                "e0eb8dbbedb92cab9e17bf02ec8f86acf92bbdaea6d285d56eee80d9cc8ea040"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/InitCommandRegistryAutoloadTest.php",
+            "shipped_sha256": [
+                "0d893af08855aae904f97a09208e3e0718b321c44a940a5f1f8b6b5441196b01",
+                "147469e7c012d107cb87aa43a2d5809a5fb27b9b7fb0325ae9915aed78f0cf0d",
+                "1841dc761035da6447b6404a14d299c98f4c3836cfc3adbb0b11fa1f9de2a6e1",
+                "18b6dd43c5e2965d81a690c072ff780ff7358980482af53413a73ff5e9bf5fab",
+                "215197d25f19a5586575ada799229fc219044b7ac82fbff4f8be0e51d036324a",
+                "b641fcf13cb3fa0026c8a4b8934d36b6ed6dc0a18fe81b1d7c0188d3ce5d372d",
+                "cb5c16abe2a4ab2afd71d4c75826543c29c49e06f4c4ab7602387ea0711326a7",
+                "d18a9be4b9123d22b61a51d9e30b6313f8098edef7c8b963b75b1b6c62a3dcbe"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/InitCommandWrongCaseRegistryTest.php",
+            "shipped_sha256": [
+                "1a92af6de5bae404367ea4173c0809d0e9eb584d4dc81c1d121a6b9f6025810a",
+                "a14493865cbfc5f42ed949cd32357c182195c1989008b525bf8c797d77eb8d6f"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/InitIsRetiredTest.php",
+            "shipped_sha256": [
+                "09b5a24381a8ec634305b70eba434001459ba9e66e7b3fe8b368885c04830eed",
+                "81be136fa16dce500b3c6dab178830449306ec3167e7134a74d8363b7500571c",
+                "fa947018e493e74da96194b9e338c5ca80d12032f09f77f0d1f2ce3cf384ea5c"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/InstallerCheckoutTestsStayOutOfTheArchiveTest.php",
+            "shipped_sha256": [
+                "1329cc86dd0d6c96eb2dc88685d30be3b49924d399e47aa61c718e1fe2e7fe0a",
+                "f5c053a6d5f013c601cfb397ec1bcfab518520f0a303bc133e17c41f953e6a12",
+                "faa16ecc5f2950ab85d7c2f874cd499cb7c542bccf1c43ce7354e2c7c6260455"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/InstallerGivesTheE2eRunnerTest.php",
+            "shipped_sha256": [
+                "6460b5fac24bf758c44a81fcd6def0c00b0ccf9c0467595c9bceff5394919ab5",
+                "6fa6873349696247d80902efcf3b7b690ac32fd7886b7f14b2d3069e7c0c99f0",
+                "7ed6d949e937786cba2ba0452c3c8a476b5ca0a68d825488b107f893aaaf5e16",
+                "d10c8e6225fd3d39615e30a29bc13f2977b5610eea3852e4a9ab8a75efadfda0"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/InstallerSyncAllowListTest.php",
+            "shipped_sha256": [
+                "55fb1d507459b606770c118e5363efba23eb55b10449cac2dc0c8bdc872512e4",
+                "7c37fe04c8b8925babfec0c680594174906d221e82f5861e42418d064ec221a3",
+                "a6ce59df872cbdbc813ff26217ea37e4a4769718024c8a060b96fdcb68180399",
+                "b429e0afa4c46a26e299b5896bfea0b3a1c95c4f29f9e134349e0679694f58de"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/IntlAndBcmathTest.php",
+            "shipped_sha256": [
+                "210ff2a9d798b3013e49763dd618317a04dad166d8cce85565a2ba8893cf6ce7",
+                "adc6360cb30a6baa8d5d8c368d7b9ea26a579f5c451c74b29debcb37088136e2",
+                "f851478f3bacd0420e1637efec8c4729637f7e92cc8c0034e651a00ec1dc1efa"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/LocalRouterBindsLoopbackTest.php",
+            "shipped_sha256": [
+                "224c93b6a68842dbb2b4aac2c7fd9519da1346f69af50cbf455a17064cd9047d",
+                "3feb443f3e05c6ac2f7ba77cfe7d945067fc0f1032955dcd8f5f584de334ddd2",
+                "548e2e5460c472964cd41cf925d5fb97c29e1a91e69a274b2d699cc5b2a1f317",
+                "80932f95f8a2820d78dd5b1c49a825e3133ce011381d61f91012c8cf82588392",
+                "8261fae83d6ec39f59d93c747fdaf7753947efb474eef35c6132953c70bdc5fc",
+                "a60ece553ec38bc06726d7b1b77846b03264ac05d35f9f775eb00e68317d121c",
+                "fc3467ec72ae4ba9f9bf8038e1aba3846abb33f879aeb53570ec33eb08efec26"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/McpConfigShellTest.php",
+            "shipped_sha256": [
+                "1222cc7d5813da939d117bb6dc0633ff2450541159c6ba3a48b9f4aff3b4f137",
+                "40e099c159906ddfd8ceda09a8d7a4977d316aaa65afe93c3687e0d95a983d5e",
+                "55f83ff03cc0b683c71070d9c39e7146dd138ae4c3806ae5f9d2da6eac36bb3c",
+                "aa12782be3658de48680952f4347ca0fec8399afa2764d43ca69fc28189355bc"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/NoInfrastructureScaffoldTest.php",
+            "shipped_sha256": [
+                "3a909fcec760a5d1209e389836b8750e53058e9e7282be368a63988f4c36327d",
+                "c286d5807608839bff548431157bcdbffd11fad2354dbf3084a71430d21c45ac",
+                "c9521f514c0255b2664414d5906a1ecf3c364d3d3b97a65838becfcc7ee3202e"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/PageCheckLauncherTest.php",
+            "shipped_sha256": [
+                "5d09d394796221ed57bf864d74ffda488ddf599058b93358c0b6111f86b64f46"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/ProxyKeepsStdoutForTheCommandTest.php",
+            "shipped_sha256": [
+                "c961f1e245bcf071727d72e851f9487e90432051f9ce6a24f3cacd02967b03f2"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/QueueWorkerScaffoldTest.php",
+            "shipped_sha256": [
+                "54464e565d0844a2c6babdb0d02ecc50b37db455897e8275b53600002a194bb5",
+                "5f4bdd85410bcb7b927afa94eb206683c16f0a2b5ed1fc015c2132d34883244d",
+                "68b28bcefb3982d37f8bf59cf21a1ad484c2ed8a570ead855755df3a470d4a0c",
+                "6d0d3e8ed8a2ca21a5046dff7552ab2cbb43e65dafa4fc60bddf46813e7257dc",
+                "91aae0ea4cc6f7018a68e511eb0fd07f1b7f437133a5b50480622ea636c029a1",
+                "a69d7d9bec8278fcb698f01f468f1ebd5072a3bcdcb52c5c40ebbc71f67dc1a8",
+                "aa2dad565f5728c06fb0aad5fa7fe4e2cbc4d10093637e7e5442a8f3c856f595"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/RouterContainerRouteTest.php",
+            "shipped_sha256": [
+                "26f2f3e38a5a250b6952d3454e13b9c9fa0a5f9d715d180d7d685e5cf783f75e",
+                "4316033c5cd93262e5feceb4e77fa25ad5489caa74088ffc84109eb0e9a5a98c",
+                "4c13bdbe958d3884eeab4f57003fcfbe08d72699252ae54dec188473663b12c0",
+                "c1cc45457709e846304ca6347bacd8d729cf281db16bf698ca58a84b7082bb4c",
+                "dcb694d8f689b4b0ee01ee8efba4f53568117d7e21c2b9f1bb464e0430e8322f"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/RouterNetworkBindsLoopbackTest.php",
+            "shipped_sha256": [
+                "095ed78431c14c8662ad7d4f0b186f976c2e1c7e32e4c9e540b7f7459ce86267",
+                "585e8de4f9421b13db178438e26e9f5b6d70fcd5fd9d357782b8e81e14c220e2"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/RuntimeScaffoldConsistencyTest.php",
+            "shipped_sha256": [
+                "070acc4dc35cce74a19ebc2d94990968cd4f09c4bcae3902282a2b3489ded645",
+                "098466e00a126e03e397142d2409d638cfec2a6e02d35ccde5f21ddea448cd4e",
+                "14f390f657176d8e44f315b2a515a9abe13948272738d250606d7fe5912307ef",
+                "19057d1a5a942d21aeea691d0517ba9e85ac07f38493d4a469a5d1764be1e227",
+                "2c09dc7e83df21cd9576c00ae2ebcb590eb4bb5075b188a46b46e4d2c6345e95",
+                "2eca419881816f8d5dd321012f942548972de22bd15bc3f9bb9fb438ae2120ed",
+                "4e2c983891ef3e56911009b18fe75ad5a246f2dc4f85094b4a1c92a846dfc717",
+                "6ca3090ac5219772d2b463890860899a0d4784fe626bf7aa6329cc9fd261ed25",
+                "6e4528c628a60457bf8e32a78e3b44836733df028b96b33f16c01781b9ce71f4",
+                "80d920f937833834599a9b202c7d63dc3b8b73c6f70aef4f56709678c9889c49",
+                "b8c65ae4766e3853b6b65a7bc91db4af745390675869d28d36d0bd08c43cde79",
+                "d75fd0509145ed71fae9aaf11d7bb5ce03731e893c203af760d8699ec741b920",
+                "da4c74c44de8e42497c1ef372f47cc49fe95d1e8c50ff25144519ed9896eb487",
+                "ec190977c4603e3bc06e3da249e65d7ec60e113e71d5c2f9d8da7b9fa5b2f84f"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/ServerPortStaysOnAServerTest.php",
+            "shipped_sha256": [
+                "22761931c02ecde1cce8046e6a8610e33c2cac161d67aa7ac64cefe3d75bfe14",
+                "4deadf66076b7cddb95ddef7599873bc934d05b5a5958fc6769c04c772401266",
+                "7c77ab31b5fb4a97e8d07edf82bb705a713302404e50468e99171e99eb1cc8a9",
+                "a29a10b9f76908a0fe7f3cecd8ba5628d5f00b341113b84d383facdfc7a06f82"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/ServerStartSaysWhatItDidTest.php",
+            "shipped_sha256": [
+                "72c43f603f195de17386b242f993821db02f28aa8cf2b4996e5e03e581d6fa5a",
+                "7f03338cfa25c648dfdacd0126342578c5176e03e26b6e47fd363291edb5cb64"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/ServerStartWaitsForTheAppTest.php",
+            "shipped_sha256": [
+                "45fa618c65234dfbff76f6473ba9e6733e6d4649582acdcea4c5de8a3f823b69",
+                "5e95da582fc140745bf8dd8ceaa657a61dea1cbb3583efa61b70576b6a29559c",
+                "cd3df7f63bade8a0ccbb32953d24158624214721891e6e55119cabdff778fb35",
+                "ecc4d708c572bd6a28d3dae93d7c5d774eaada8bd061e45f97e2886c407e91b0",
+                "ed36ef12881b1bee3746401ece78c34fb798efb5bd4311b9d3952f51e8ec0975"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/ServerStartWarningsShellTest.php",
+            "shipped_sha256": [
+                "136c2e9e231b945574195d95c72e59ce38c40bdd5f9212191fe246bd37610bb5",
+                "2e6a0d8f0bafa8820e8ee5d90455349d32b40368d102b79aeb508323a5e55b2c",
+                "848b102803597976184a945c1fac086218304f025917aa0e52488c1c7c5f5aeb",
+                "e74025f147ccadfa58328b223d174ebe61a4a0c8eac49bb0b48649d4509cddff"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/ShellInformationModeTest.php",
+            "shipped_sha256": [
+                "4108a28f7b284da4487cf8396e4fa698ff8f633d9d3d560ec93b97f1bdf78ab7",
+                "749ff59a41734cef11cf5aa0edd51da71f30e3cad11d57ffb4a60a89fe443c8d",
+                "b2f0c6f7606dec623959edf1616fbe52decdcc3fa4435d61595a8400af076637",
+                "b8d2783abaf2eadf4565cc1e3b696c8c9633e7c5488bbe25d4d3d1d1f25b862b",
+                "d41f5d949a95441ebea89b164e71bacb7b3d6eb1599a43ebb1c8b033993a88d2",
+                "ea40053fee4e585b760fbc324bc3d7b6710e48a154ce4230d5713cf284c92edd"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/StackEventsShellTest.php",
+            "shipped_sha256": [
+                "1a26b4201598cb104e02d8bc75b024b9ca64752e13c45060ba3e7b9417631250",
+                "24ab049bd2be05f3a246a98f5d70319f9d829b139d49c1e826f98423835fc1ee",
+                "2cb6225e4c5be708c1059d0c90ce36e5672a7722c52ff62b7e26dd6d5acd01a8",
+                "3c40cb74c31762dd8b5e1c1f4c728cf9f72975ca5deec3311cec8f27882f98f3",
+                "5381b457c8a829ed1be9cb7ab2754205072eaa1f591bdb84a3bc7c42faa38488",
+                "592c705488b69af101724afd4cfc7bcdbdb8c34f83d8aec766487ed9099ff5f0",
+                "62d906fae79d57937fcdd3417a9207c1c425b538a7b60c22aa2a270105a810bd",
+                "9831ca8de42ec361749bbc761742db3818b997baaeb615660f525029fafcda0a",
+                "a10e6a414ac350e57d658fe9de87966a36831000f3b9a68951e95f2cbadf7799",
+                "b21ed3ac88bb9cbd592ce5d4411927379a6dccb2eeda0b1377bd3d8fdf2fc53f",
+                "bb105e9aa17cd24eb3e97b4714dae84a03e5cc0da64476a93c428611858dbbd3",
+                "d90a651e438880bd012068157a0a3300311d69d3ebe9c844afe7441a30f7fff5"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/SwoolePinnedTest.php",
+            "shipped_sha256": [
+                "57c8d110a72de97f1680aa616e975ea4328c1029ee71f2479c8663b9648c1b11",
+                "78bb4dd38a0e41e24d3713d034a315d36ce1131e36a65f26d849940b3c312be4"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/TestRunFocusShellTest.php",
+            "shipped_sha256": [
+                "aedac07a12f7f61412ecb5fa73fae8e17c39e970c7452b5fe8100736e23143c1",
+                "cddb547d2a12dbaca17fa35d5995f1b4161cb50dedf4ea1032011cb77860822f",
+                "cf673379a2cfda31c9a51bd518d45801e003aabc48badaf03f95a7a6ee21cf84"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/TestRunOneSpecTest.php",
+            "shipped_sha256": [
+                "2077f836107b17b26afe2ae5adefcf3f90d6bda32c6372046c6a808046003f5c",
+                "4a41fd350a45cf2a4d7fc0dfb205673b4394b5844558bb61c422eca48000ea66",
+                "93446a5044abb51ea61319be1fcf01c265b3172037f298e586f0d0a6915ac234",
+                "c8da75af5d7b705f4a54068f5accb3b7d7ddd2687059646b2f0fdb4024737198",
+                "c905681a8f0bff469f036952e41888aee2d054c8e4ff4d48285389e0aa3062fb"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/ThePortRegistryForgetsGoneProjectsTest.php",
+            "shipped_sha256": [
+                "3169401e95741dfda2623f3c8341d63184bc29ef0cf100ddd69050466f302824",
+                "795e845d443925db2f8793e2381a96fe78425caf50b5bef50ed4236699d596e3",
+                "ba07cc1c515b161761cdc64303ad6062d3b962bb32e5a620efe4982d43680d62",
+                "bde5358828027bd332b65aa29c965138874617de3b9b4159e1e19c3d30eab627"
+            ]
+        },
+        {
+            "path": "tests/Unit/Scaffold/WorkerEnvShellTest.php",
+            "shipped_sha256": [
+                "2b6babe56c20f3f648e1df22a773f1b72e232590b69e54983d3a829f209a3cf9",
+                "81225fbb5e89b02df9c3eda8283e5fd550fc64ce8a8adaa3516bd0391900480a",
+                "a0cd5a7939a276650e5738db99b96deaf9998fea8f030bc1142f1fd3e9d0a0e0",
+                "f84f74d83e89bb2a420b65d8eebbf2d7c2ebb0278ef8c408c4de0d4e54f159f9"
+            ]
+        },
+        {
+            "path": "tests/Unit/Soak/SoakSummaryTest.php",
+            "shipped_sha256": [
+                "8eefc4796316c6aa09a350adb49a64ac9be410454e6dd92e43f9900e9e65bb0f",
+                "a7480dd27e39989075b9260543302bd4700789a4ebfefe1e4fb8e9ee723c3ad5",
+                "cf4067cbdc1f142f255fc205e1d4d525d77d8ffeaa358e69b028614f123ef9c5"
+            ]
+        },
+        {
+            "path": "tools/published-install.sh",
+            "shipped_sha256": [
+                "5dd0f111477b560aff326a5f5cfe68e03606324a7a5614ca5e747ceb54ae6132"
+            ]
+        },
+        {
+            "path": "tools/soak/load.mjs",
+            "shipped_sha256": [
+                "367d862c4cb3c1a41fda4a115e33f66b44f41f0e4ad276fa0e6b4d08e23327e8",
+                "928963c57654f54a29acba0e790458500563cfe39413613ac55b2951f2b3c2d2"
+            ]
+        },
+        {
+            "path": "tools/soak/soak.sh",
+            "shipped_sha256": [
+                "0f93f40a085ec08f085e90ccf4fe1a0af08316e0e1c3aabc5752809dd5cc1de5",
+                "464a155e6311c67353aae143ec6efee628a2bd88d73f1b8edac157dcdb767dba",
+                "948bb3a1820be897bbafa6c2f970b2d23c940ecc6996b85381da4dc925814901",
+                "aaa7f5176a140d364fb25db0565bb00104e5dd90ee405f829725afa7d908775d",
+                "af960f8fe11e907948c66c445a53cd879533db3697ca25e8b3094cb3e87ae423",
+                "b7f757c5e0071ec316d49b83d333e053f27ec32702959c00902c64799ed71390"
+            ]
+        },
+        {
+            "path": "tools/soak/summary.php",
+            "shipped_sha256": [
+                "acc7e32b1be00896683d832eafdacbaf956ebd123b593ccdd351dba63285db41",
+                "b32139105557c4ec4ad8b3ffe37087bdc92ef716fb1cc3a94001b7f145ac6000",
+                "ff2db425dd9401fcf91435d7571f09bd6a9fc7cb95e7f53c12b53692010cc162"
+            ]
+        },
+        {
+            "path": "tools/stack-smoke.sh",
+            "shipped_sha256": [
+                "03323581d6e9bf721da97433fd2ae1b6602cc82bd1cb9edd1c77436a695c16d3",
+                "52dd6185c741621a748e06af5b7a6d0e8b21c86b417caeefa039547adcbe48e9",
+                "65bbad3484fffe4008e4d33cd066b707a9c575145d6699243af450993f874f85",
+                "686bedfa3ab10577829a2614296df0a1e2f0f45ba232db3ae8b7d7e7fdf5919f",
+                "9a6cfb668d0d6226d34b3ae3c07eba90f9b228b4d4f4a10aa6ca94abbdf7b49e",
+                "a6a2c4522c669c09f6fd9d86cd0c2abd4d3f58cd88a1c3d435de9b9a56ea5c49"
+            ]
+        },
+        {
+            "path": "tools/upgrade-from-previous.sh",
+            "shipped_sha256": [
+                "98247872951e3314d8e1dee3622e26042f38d256c7b96197780dfb761af6990f",
+                "ec6c20c8bcb33a4e7530a696be4abdae06bc380007963a3acd044399701f8121"
+            ]
+        }
     ]
 }

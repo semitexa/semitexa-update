@@ -18,11 +18,16 @@ final readonly class ScaffoldManifest
 
     /**
      * @param array<string, ScaffoldFileEntry> $entries Keyed by project-relative path.
+     * @param array<string, list<string>>     $retired Paths semitexa/ultimate shipped once and
+     *                                                 no longer does, each with the sha256 of every
+     *                                                 version its history has of it. A project's copy
+     *                                                 that matches one is the framework's, and goes.
      */
     public function __construct(
         public string $schemaVersion,
         public string $generatedAt,
         public array $entries,
+        public array $retired = [],
     ) {
     }
 
@@ -62,10 +67,19 @@ final readonly class ScaffoldManifest
         foreach ($this->entries as $entry) {
             $files[] = $entry->toArray();
         }
+        $retired = [];
+        $paths = array_keys($this->retired);
+        sort($paths, SORT_STRING);
+        foreach ($paths as $path) {
+            $hashes = $this->retired[$path];
+            sort($hashes, SORT_STRING);
+            $retired[] = ['path' => $path, 'shipped_sha256' => $hashes];
+        }
         return [
             'schema_version' => $this->schemaVersion,
             'generated_at' => $this->generatedAt,
             'files' => $files,
+            'retired' => $retired,
         ];
     }
 }

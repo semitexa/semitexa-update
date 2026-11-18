@@ -75,7 +75,7 @@ final class ScaffoldManifestLoader
         }
         ksort($entries);
 
-        return new ScaffoldManifest($schemaVersion, $generatedAt, $entries);
+        return new ScaffoldManifest($schemaVersion, $generatedAt, $entries, $this->retiredFromArray($data['retired'] ?? [], $sourceHint, $entries));
     }
 
     /**
@@ -120,6 +120,67 @@ final class ScaffoldManifestLoader
             preserveExecutable: (bool) ($raw['preserve_executable'] ?? false),
             notes: (string) ($raw['notes'] ?? ''),
         );
+    }
+
+    /**
+     * The update deletes what this list names, so it is read as strictly as
+     * the files: a path that could leave the project, or one the scaffold
+     * still ships, stops the load.
+     *
+     * @param array<string, ScaffoldFileEntry> $entries
+     * @return array<string, list<string>>
+     */
+    private function retiredFromArray(mixed $raw, string $sourceHint, array $entries): array
+    {
+        if (!is_array($raw) || !array_is_list($raw)) {
+            throw new \RuntimeException("Scaffold manifest in {$sourceHint} has a retired section that is not a list.");
+        }
+        $retired = [];
+        foreach ($raw as $index => $item) {
+            if (!is_array($item)) {
+                throw new \RuntimeException("Scaffold manifest retired entry #{$index} in {$sourceHint} is not an object.");
+            }
+            $path = $item['path'] ?? null;
+            if (!is_string($path) || !$this->isProjectRelativePath($path)) {
+                throw new \RuntimeException("Scaffold manifest retired entry #{$index} in {$sourceHint} has an unsafe path.");
+            }
+            if (isset($retired[$path])) {
+                throw new \RuntimeException("Scaffold manifest has duplicate retired entry for path: {$path}");
+            }
+            if (isset($entries[$path])) {
+                throw new \RuntimeException("Scaffold manifest lists {$path} as both shipped and retired.");
+            }
+            $hashes = $item['shipped_sha256'] ?? null;
+            if (!is_array($hashes) || $hashes === []) {
+                throw new \RuntimeException("Scaffold manifest retired entry '{$path}' has no shipped_sha256.");
+            }
+            $valid = [];
+            foreach ($hashes as $hash) {
+                if (!is_string($hash) || !$this->isSha256($hash)) {
+                    throw new \RuntimeException("Scaffold manifest retired entry '{$path}' has an invalid shipped_sha256 element.");
+                }
+                $valid[] = $hash;
+            }
+            $retired[$path] = array_values(array_unique($valid));
+        }
+        ksort($retired, SORT_STRING);
+
+        return $retired;
+    }
+
+    /** Relative, forward slashes, no empty, '.' or '..' segment: it names a file inside the project. */
+    private function isProjectRelativePath(string $path): bool
+    {
+        if ($path === '' || str_starts_with($path, '/') || str_contains($path, '\\') || str_contains($path, "\0")) {
+            return false;
+        }
+        foreach (explode('/', $path) as $segment) {
+            if ($segment === '' || $segment === '.' || $segment === '..') {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private function isSha256(string $candidate): bool
