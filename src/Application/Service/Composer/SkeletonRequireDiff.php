@@ -54,6 +54,12 @@ final class SkeletonRequireDiff
             return null;
         }
 
+        // A package vendor already holds came as a dependency of another one:
+        // semitexa/installer arrives with semitexa/update since 2026.11.20.0947.
+        // Proposing `composer require` for it was advice the project did not
+        // need, printed right after composer had installed it (20.11).
+        $installed = $this->installedPackages($projectRoot);
+
         $descriptionsFetched = 0;
         $missing = [];
         foreach ($skeletonRequire as $name => $pin) {
@@ -63,7 +69,7 @@ final class SkeletonRequireDiff
             if (!str_starts_with($name, self::PREFIX) || $name === $this->skeletonPackage) {
                 continue;
             }
-            if (isset($declared[$name])) {
+            if (isset($declared[$name]) || isset($installed[$name])) {
                 continue;
             }
             // Descriptions cost one extra Packagist request per proposal; cap
@@ -126,6 +132,36 @@ final class SkeletonRequireDiff
         $expanded = P2MetadataExpander::expand($rows);
 
         return (string) ($expanded[0]['description'] ?? '');
+    }
+
+    /**
+     * The packages vendor/composer/installed.json lists. None when it is not
+     * there or cannot be read: then every undeclared package is proposed, as
+     * before. Composer 2 wraps the list in "packages"; Composer 1 is the list.
+     *
+     * @return array<string, true>
+     */
+    private function installedPackages(string $projectRoot): array
+    {
+        $path = $projectRoot . '/vendor/composer/installed.json';
+        $json = is_file($path) ? @file_get_contents($path) : false;
+        $data = $json !== false ? json_decode($json, true) : null;
+        if (!is_array($data)) {
+            return [];
+        }
+        $packages = $data['packages'] ?? $data;
+        if (!is_array($packages)) {
+            return [];
+        }
+
+        $installed = [];
+        foreach ($packages as $package) {
+            if (is_array($package) && is_string($package['name'] ?? null)) {
+                $installed[$package['name']] = true;
+            }
+        }
+
+        return $installed;
     }
 
     /**

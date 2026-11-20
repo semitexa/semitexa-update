@@ -16,6 +16,7 @@ use Semitexa\Update\Domain\Enum\ScaffoldSyncStatus;
 use Semitexa\Update\Domain\Enum\UpdatePhase;
 use Semitexa\Update\Domain\Model\Composer\ComposerUpdatePlan;
 use Semitexa\Update\Domain\Model\Composer\ComposerUpdateResult;
+use Semitexa\Update\Domain\Model\Composer\NewSkeletonPackage;
 use Semitexa\Update\Domain\Model\Advisory\UpdateAdvisory;
 use Semitexa\Update\Domain\Model\PackageDrift\PackageDriftReport;
 use Semitexa\Update\Domain\Model\Scaffold\ScaffoldSyncPlan;
@@ -94,6 +95,22 @@ final class UpdateCommand extends BaseCommand
             );
     }
 
+    /**
+     * The skeleton packages this project lacks: Packagist's answer. A seam for
+     * tests, which must not ask Packagist.
+     *
+     * @var \Closure(): (list<NewSkeletonPackage>|null)
+     */
+    private \Closure $missingSkeletonPackages;
+
+    public function __construct()
+    {
+        parent::__construct();
+        // Tight 3s timeout: this section is advisory and must not make the
+        // interactive update noticeably slower on bad connectivity.
+        $this->missingSkeletonPackages = fn (): ?array => new SkeletonRequireDiff(timeoutSeconds: 3)->missingPackages($this->getProjectRoot());
+    }
+
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $io = new SymfonyStyle($input, $output);
@@ -143,6 +160,7 @@ final class UpdateCommand extends BaseCommand
                     return Command::FAILURE;
                 }
             }
+            $this->renderSkeletonRequireDiff($io);
             return Command::SUCCESS;
         }
 
@@ -188,6 +206,7 @@ final class UpdateCommand extends BaseCommand
         }
 
         $io->success('Update completed.');
+        $this->renderSkeletonRequireDiff($io);
         return Command::SUCCESS;
     }
 
@@ -242,7 +261,6 @@ final class UpdateCommand extends BaseCommand
             $this->renderPackageDrift($io, $planReport->packageDrift);
         }
 
-        $this->renderSkeletonRequireDiff($io);
 
         if ($planReport->scaffoldPlan !== null) {
             $this->renderScaffoldPlan($io, $planReport->scaffoldPlan);
@@ -441,13 +459,17 @@ final class UpdateCommand extends BaseCommand
      * project never declared (projects born from an older skeleton do not gain
      * new root requires on composer update). Degrades silently when Packagist
      * is unreachable — this must never block or fail an update run.
+     *
+     * Rendered once, by the process that finishes the run, after its stages.
+     * Rendered with the plan, before composer, it proposed a package the run
+     * was about to install as a dependency (semitexa/installer with
+     * semitexa/update, 20.11), and a run that continues in a fresh process
+     * printed it twice.
      */
     private function renderSkeletonRequireDiff(SymfonyStyle $io): void
     {
         try {
-            // Tight 3s timeout: this section is advisory and must not make the
-            // interactive update noticeably slower on bad connectivity.
-            $missing = new SkeletonRequireDiff(timeoutSeconds: 3)->missingPackages($this->getProjectRoot());
+            $missing = ($this->missingSkeletonPackages)();
         } catch (\Throwable) {
             return;
         }
