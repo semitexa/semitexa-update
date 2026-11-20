@@ -38,6 +38,7 @@ final class InstallerKeepsEveryVersionUpdateShippedTest extends TestCase
         foreach ($frozen['files'] as $path => $hashes) {
             self::assertIsString($path);
             self::assertIsArray($hashes);
+            self::assertNotSame([], $hashes, "{$path} has no version in the fixture");
             $entry = $installer->entryByPath($path);
             $known = $entry === null ? [] : [$entry->currentSha256, ...$entry->previousSha256];
             // A file the installer took out on purpose keeps its versions in retired.
@@ -51,7 +52,8 @@ final class InstallerKeepsEveryVersionUpdateShippedTest extends TestCase
             }
         }
 
-        self::assertGreaterThan(250, $checked, 'the fixture lost its history');
+        // Exact: the fixture is frozen, and one hash lost from it is history lost (review, update#121).
+        self::assertSame(292, $checked, 'the fixture lost its history');
         self::assertSame([], $forgotten, 'semitexa/installer forgot versions projects may hold');
     }
 

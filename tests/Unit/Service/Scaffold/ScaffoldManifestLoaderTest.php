@@ -94,6 +94,49 @@ final class ScaffoldManifestLoaderTest extends TestCase
         (new ScaffoldManifestLoader())->load($this->writeManifest($data));
     }
 
+    /**
+     * Review on update#121: files keyed by path reached entryFromArray() with a
+     * string for its int index, a TypeError the update does not turn into an
+     * integrity error, so its plan stopped before composer could repair it.
+     *
+     * @return iterable<string, array{array<string, mixed>, string}>
+     */
+    public static function malformedShapes(): iterable
+    {
+        $entry = [
+            'path' => 'bin/semitexa',
+            'current_sha256' => self::HASH_BIN_CURRENT,
+            'previous_sha256' => [],
+            'category' => 'executable',
+            'critical' => true,
+            'auto_update' => true,
+            'preserve_executable' => true,
+            'notes' => '',
+        ];
+        $manifest = static fn (mixed $files, mixed $schema = ScaffoldManifest::SCHEMA_VERSION): array => [
+            'schema_version' => $schema,
+            'generated_at' => '2026-05-11T00:00:00+00:00',
+            'files' => $files,
+        ];
+
+        yield 'files keyed by path' => [$manifest(['bin/semitexa' => $entry]), 'files section that is not a list'];
+        yield 'a path that is a list' => [$manifest([['path' => ['bin', 'semitexa']] + $entry]), 'has no path'];
+        yield 'a current hash that is a number' => [$manifest([['current_sha256' => 42] + $entry]), 'invalid current_sha256'];
+        yield 'a category that is a list' => [$manifest([['category' => ['executable']] + $entry]), 'invalid category: array'];
+        yield 'a schema version that is a list' => [$manifest([$entry], ['v1']), 'Unsupported scaffold manifest schema_version'];
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('malformedShapes')]
+    public function testAMalformedShapeIsARuntimeExceptionNotATypeError(array $data, string $message): void
+    {
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage($message);
+        (new ScaffoldManifestLoader())->load($this->writeManifest($data));
+    }
+
     public function testRejectsNonSha256CurrentHash(): void
     {
         $data = $this->validData();

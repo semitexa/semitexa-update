@@ -92,6 +92,9 @@ final class UpdateScaffoldRebuildCommand extends BaseCommand
         $manifestPath = $packageRoot . '/resources/scaffold-manifest.json';
 
         try {
+            // Before any source is resolved, overrides included: an installed
+            // package is never rewritten (D5; review, update#121).
+            $this->refuseAnInstalledPackage($packageRoot);
             $installerScaffold = $this->resolveInstallerScaffold($input, $packageRoot);
             $installerManifestPath = \dirname($installerScaffold) . '/resources/scaffold-manifest.json';
             $docsRoot = $this->resolveAgentDocsRoot($input, $packageRoot);
@@ -167,7 +170,11 @@ final class UpdateScaffoldRebuildCommand extends BaseCommand
             foreach (array_diff($targetFiles, array_keys($docSources)) as $relative) {
                 $removed[] = $relative;
                 if (!$check) {
-                    @unlink($updateScaffold . '/' . $relative);
+                    // A file that stays while its entry goes would be a runtime
+                    // file this package still ships, unlisted (review, update#121).
+                    if (!@unlink($updateScaffold . '/' . $relative) && file_exists($updateScaffold . '/' . $relative)) {
+                        throw new \RuntimeException("Cannot remove {$updateScaffold}/{$relative}; nothing was rebuilt.");
+                    }
                     $this->removeEmptyParents($updateScaffold, $relative);
                 }
             }
@@ -256,6 +263,17 @@ final class UpdateScaffoldRebuildCommand extends BaseCommand
             ['Files removed from this copy' => $removed === [] ? 'none' : implode(', ', $removed)],
             ['This manifest' => $manifestChanged ? 'regenerated' : 'unchanged'],
         );
+    }
+
+    /** This package as Composer installed it into a project: <project>/vendor/semitexa/update. */
+    private function refuseAnInstalledPackage(string $packageRoot): void
+    {
+        if (basename(\dirname($packageRoot, 2)) === 'vendor') {
+            throw new \RuntimeException(
+                "update:scaffold:rebuild runs in the framework workspace, where semitexa-update and semitexa-installer are "
+                . "checkouts; {$packageRoot} is an installed package, and its scaffold and manifests are never rewritten.",
+            );
+        }
     }
 
     private function resolveInstallerScaffold(InputInterface $input, string $packageRoot): string

@@ -80,7 +80,7 @@ final class UpdateScaffoldRebuildCommandTest extends TestCase
         $entry = $this->entry($this->installerManifestPath, 'bin/semitexa');
         self::assertSame(hash('sha256', self::BIN_NEW), $entry['current_sha256']);
         // A project still on the old pristine file is updated, not told it edited it.
-        self::assertContains(hash('sha256', self::BIN_OLD), $entry['previous_sha256']);
+        self::assertSame([hash('sha256', self::BIN_OLD)], $entry['previous_sha256']);
     }
 
     public function testThisPackagesCopyKeepsOnlyTheAgentDocs(): void
@@ -113,8 +113,10 @@ final class UpdateScaffoldRebuildCommandTest extends TestCase
         file_put_contents($this->base . '/semitexa-ultimate/AGENTS.md', "# AGENTS.md, with directive 11\n");
         self::assertSame(Command::FAILURE, $this->tester()->execute(['--check' => true]), 'a newer manual is drift');
         $before = $this->entry($this->manifestPath, 'AGENTS.md')['current_sha256'];
+        $older = hash('sha256', "# AGENTS.md, older\n");
         $this->tester()->execute([]);
-        self::assertContains($before, $this->entry($this->manifestPath, 'AGENTS.md')['previous_sha256'], 'a project still on the old manual stays eligible');
+        // Both earlier manuals stay known, newest first: a project on either is updated.
+        self::assertSame([$before, $older], $this->entry($this->manifestPath, 'AGENTS.md')['previous_sha256'], 'a project still on an old manual stays eligible');
     }
 
     public function testCheckReportsInSyncAfterRebuildAndWritesNothing(): void
@@ -212,6 +214,37 @@ final class UpdateScaffoldRebuildCommandTest extends TestCase
         $this->writeManifest($this->installerManifestPath, $manifest);
         self::assertSame(Command::SUCCESS, $this->tester()->execute([]));
         self::assertSame(['docker-compose.yml'], array_column($this->manifest($this->installerManifestPath)['retired'] ?? [], 'path'));
+    }
+
+    public function testAnOverrideDoesNotLetItRewriteAVendorInstall(): void
+    {
+        $vendor = $this->base . '/project/vendor/semitexa';
+        mkdir($vendor . '/update/resources/scaffold', 0777, true);
+        file_put_contents($vendor . '/update/resources/scaffold-manifest.json', '{"installed": true}');
+
+        $tester = $this->tester($vendor . '/update');
+        $exit = $tester->execute(['--installer-scaffold' => $this->installerScaffold, '--agent-docs-root' => $this->base . '/semitexa-ultimate']);
+
+        self::assertSame(Command::FAILURE, $exit);
+        self::assertStringContainsString('is an installed package', (string) preg_replace('/\s+/', ' ', $tester->getDisplay()));
+        self::assertSame('{"installed": true}', file_get_contents($vendor . '/update/resources/scaffold-manifest.json'));
+    }
+
+    public function testAFileThatCannotBeRemovedStopsTheRebuild(): void
+    {
+        $ownBefore = (string) file_get_contents($this->manifestPath);
+        chmod($this->updateScaffold . '/bin', 0555);
+        try {
+            $tester = $this->tester();
+            $exit = $tester->execute([]);
+        } finally {
+            chmod($this->updateScaffold . '/bin', 0755);
+        }
+
+        self::assertSame(Command::FAILURE, $exit);
+        self::assertStringContainsString('Cannot remove', $tester->getDisplay());
+        self::assertSame($ownBefore, (string) file_get_contents($this->manifestPath), 'no manifest drops an entry whose file is still there');
+        self::assertFileExists($this->updateScaffold . '/bin/semitexa');
     }
 
     public function testFailsClearlyWhenTheInstallerScaffoldGivenIsMissing(): void
