@@ -14,6 +14,7 @@ use Semitexa\Update\Domain\Enum\ScaffoldSyncAction;
 use Semitexa\Update\Domain\Enum\ScaffoldSyncOutcome;
 use Semitexa\Update\Domain\Enum\ScaffoldSyncStatus;
 use Semitexa\Update\Domain\Enum\UpdatePhase;
+use Semitexa\Update\Application\Service\RequiredSettings\RequiredSettingsStageRenderer;
 use Semitexa\Update\Domain\Model\Composer\ComposerUpdatePlan;
 use Semitexa\Update\Domain\Model\Composer\ComposerUpdateResult;
 use Semitexa\Update\Domain\Model\Composer\NewSkeletonPackage;
@@ -331,6 +332,7 @@ final class UpdateCommand extends BaseCommand
             }
             $report = $stage->report;
             if ($report === null) {
+                RequiredSettingsStageRenderer::render($io, $stage->requiredSettings);
                 if ($stage->message !== null) {
                     $escaped = \Symfony\Component\Console\Formatter\OutputFormatter::escape($stage->message);
                     $io->writeln(

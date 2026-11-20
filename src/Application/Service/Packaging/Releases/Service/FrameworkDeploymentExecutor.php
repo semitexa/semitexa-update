@@ -16,6 +16,7 @@ use Semitexa\Update\Domain\Model\DeploymentPlan;
 use Semitexa\Update\Application\Service\Packaging\Releases\Support\ComposerStateSnapshot;
 use Semitexa\Update\Application\Service\Packaging\Releases\Support\DeploymentLogWriter;
 use Semitexa\Update\Application\Service\Packaging\Releases\Support\InstalledSemitexaPackageReader;
+use Semitexa\Update\Application\Service\Packaging\Releases\Support\RequiredSettingsGate;
 
 final class FrameworkDeploymentExecutor
 {
@@ -23,7 +24,7 @@ final class FrameworkDeploymentExecutor
      * $commandRunner overrides shell execution — tests inject a fake to
      * exercise partial-failure/rollback ordering without running composer.
      * Signature: fn (string $command, string $projectRoot): void, throw on
-     * failure (same contract as run()).
+     * failure (same contract as run()). $doctorProbe: {@see RequiredSettingsGate::with()}.
      */
     public function __construct(
         private readonly DeploymentLogWriter $logWriter = new DeploymentLogWriter(),
@@ -31,6 +32,7 @@ final class FrameworkDeploymentExecutor
         private readonly ?UpdateLock $lock = null,
         private readonly ?\Closure $commandRunner = null,
         private readonly HealthChecker $healthChecker = new HealthChecker(),
+        private readonly ?\Semitexa\Update\Application\Service\RequiredSettings\DoctorProbe $doctorProbe = null,
     ) {}
 
     /**
@@ -74,6 +76,7 @@ final class FrameworkDeploymentExecutor
         $installedBefore = false;
         /** @var array<string, string>|null $unhealthySet what vendor/ held when the health check failed */
         $unhealthySet = null;
+        $settingsGate = RequiredSettingsGate::with($this->doctorProbe, realByDefault: $this->commandRunner === null);
         try {
             if (!$plan->config->enabled) {
                 return $this->finalize($projectRoot, $result, 'skipped');
@@ -107,6 +110,9 @@ final class FrameworkDeploymentExecutor
                 return $this->finalize($projectRoot, $result, 'noop');
             }
 
+            if ($settingsGate->waiting($projectRoot, $plan, $result)) {
+                return $this->finalize($projectRoot, $result, 'noop');
+            }
             // Same lock as the manual `update` sweep: never race a running
             // operator update from the auto-deploy timer (or vice versa).
             $lock = $this->lock ?? new UpdateLock($projectRoot);
@@ -151,6 +157,7 @@ final class FrameworkDeploymentExecutor
                 return $this->finalize($projectRoot, $result, 'noop', $plan, $runId);
             }
 
+            $settingsGate->assert($projectRoot, $result);
             $this->run($this->projectCliCommand($projectRoot, 'orm:sync'), $projectRoot);
             // Disk only: core's cache:clear also reloads the workers, and core
             // refuses a reload (exit 1) when the master's loaded-files record is
@@ -239,6 +246,7 @@ final class FrameworkDeploymentExecutor
                         ? 'recorded'
                         : 'not recorded: the next tick may deploy the same releases again';
                 }
+                $settingsGate->blocked($projectRoot, $plan, $e, $result);
                 // Rolled back: vendor/ no longer holds what was read after the update.
                 foreach ($result['updated_packages'] as $i => $update) {
                     unset($result['updated_packages'][$i]['deployed_version']);

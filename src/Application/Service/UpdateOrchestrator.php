@@ -6,6 +6,7 @@ namespace Semitexa\Update\Application\Service;
 
 use Semitexa\Update\Discovery\UpdateAdvisoryDiscovery;
 use Semitexa\Update\Application\Service\Composer\ComposerUpdateRunner;
+use Semitexa\Update\Application\Service\RequiredSettings\DoctorProbe;
 use Semitexa\Update\Application\Service\Scaffold\ScaffoldFileClassifier;
 use Semitexa\Update\Application\Service\Scaffold\ScaffoldManifestLoader;
 use Semitexa\Update\Application\Service\Scaffold\ScaffoldSyncEngine;
@@ -28,14 +29,19 @@ use Semitexa\Update\Domain\Model\Plan;
  *
  * Stage order:
  *
- *   package-drift  →  scaffold-sync  →  pre-patches  →  orm-sync
- *                  →  apply-patches  →  post-patches
+ *   preflight  →  composer-update  →  required-settings  →  scaffold-sync
+ *              →  pre-patches  →  orm-sync  →  apply-patches  →  post-patches
  *
  * Stage semantics:
  *
  *  - package-drift is read-only. It surfaces composer.json/lock/installed.json
  *    drift across `semitexa/*` and is purely informational — Composer is never
  *    invoked. Drift never aborts the run.
+ *  - required-settings asks the doctor of the code composer just installed, in
+ *    a new process, which required settings this environment lacks. A failing
+ *    check that names a setting (APP_SECRET) aborts the run before the
+ *    scaffold or the database is touched; it runs under --no-composer too.
+ *    Other failing checks, and a doctor that cannot be run, abort nothing.
  *  - scaffold-sync runs the manifest-driven classifier + engine from uw-2/uw-3.
  *    A scaffold integrity failure (manifest disagrees with the scaffold dir)
  *    aborts the run before any DB-affecting stage executes. A successful run
@@ -74,6 +80,7 @@ final class UpdateOrchestrator
         private readonly ?PreflightChecker $preflight = null,
         private readonly ?HealthChecker $healthChecker = null,
         private readonly ?string $healthcheckUrl = null,
+        private readonly ?DoctorProbe $requiredSettingsProbe = null,
     ) {
     }
 
@@ -253,6 +260,9 @@ final class UpdateOrchestrator
         if ($stage->scaffoldReport !== null && $stage->scaffoldReport->integrityErrors !== []) {
             return implode('; ', $stage->scaffoldReport->integrityErrors);
         }
+        if ($stage->requiredSettings !== null) {
+            return $stage->requiredSettings->describe();
+        }
         if ($stage->preflightReport !== null) {
             return implode('; ', array_map(
                 static fn (\Semitexa\Update\Domain\Model\PreflightCheck $c): string => $c->name . ': ' . $c->message,
@@ -309,6 +319,18 @@ final class UpdateOrchestrator
                 return $stages;
             }
             if ($composerOnly) {
+                return $stages;
+            }
+        }
+
+        // The code composer installed may need a setting this environment has
+        // never had. Asked now, before the scaffold, the schema or a patch
+        // moves, so a refusal leaves all three as they were. Under
+        // --no-composer too: vendor/ can be ahead of .env without this run.
+        if ($this->requiredSettingsProbe !== null && $this->projectRoot !== null) {
+            $requiredSettings = $this->requiredSettingsProbe->probe($this->projectRoot);
+            $stages[] = new OrchestratorStage('required-settings', null, null, requiredSettings: $requiredSettings);
+            if (!$requiredSettings->isSuccess()) {
                 return $stages;
             }
         }

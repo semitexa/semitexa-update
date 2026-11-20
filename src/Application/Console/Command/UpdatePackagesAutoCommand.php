@@ -74,6 +74,11 @@ final class UpdatePackagesAutoCommand extends BaseCommand
             $io->text('Restart: ' . $result['restart_status']);
         }
 
+        $requiredSettings = $result['required_settings'] ?? null;
+        if (is_string($requiredSettings)) {
+            $io->text('Required settings: ' . $requiredSettings);
+        }
+
         if (($result['run_journal'] ?? null) !== null) {
             $io->text('Run journal: ' . $result['run_journal']);
         }
