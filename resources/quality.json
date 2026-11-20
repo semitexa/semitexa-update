@@ -1,0 +1,8 @@
+{
+    "_": "This package's share of the Semitexa quality ledger: lower is better. Written only by `bin/semitexa ai:quality`; do not edit by hand.",
+    "metrics": {
+        "tests.skip-calls": {
+            "count": 2
+        }
+    }
+}
