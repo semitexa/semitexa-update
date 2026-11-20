@@ -5,7 +5,7 @@ All notable changes to `semitexa/update`. Sections are `## <version> — <date>`
 This file is machine-read by `update:changelog` and the OS "What's new"
 surface — keep entries short and operator-facing.
 
-## Unreleased
+## 2026.11.20.0947 — 2026-11-20
 
 ### Changed
 - **The scaffold comes from `semitexa/installer`.** `bin/semitexa update` takes
