@@ -173,7 +173,7 @@ final class UpdateScaffoldRebuildCommand extends BaseCommand
                     // A file that stays while its entry goes would be a runtime
                     // file this package still ships, unlisted (review, update#121).
                     if (!@unlink($updateScaffold . '/' . $relative) && file_exists($updateScaffold . '/' . $relative)) {
-                        throw new \RuntimeException("Cannot remove {$updateScaffold}/{$relative}; nothing was rebuilt.");
+                        throw new \RuntimeException("Cannot remove {$updateScaffold}/{$relative}; neither manifest was written. Fix its permissions and run the rebuild again.");
                     }
                     $this->removeEmptyParents($updateScaffold, $relative);
                 }

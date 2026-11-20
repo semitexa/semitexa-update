@@ -232,6 +232,10 @@ final class UpdateScaffoldRebuildCommandTest extends TestCase
 
     public function testAFileThatCannotBeRemovedStopsTheRebuild(): void
     {
+        if (function_exists('posix_geteuid') && posix_geteuid() === 0) {
+            // verify:accept-test-change root removes a file from a read-only directory, so there is no failure to provoke; the suite runs as uid 1000 in the workspace and the release clone
+            self::markTestSkipped('root ignores the directory permission this test relies on');
+        }
         $ownBefore = (string) file_get_contents($this->manifestPath);
         chmod($this->updateScaffold . '/bin', 0555);
         try {
