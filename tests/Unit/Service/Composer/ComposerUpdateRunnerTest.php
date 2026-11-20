@@ -695,6 +695,55 @@ final class ComposerUpdateRunnerTest extends TestCase
         self::assertStringNotContainsString('skipped', $result->message);
     }
 
+    /**
+     * One source for bin/semitexa, step 2 (Fable's review, D1): semitexa/installer
+     * carries the scaffold, and a project made before that has it only through
+     * semitexa/update. A release of the installer alone moves none of the
+     * project's pins; the release set's pin of the installer is what says the
+     * project is behind.
+     */
+    public function testATransitivePackageBehindTheReleaseSetRunsComposer(): void
+    {
+        $this->writeProject(
+            declared:  ['semitexa/update' => '2026.05.12.0744'],
+            locked:    ['semitexa/update' => '2026.05.12.0744', 'semitexa/installer' => '2026.05.10.1449'],
+            installed: ['semitexa/update' => '2026.05.12.0744', 'semitexa/installer' => '2026.05.10.1449'],
+        );
+        $resolver = FakeResolver::withReleaseSet('2026.05.13.0900', [
+            'semitexa/update' => '2026.05.12.0744',
+            'semitexa/installer' => '2026.05.13.0900',
+        ]);
+        $executor = new FakeExecutor(true);
+
+        $result = (new ComposerUpdateRunner($executor, $resolver))
+            ->execute($this->projectRoot, dryRun: false);
+
+        self::assertSame(1, $executor->callCount, 'An installer behind the release set must let composer move it.');
+        self::assertNotSame('', $result->message);
+        self::assertStringNotContainsString('skipped', $result->message);
+    }
+
+    public function testATransitivePackageAtTheReleaseSetStillSkips(): void
+    {
+        $this->writeProject(
+            declared:  ['semitexa/update' => '2026.05.12.0744'],
+            locked:    ['semitexa/update' => '2026.05.12.0744', 'semitexa/installer' => '2026.05.13.0900'],
+            installed: ['semitexa/update' => '2026.05.12.0744', 'semitexa/installer' => '2026.05.13.0900'],
+        );
+        // The installer's own newest is ahead of the set: only the set counts.
+        $resolver = FakeResolver::withReleaseSet('2026.05.13.0900', [
+            'semitexa/update' => '2026.05.12.0744',
+            'semitexa/installer' => '2026.05.13.0900',
+        ], ['semitexa/installer' => ['2026.05.14.1000', '2026.05.13.0900']]);
+        $executor = new FakeExecutor(true);
+
+        $result = (new ComposerUpdateRunner($executor, $resolver))
+            ->execute($this->projectRoot, dryRun: false);
+
+        self::assertSame(0, $executor->callCount);
+        self::assertSame(ComposerUpdateOutcome::Clean, $result->outcome);
+    }
+
     /** A coherent set still skips: this must not become "run composer every time". */
     public function testACoherentWildcardSetStillSkips(): void
     {

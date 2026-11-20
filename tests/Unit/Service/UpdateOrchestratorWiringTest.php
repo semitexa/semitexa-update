@@ -8,6 +8,7 @@ use PHPUnit\Framework\TestCase;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Orm\Adapter\SqliteAdapter;
 use Semitexa\Update\Application\Service\DagBuilder;
+use Semitexa\Update\Domain\Model\Scaffold\ScaffoldSource;
 use Semitexa\Update\Application\Service\JournalRepository;
 use Semitexa\Update\Application\Service\LiveSchemaInspector;
 use Semitexa\Update\Application\Service\PackageDriftInspector;
@@ -407,8 +408,33 @@ final class UpdateOrchestratorWiringTest extends TestCase
         );
         self::assertSame(['composer-update', 'pre-patches', 'orm-sync', 'apply-patches', 'post-patches'], $names);
 
-        $this->expectException(\Throwable::class);
-        $orchestrator->plan();
+        // With the scaffold stage on, a broken manifest is an integrity error of
+        // the plan, not an exception: the command plans before it runs, and
+        // composer, the way to a manifest this update can read, has to get to run
+        // (Fable's review of one source for bin/semitexa, step 2, D3).
+        $scaffoldPlan = $orchestrator->plan()->scaffoldPlan;
+        self::assertNotNull($scaffoldPlan);
+        self::assertTrue($scaffoldPlan->hasIntegrityFailure());
+        self::assertStringContainsString('The scaffold manifest of semitexa/update cannot be read', $scaffoldPlan->integrityErrors[0]);
+    }
+
+    public function testAnUnreadableManifestLetsComposerRunAndStopsBeforeTheDatabase(): void
+    {
+        $this->writeProjectFile('bin/semitexa', "#!/bin/sh\necho old\n");
+        $orchestrator = $this->orchestratorWithComposer(
+            available: true,
+            anchor: '2026.05.12.0744',
+            installedBefore: '2026.05.10.1449',
+            installedAfter: '2026.05.10.1449',
+        );
+        file_put_contents($this->manifestPath, '{not json');
+
+        $stages = $orchestrator->run(dryRun: false);
+
+        self::assertSame(['composer-update', 'scaffold-sync'], array_map(static fn (\Semitexa\Update\Domain\Model\OrchestratorStage $s) => $s->name, $stages));
+        self::assertNotNull($stages[1]->scaffoldReport);
+        self::assertFalse($stages[1]->scaffoldReport->isSuccess());
+        self::assertSame("#!/bin/sh\necho old\n", file_get_contents($this->projectRoot . '/bin/semitexa'), 'nothing of the scaffold was written');
     }
 
     public function testUnresolvedUpstreamBlocksScaffoldAndDbStagesByDefault(): void
@@ -555,8 +581,7 @@ final class UpdateOrchestratorWiringTest extends TestCase
             scaffoldClassifier: new ScaffoldFileClassifier($hasher),
             scaffoldEngine: new ScaffoldSyncEngine($hasher),
             projectRoot: $this->projectRoot,
-            scaffoldRoot: $this->scaffoldRoot,
-            manifestPath: $this->manifestPath,
+            scaffoldSources: [new ScaffoldSource('semitexa/update', $this->scaffoldRoot, $this->manifestPath)],
             composerRunner: $composerRunner,
         );
     }
@@ -586,8 +611,7 @@ final class UpdateOrchestratorWiringTest extends TestCase
             scaffoldClassifier: new ScaffoldFileClassifier($hasher),
             scaffoldEngine: new ScaffoldSyncEngine($hasher),
             projectRoot: $this->projectRoot,
-            scaffoldRoot: $this->scaffoldRoot,
-            manifestPath: $this->manifestPath,
+            scaffoldSources: [new ScaffoldSource('semitexa/update', $this->scaffoldRoot, $this->manifestPath)],
         );
     }
 

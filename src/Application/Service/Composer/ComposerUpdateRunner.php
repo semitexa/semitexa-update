@@ -139,7 +139,8 @@ final class ComposerUpdateRunner
         // `bin/semitexa update`. The `$force` flag (wired to --composer-only)
         // is the explicit operator override.
         $driftReason = $this->lockOrVendorDriftReason($projectRoot)
-            ?? $this->wildcardBehindReason($plan);
+            ?? $this->wildcardBehindReason($plan)
+            ?? $this->transitiveBehindReason($plan);
         if ($bumps === [] && $driftReason === null && !$force) {
             return new ComposerUpdateResult(
                 outcome: ComposerUpdateOutcome::Clean,
@@ -492,6 +493,46 @@ final class ComposerUpdateRunner
             if (SemitexaReleaseVersion::compare($entry->upstreamVersion, $entry->installed) > 0) {
                 return sprintf(
                     '%s is installed at %s and upstream offers %s',
+                    $entry->name,
+                    $entry->installed,
+                    $entry->upstreamVersion,
+                );
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * A package this project does not require itself, installed below the
+     * version the release set pins.
+     *
+     * semitexa/installer reaches a project made before step 2 of one source for
+     * bin/semitexa this way, through semitexa/update, and from that step it
+     * carries the scaffold. No pin of the project's would move on a release of
+     * the installer alone, so without this the composer stage was skipped, the
+     * old scaffold stayed, and the scaffold stage reported it current (Fable's
+     * review of the step 2 plan, D1). Only the release set's version counts:
+     * a transitive package's own newest release may be one the project's
+     * other pins cannot take, and composer would run for nothing every time.
+     * Like the wildcard reason it can still run composer for nothing when a
+     * project's own constraints hold the package below the set (a dev-branch
+     * ultimate, a private package pinning it): a no-op run costs seconds, while
+     * a skipped one left every older project on the old scaffold.
+     */
+    private function transitiveBehindReason(ComposerUpdatePlan $plan): ?string
+    {
+        foreach ($plan->entries as $entry) {
+            if ($entry->pinKind !== ComposerUpdatePlanEntry::PIN_TRANSITIVE
+                || $entry->installed === null
+                || $entry->upstreamVersion === null
+                || !SemitexaReleaseVersion::isValid($entry->installed)
+            ) {
+                continue;
+            }
+            if (SemitexaReleaseVersion::compare($entry->upstreamVersion, $entry->installed) > 0) {
+                return sprintf(
+                    '%s is installed at %s and the release set pins %s',
                     $entry->name,
                     $entry->installed,
                     $entry->upstreamVersion,

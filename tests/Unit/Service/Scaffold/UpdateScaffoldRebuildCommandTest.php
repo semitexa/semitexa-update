@@ -11,170 +11,273 @@ use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
 
 /**
- * Locks the contract of `update:scaffold:rebuild`: it must mirror the installer
- * SSoT into this package's resources/scaffold AND keep scaffold-manifest.json
- * aligned (growing previous_sha256), in one step — the atomic operation that
- * replaces the error-prone manual "copy file, forget to rebuild manifest" dance
- * that left ScaffoldSourceParityTest red.
+ * Locks the contract of `update:scaffold:rebuild` from step 2 of one source for
+ * bin/semitexa: it writes semitexa/installer's manifest in the checkout beside
+ * this package, carrying each file's history on from that manifest, and keeps
+ * this package's copy to the agent docs from semitexa/ultimate, with their
+ * manifest and the retired list. It is the one way a manifest changes, so a
+ * scaffold file copied by hand cannot leave one stale.
+ *
+ * The fixture is the framework workspace's layout: semitexa-update,
+ * semitexa-installer and semitexa-ultimate side by side.
  */
 final class UpdateScaffoldRebuildCommandTest extends TestCase
 {
-    private string $base;
-    private string $packageRoot;
-    private string $updateScaffold;
-    private string $manifestPath;
-    private string $installerScaffold;
+    private const BIN_OLD = "#!/bin/sh\necho old\n";
+    private const BIN_NEW = "#!/bin/sh\necho new\n";
+
+    private string $base = '';
+    private string $packageRoot = '';
+    private string $updateScaffold = '';
+    private string $manifestPath = '';
+    private string $installerScaffold = '';
+    private string $installerManifestPath = '';
 
     protected function setUp(): void
     {
         $this->base = sys_get_temp_dir() . '/semitexa-scaffold-rebuild-' . bin2hex(random_bytes(8));
-        $this->packageRoot = $this->base . '/package';
+        $this->packageRoot = $this->base . '/semitexa-update';
         $this->updateScaffold = $this->packageRoot . '/resources/scaffold';
         $this->manifestPath = $this->packageRoot . '/resources/scaffold-manifest.json';
-        $this->installerScaffold = $this->base . '/installer/scaffold';
+        $this->installerScaffold = $this->base . '/semitexa-installer/scaffold';
+        $this->installerManifestPath = $this->base . '/semitexa-installer/resources/scaffold-manifest.json';
 
-        mkdir($this->updateScaffold . '/bin', 0777, true);
+        // The installer's manifest describes the OLD bin/semitexa; its checkout
+        // now carries the NEW one, as after an edit and before the rebuild.
         mkdir($this->installerScaffold . '/bin', 0777, true);
-
-        // Update copy is the OLD pristine version; installer SSoT carries NEW content.
-        file_put_contents($this->updateScaffold . '/bin/semitexa', "#!/bin/sh\necho old\n");
-        file_put_contents($this->installerScaffold . '/bin/semitexa', "#!/bin/sh\necho new\n");
+        mkdir(\dirname($this->installerManifestPath), 0777, true);
+        file_put_contents($this->installerScaffold . '/bin/semitexa', self::BIN_OLD);
+        $this->writeManifest($this->installerManifestPath, (new ScaffoldManifestBuilder())->build($this->installerScaffold, null, '2026-01-01T00:00:00+00:00')->toArray());
+        file_put_contents($this->installerScaffold . '/bin/semitexa', self::BIN_NEW);
 
         // The agent docs' source: semitexa/ultimate beside this package.
-        mkdir($this->base . '/ultimate', 0777, true);
+        mkdir($this->base . '/semitexa-ultimate', 0777, true);
         foreach (UpdateScaffoldRebuildCommand::AGENT_DOCS as $doc) {
-            file_put_contents($this->base . '/ultimate/' . $doc, "# {$doc}\n");
+            file_put_contents($this->base . '/semitexa-ultimate/' . $doc, "# {$doc}\n");
         }
 
-        // Seed the committed manifest for the OLD content.
-        $manifest = (new ScaffoldManifestBuilder())->build($this->updateScaffold, null, '2026-01-01T00:00:00+00:00');
-        file_put_contents(
-            $this->manifestPath,
-            json_encode($manifest->toArray(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n",
-        );
+        // This package's copy as it was before the switch: a runtime file beside
+        // the docs, both in its manifest, and a retired file.
+        mkdir($this->updateScaffold . '/bin', 0777, true);
+        file_put_contents($this->updateScaffold . '/bin/semitexa', self::BIN_OLD);
+        foreach (UpdateScaffoldRebuildCommand::AGENT_DOCS as $doc) {
+            file_put_contents($this->updateScaffold . '/' . $doc, "# {$doc}, older\n");
+        }
+        $own = (new ScaffoldManifestBuilder())->build($this->updateScaffold, null, '2026-01-01T00:00:00+00:00')->toArray();
+        $own['retired'] = [['path' => 'docker-compose.gone.yml', 'shipped_sha256' => [str_repeat('c', 64)]]];
+        $this->writeManifest($this->manifestPath, $own);
     }
 
     protected function tearDown(): void
     {
-        $this->rrm($this->base);
+        exec('rm -rf ' . escapeshellarg($this->base));
     }
 
-    public function testRebuildMirrorsInstallerAndRegeneratesManifest(): void
+    public function testTheInstallersManifestFollowsItsFilesAndKeepsTheirHistory(): void
     {
-        $oldHash = hash_file('sha256', $this->updateScaffold . '/bin/semitexa');
-        $newHash = hash_file('sha256', $this->installerScaffold . '/bin/semitexa');
-        self::assertNotSame($oldHash, $newHash);
+        self::assertSame(Command::SUCCESS, $this->tester()->execute([]));
 
-        $exit = $this->tester()->execute([
-            '--installer-scaffold' => $this->installerScaffold,
-        ]);
+        $entry = $this->entry($this->installerManifestPath, 'bin/semitexa');
+        self::assertSame(hash('sha256', self::BIN_NEW), $entry['current_sha256']);
+        // A project still on the old pristine file is updated, not told it edited it.
+        self::assertSame([hash('sha256', self::BIN_OLD)], $entry['previous_sha256']);
+    }
 
-        self::assertSame(Command::SUCCESS, $exit);
+    public function testThisPackagesCopyKeepsOnlyTheAgentDocs(): void
+    {
+        self::assertSame(Command::SUCCESS, $this->tester()->execute([]));
 
-        // File mirrored.
-        self::assertSame(
-            $newHash,
-            hash_file('sha256', $this->updateScaffold . '/bin/semitexa'),
-            'update scaffold bin/semitexa must now match the installer SSoT byte-for-byte.',
-        );
+        $left = array_values(array_diff(scandir($this->updateScaffold) ?: [], ['.', '..']));
+        sort($left);
+        $docs = UpdateScaffoldRebuildCommand::AGENT_DOCS;
+        sort($docs);
+        self::assertSame($docs, $left, 'the runtime files are the installer\'s now');
 
-        // Manifest re-pointed to the new hash, with the old hash preserved for
-        // downstream auto-update eligibility.
-        $entry = $this->manifestEntry('bin/semitexa');
-        self::assertSame($newHash, $entry['current_sha256']);
-        self::assertContains($oldHash, $entry['previous_sha256']);
+        $manifest = $this->manifest($this->manifestPath);
+        self::assertSame($docs, array_column($manifest['files'], 'path'));
+        // The runtime entry moved; it did not go, so it is not retired either.
+        self::assertSame(['docker-compose.gone.yml'], array_column($manifest['retired'] ?? [], 'path'));
+    }
+
+    public function testAgentDocsComeFromUltimateIntoTheCopyAndTheManifest(): void
+    {
+        self::assertSame(Command::SUCCESS, $this->tester()->execute([]));
+
+        foreach (UpdateScaffoldRebuildCommand::AGENT_DOCS as $doc) {
+            self::assertFileEquals($this->base . '/semitexa-ultimate/' . $doc, $this->updateScaffold . '/' . $doc);
+            self::assertSame(hash_file('sha256', $this->base . '/semitexa-ultimate/' . $doc), $this->entry($this->manifestPath, $doc)['current_sha256']);
+            self::assertSame('agent_docs', $this->entry($this->manifestPath, $doc)['category'] ?? null);
+        }
+        self::assertSame(Command::SUCCESS, $this->tester()->execute(['--check' => true]));
+
+        file_put_contents($this->base . '/semitexa-ultimate/AGENTS.md', "# AGENTS.md, with directive 11\n");
+        self::assertSame(Command::FAILURE, $this->tester()->execute(['--check' => true]), 'a newer manual is drift');
+        $before = $this->entry($this->manifestPath, 'AGENTS.md')['current_sha256'];
+        $older = hash('sha256', "# AGENTS.md, older\n");
+        $this->tester()->execute([]);
+        // Both earlier manuals stay known, newest first: a project on either is updated.
+        self::assertSame([$before, $older], $this->entry($this->manifestPath, 'AGENTS.md')['previous_sha256'], 'a project still on an old manual stays eligible');
     }
 
     public function testCheckReportsInSyncAfterRebuildAndWritesNothing(): void
     {
-        $this->tester()->execute(['--installer-scaffold' => $this->installerScaffold]);
-        $manifestAfterRebuild = (string) file_get_contents($this->manifestPath);
+        $this->tester()->execute([]);
+        $installerAfter = (string) file_get_contents($this->installerManifestPath);
+        $ownAfter = (string) file_get_contents($this->manifestPath);
 
         $tester = $this->tester();
-        $exit = $tester->execute([
-            '--installer-scaffold' => $this->installerScaffold,
-            '--check' => true,
-            '--json' => true,
-        ]);
+        $exit = $tester->execute(['--check' => true, '--json' => true]);
 
         self::assertSame(Command::SUCCESS, $exit);
         self::assertStringContainsString('"in_sync": true', $tester->getDisplay());
-        self::assertSame(
-            $manifestAfterRebuild,
-            (string) file_get_contents($this->manifestPath),
-            '--check must not mutate the manifest.',
-        );
+        self::assertSame($installerAfter, (string) file_get_contents($this->installerManifestPath), '--check must not write the installer manifest.');
+        self::assertSame($ownAfter, (string) file_get_contents($this->manifestPath), '--check must not write this manifest.');
     }
 
-    public function testCheckFailsAndWritesNothingWhenDrifted(): void
+    public function testCheckFailsAndWritesNothingWhenEitherManifestIsStale(): void
     {
-        $manifestBefore = (string) file_get_contents($this->manifestPath);
-        $fileBefore = (string) file_get_contents($this->updateScaffold . '/bin/semitexa');
+        $installerBefore = (string) file_get_contents($this->installerManifestPath);
+        $ownBefore = (string) file_get_contents($this->manifestPath);
 
         $tester = $this->tester();
-        $exit = $tester->execute([
-            '--installer-scaffold' => $this->installerScaffold,
-            '--check' => true,
-            '--json' => true,
-        ]);
+        $exit = $tester->execute(['--check' => true, '--json' => true]);
 
         self::assertSame(Command::FAILURE, $exit);
-        self::assertStringContainsString('"in_sync": false', $tester->getDisplay());
-
-        // Nothing on disk changed.
-        self::assertSame($manifestBefore, (string) file_get_contents($this->manifestPath));
-        self::assertSame($fileBefore, (string) file_get_contents($this->updateScaffold . '/bin/semitexa'));
+        $result = json_decode($tester->getDisplay(), true);
+        self::assertIsArray($result);
+        self::assertFalse($result['in_sync']);
+        self::assertTrue($result['installer_manifest_changed'], 'the installer file changed after its manifest');
+        self::assertSame($installerBefore, (string) file_get_contents($this->installerManifestPath));
+        self::assertSame($ownBefore, (string) file_get_contents($this->manifestPath));
+        self::assertFileExists($this->updateScaffold . '/bin/semitexa', '--check removes nothing');
     }
 
-    public function testFailsClearlyWhenInstallerScaffoldMissing(): void
+    /**
+     * Fable's review of the step 2 plan, D5: in a project, vendor/semitexa/installer
+     * is an installed package. The command used to accept it, and refused only
+     * because semitexa/ultimate's docs were missing.
+     */
+    public function testInAVendorInstallItRefusesAndRewritesNothing(): void
+    {
+        $vendor = $this->base . '/project/vendor/semitexa';
+        mkdir($vendor . '/installer/scaffold/bin', 0777, true);
+        mkdir($vendor . '/installer/resources', 0777, true);
+        mkdir($vendor . '/ultimate', 0777, true);
+        mkdir($vendor . '/update/resources/scaffold', 0777, true);
+        file_put_contents($vendor . '/installer/scaffold/bin/semitexa', self::BIN_NEW);
+        file_put_contents($vendor . '/installer/resources/scaffold-manifest.json', '{"installed": true}');
+        foreach (UpdateScaffoldRebuildCommand::AGENT_DOCS as $doc) {
+            file_put_contents($vendor . '/ultimate/' . $doc, "# {$doc}\n");
+        }
+
+        $tester = $this->tester($vendor . '/update');
+        $exit = $tester->execute([]);
+
+        self::assertSame(Command::FAILURE, $exit);
+        self::assertStringContainsString('runs in the framework workspace', $tester->getDisplay());
+        self::assertSame('{"installed": true}', file_get_contents($vendor . '/installer/resources/scaffold-manifest.json'));
+    }
+
+    public function testAMissingInstallerManifestIsRefusedNotRebuiltFromNothing(): void
+    {
+        unlink($this->installerManifestPath);
+
+        $tester = $this->tester();
+        self::assertSame(Command::FAILURE, $tester->execute([]));
+
+        self::assertStringContainsString("semitexa/installer's manifest is missing", (string) preg_replace('/\s+/', ' ', $tester->getDisplay()));
+        self::assertFileDoesNotExist($this->installerManifestPath, 'no manifest without its history');
+    }
+
+    public function testAFileThatLeftTheInstallerScaffoldMustBeRetiredFirst(): void
+    {
+        // A second file in the manifest, then gone from the scaffold.
+        file_put_contents($this->installerScaffold . '/docker-compose.yml', "services: {}\n");
+        $manifest = (new ScaffoldManifestBuilder())->build($this->installerScaffold, null, '2026-01-01T00:00:00+00:00')->toArray();
+        $this->writeManifest($this->installerManifestPath, $manifest);
+        unlink($this->installerScaffold . '/docker-compose.yml');
+
+        $tester = $this->tester();
+        self::assertSame(Command::FAILURE, $tester->execute([]));
+        // SymfonyStyle wraps the error at the terminal width.
+        self::assertStringContainsString("docker-compose.yml left semitexa/installer's scaffold but not its manifest", (string) preg_replace('/\s+/', ' ', $tester->getDisplay()));
+
+        // Retired with what it shipped with, it may go.
+        $manifest['retired'] = [['path' => 'docker-compose.yml', 'shipped_sha256' => [hash('sha256', "services: {}\n")]]];
+        $kept = [];
+        foreach (is_array($manifest['files'] ?? null) ? $manifest['files'] : [] as $entry) {
+            if (is_array($entry) && ($entry['path'] ?? null) !== 'docker-compose.yml') {
+                $kept[] = $entry;
+            }
+        }
+        $manifest['files'] = $kept;
+        $this->writeManifest($this->installerManifestPath, $manifest);
+        self::assertSame(Command::SUCCESS, $this->tester()->execute([]));
+        self::assertSame(['docker-compose.yml'], array_column($this->manifest($this->installerManifestPath)['retired'] ?? [], 'path'));
+    }
+
+    public function testAnOverrideDoesNotLetItRewriteAVendorInstall(): void
+    {
+        $vendor = $this->base . '/project/vendor/semitexa';
+        mkdir($vendor . '/update/resources/scaffold', 0777, true);
+        file_put_contents($vendor . '/update/resources/scaffold-manifest.json', '{"installed": true}');
+
+        $tester = $this->tester($vendor . '/update');
+        $exit = $tester->execute(['--installer-scaffold' => $this->installerScaffold, '--agent-docs-root' => $this->base . '/semitexa-ultimate']);
+
+        self::assertSame(Command::FAILURE, $exit);
+        self::assertStringContainsString('is an installed package', (string) preg_replace('/\s+/', ' ', $tester->getDisplay()));
+        self::assertSame('{"installed": true}', file_get_contents($vendor . '/update/resources/scaffold-manifest.json'));
+    }
+
+    public function testAFileThatCannotBeRemovedStopsTheRebuild(): void
+    {
+        if (function_exists('posix_geteuid') && posix_geteuid() === 0) {
+            // verify:accept-test-change root removes a file from a read-only directory, so there is no failure to provoke; the suite runs as uid 1000 in the workspace and the release clone
+            self::markTestSkipped('root ignores the directory permission this test relies on');
+        }
+        $ownBefore = (string) file_get_contents($this->manifestPath);
+        chmod($this->updateScaffold . '/bin', 0555);
+        try {
+            $tester = $this->tester();
+            $exit = $tester->execute([]);
+        } finally {
+            chmod($this->updateScaffold . '/bin', 0755);
+        }
+
+        self::assertSame(Command::FAILURE, $exit);
+        self::assertStringContainsString('Cannot remove', $tester->getDisplay());
+        self::assertSame($ownBefore, (string) file_get_contents($this->manifestPath), 'no manifest drops an entry whose file is still there');
+        self::assertFileExists($this->updateScaffold . '/bin/semitexa');
+    }
+
+    public function testFailsClearlyWhenTheInstallerScaffoldGivenIsMissing(): void
     {
         $tester = $this->tester();
-        $exit = $tester->execute([
-            '--installer-scaffold' => $this->base . '/does-not-exist',
-        ]);
+        $exit = $tester->execute(['--installer-scaffold' => $this->base . '/does-not-exist']);
 
         self::assertSame(Command::FAILURE, $exit);
         self::assertStringContainsString('not a directory', $tester->getDisplay());
     }
 
-    public function testAgentDocsComeFromUltimateIntoTheCopyAndTheManifest(): void
-    {
-        // init --only-docs never rewrote AGENTS.md, and the update scaffold did
-        // not carry it: every project kept the manual it was installed with.
-        self::assertSame(Command::SUCCESS, $this->tester()->execute(['--installer-scaffold' => $this->installerScaffold]));
-
-        foreach (UpdateScaffoldRebuildCommand::AGENT_DOCS as $doc) {
-            self::assertFileEquals($this->base . '/ultimate/' . $doc, $this->updateScaffold . '/' . $doc);
-            self::assertSame(hash_file('sha256', $this->base . '/ultimate/' . $doc), $this->manifestEntry($doc)['current_sha256']);
-            self::assertSame('agent_docs', $this->manifestEntry($doc)['category'] ?? null);
-        }
-        self::assertSame(Command::SUCCESS, $this->tester()->execute(['--installer-scaffold' => $this->installerScaffold, '--check' => true]));
-
-        file_put_contents($this->base . '/ultimate/AGENTS.md', "# AGENTS.md, with directive 11\n");
-        self::assertSame(Command::FAILURE, $this->tester()->execute(['--installer-scaffold' => $this->installerScaffold, '--check' => true]), 'a newer manual is drift');
-        $before = $this->manifestEntry('AGENTS.md')['current_sha256'];
-        $this->tester()->execute(['--installer-scaffold' => $this->installerScaffold]);
-        self::assertContains($before, $this->manifestEntry('AGENTS.md')['previous_sha256'], 'a project still on the old manual stays eligible');
-    }
-
     public function testAMissingAgentDocOrASecondSourceFailsTheRebuild(): void
     {
-        unlink($this->base . '/ultimate/AI_REFERENCE.md');
+        unlink($this->base . '/semitexa-ultimate/AI_REFERENCE.md');
         $tester = $this->tester();
-        self::assertSame(Command::FAILURE, $tester->execute(['--installer-scaffold' => $this->installerScaffold]));
+        self::assertSame(Command::FAILURE, $tester->execute([]));
         self::assertStringContainsString('AI_REFERENCE.md', $tester->getDisplay());
 
-        file_put_contents($this->base . '/ultimate/AI_REFERENCE.md', "# back\n");
+        file_put_contents($this->base . '/semitexa-ultimate/AI_REFERENCE.md', "# back\n");
         file_put_contents($this->installerScaffold . '/CLAUDE.md', "# a stray copy\n");
         $tester = $this->tester();
-        self::assertSame(Command::FAILURE, $tester->execute(['--installer-scaffold' => $this->installerScaffold]));
+        self::assertSame(Command::FAILURE, $tester->execute([]));
         self::assertStringContainsString('installer scaffold too', $tester->getDisplay());
     }
 
-    private function tester(): CommandTester
+    private function tester(?string $packageRoot = null): CommandTester
     {
         $cmd = new UpdateScaffoldRebuildCommand();
-        $cmd->overridePackageRoot($this->packageRoot);
+        $cmd->overridePackageRoot($packageRoot ?? $this->packageRoot);
         // The framework's command discovery sets the name from the Semitexa
         // #[AsCommand] attribute at runtime; the bare Symfony tester needs it set.
         $cmd->setName('update:scaffold:rebuild');
@@ -183,32 +286,36 @@ final class UpdateScaffoldRebuildCommandTest extends TestCase
     }
 
     /**
+     * @param array<string, mixed> $manifest
+     */
+    private function writeManifest(string $path, array $manifest): void
+    {
+        file_put_contents($path, json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . "\n");
+    }
+
+    /**
+     * @return array{files: list<array<string, mixed>>, retired?: list<array<string, mixed>>}
+     */
+    private function manifest(string $path): array
+    {
+        $data = json_decode((string) file_get_contents($path), true);
+        self::assertIsArray($data);
+        self::assertIsArray($data['files'] ?? null);
+        /** @var array{files: list<array<string, mixed>>, retired?: list<array<string, mixed>>} $data */
+        return $data;
+    }
+
+    /**
      * @return array{path: string, current_sha256: string, previous_sha256: list<string>, category?: string}
      */
-    private function manifestEntry(string $path): array
+    private function entry(string $manifestPath, string $path): array
     {
-        $data = json_decode((string) file_get_contents($this->manifestPath), true);
-        self::assertIsArray($data);
-        foreach ($data['files'] as $entry) {
-            if ($entry['path'] === $path) {
+        foreach ($this->manifest($manifestPath)['files'] as $entry) {
+            if (($entry['path'] ?? null) === $path) {
+                /** @var array{path: string, current_sha256: string, previous_sha256: list<string>, category?: string} $entry */
                 return $entry;
             }
         }
-        self::fail("Manifest has no entry for {$path}");
-    }
-
-    private function rrm(string $dir): void
-    {
-        if (!is_dir($dir)) {
-            return;
-        }
-        $it = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::CHILD_FIRST,
-        );
-        foreach ($it as $f) {
-            $f->isDir() ? @rmdir($f->getPathname()) : @unlink($f->getPathname());
-        }
-        @rmdir($dir);
+        self::fail("{$manifestPath} has no entry for {$path}");
     }
 }

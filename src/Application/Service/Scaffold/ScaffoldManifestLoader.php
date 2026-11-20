@@ -42,7 +42,11 @@ final class ScaffoldManifestLoader
      */
     public function fromArray(array $data, string $sourceHint = '<array>'): ScaffoldManifest
     {
-        $schemaVersion = (string) ($data['schema_version'] ?? '');
+        // Every shape is checked before it is used: a manifest is read from
+        // another package since one source for bin/semitexa, and what it holds
+        // must fail as a RuntimeException, which the update turns into an
+        // integrity error, never as a TypeError or a warning (review, update#121).
+        $schemaVersion = is_string($data['schema_version'] ?? null) ? $data['schema_version'] : '';
         if ($schemaVersion !== ScaffoldManifest::SCHEMA_VERSION) {
             throw new \RuntimeException(sprintf(
                 'Unsupported scaffold manifest schema_version "%s" in %s (expected "%s")',
@@ -52,7 +56,7 @@ final class ScaffoldManifestLoader
             ));
         }
 
-        $generatedAt = (string) ($data['generated_at'] ?? '');
+        $generatedAt = is_string($data['generated_at'] ?? null) ? $data['generated_at'] : '';
         if ($generatedAt === '') {
             throw new \RuntimeException("Scaffold manifest in {$sourceHint} is missing generated_at.");
         }
@@ -60,6 +64,9 @@ final class ScaffoldManifestLoader
         $files = $data['files'] ?? null;
         if (!is_array($files)) {
             throw new \RuntimeException("Scaffold manifest in {$sourceHint} is missing files[].");
+        }
+        if (!array_is_list($files)) {
+            throw new \RuntimeException("Scaffold manifest in {$sourceHint} has a files section that is not a list.");
         }
 
         $entries = [];
@@ -83,12 +90,12 @@ final class ScaffoldManifestLoader
      */
     private function entryFromArray(array $raw, string $sourceHint, int $index): ScaffoldFileEntry
     {
-        $path = (string) ($raw['path'] ?? '');
-        if ($path === '') {
+        $path = $raw['path'] ?? null;
+        if (!is_string($path) || $path === '') {
             throw new \RuntimeException("Scaffold manifest file entry #{$index} in {$sourceHint} has no path.");
         }
-        $currentSha256 = (string) ($raw['current_sha256'] ?? '');
-        if (!$this->isSha256($currentSha256)) {
+        $currentSha256 = $raw['current_sha256'] ?? null;
+        if (!is_string($currentSha256) || !$this->isSha256($currentSha256)) {
             throw new \RuntimeException("Scaffold manifest entry '{$path}' has invalid current_sha256.");
         }
 
@@ -104,10 +111,10 @@ final class ScaffoldManifestLoader
             $previousSha256[] = $prev;
         }
 
-        $categoryRaw = (string) ($raw['category'] ?? '');
-        $category = ScaffoldFileCategory::tryFrom($categoryRaw);
+        $categoryRaw = $raw['category'] ?? null;
+        $category = is_string($categoryRaw) ? ScaffoldFileCategory::tryFrom($categoryRaw) : null;
         if ($category === null) {
-            throw new \RuntimeException("Scaffold manifest entry '{$path}' has invalid category: {$categoryRaw}");
+            throw new \RuntimeException(sprintf("Scaffold manifest entry '%s' has invalid category: %s", $path, is_string($categoryRaw) ? $categoryRaw : get_debug_type($categoryRaw)));
         }
 
         return new ScaffoldFileEntry(
@@ -118,7 +125,7 @@ final class ScaffoldManifestLoader
             critical: (bool) ($raw['critical'] ?? false),
             autoUpdate: (bool) ($raw['auto_update'] ?? false),
             preserveExecutable: (bool) ($raw['preserve_executable'] ?? false),
-            notes: (string) ($raw['notes'] ?? ''),
+            notes: is_string($raw['notes'] ?? null) ? $raw['notes'] : '',
         );
     }
 

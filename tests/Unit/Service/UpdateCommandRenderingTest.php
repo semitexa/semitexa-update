@@ -8,6 +8,7 @@ use PHPUnit\Framework\TestCase;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Orm\Adapter\SqliteAdapter;
 use Semitexa\Update\Application\Console\Command\UpdateCommand;
+use Semitexa\Update\Domain\Model\Scaffold\ScaffoldSource;
 use Semitexa\Update\Application\Service\DagBuilder;
 use Semitexa\Update\Application\Service\JournalRepository;
 use Semitexa\Update\Application\Service\LiveSchemaInspector;
@@ -225,8 +226,7 @@ final class UpdateCommandRenderingTest extends TestCase
             scaffoldClassifier: new ScaffoldFileClassifier($hasher),
             scaffoldEngine: new ScaffoldSyncEngine($hasher),
             projectRoot: $this->projectRoot,
-            scaffoldRoot: $this->scaffoldRoot,
-            manifestPath: $this->manifestPath,
+            scaffoldSources: [new ScaffoldSource('semitexa/update', $this->scaffoldRoot, $this->manifestPath)],
             composerRunner: $composerRunner,
         );
     }
