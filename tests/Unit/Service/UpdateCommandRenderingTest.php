@@ -7,6 +7,7 @@ namespace Semitexa\Update\Tests\Unit\Service;
 use PHPUnit\Framework\TestCase;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Orm\Adapter\SqliteAdapter;
+use Semitexa\Update\Domain\Model\Composer\NewSkeletonPackage;
 use Semitexa\Update\Application\Console\Command\UpdateCommand;
 use Semitexa\Update\Domain\Model\Scaffold\ScaffoldSource;
 use Semitexa\Update\Application\Service\DagBuilder;
@@ -82,6 +83,32 @@ final class UpdateCommandRenderingTest extends TestCase
         self::assertStringContainsString('known_previous', $output);
         self::assertStringContainsString('replace', $output);
         self::assertStringContainsString('Dry-run: would apply', $output);
+    }
+
+    /**
+     * The advisory is the last thing a finished run says, once. Rendered with
+     * the plan, before composer, it proposed semitexa/installer to a project
+     * the same run was about to give it, and printed it again in the
+     * continuation process (20.11).
+     */
+    public function testTheSkeletonAdvisoryComesOnceAfterTheStages(): void
+    {
+        foreach ([[], ['--dry-run' => true]] as $options) {
+            $tester = $this->commandTester(missingSkeletonPackages: static fn (): array => [
+                new NewSkeletonPackage(name: 'semitexa/media', pinnedVersion: '2026.11.20.0947', description: 'Media assets'),
+            ]);
+            $tester->execute($options);
+            $output = $tester->getDisplay();
+            $mode = $options === [] ? 'real run' : 'dry run';
+
+            self::assertSame(1, substr_count($output, 'New skeleton packages available'), $mode . ': once');
+            self::assertStringContainsString('composer require semitexa/media:2026.11.20.0947', $output, $mode);
+            // The "Stages" title opens what the run did; the plan comes before it.
+            preg_match('/Stages\n\s*=+\n/', $output, $stages, PREG_OFFSET_CAPTURE);
+            $stagesAt = $stages[0][1] ?? -1;
+            self::assertGreaterThan(-1, $stagesAt, $mode . ': the stages are rendered');
+            self::assertGreaterThan($stagesAt, strpos($output, 'New skeleton packages available'), $mode . ': after the stages, not with the plan');
+        }
     }
 
     public function testRealRunOutputRecommendsManualRerunAfterBinReplacement(): void
@@ -169,7 +196,10 @@ final class UpdateCommandRenderingTest extends TestCase
         self::assertStringContainsString('Dry-run: stage "composer-update" would fail.', $tester->getDisplay());
     }
 
-    private function commandTester(?ComposerUpdateRunner $composerRunner = null): CommandTester
+    /**
+     * @param (\Closure(): (list<NewSkeletonPackage>|null))|null $missingSkeletonPackages null: none, so no test asks Packagist
+     */
+    private function commandTester(?ComposerUpdateRunner $composerRunner = null, ?\Closure $missingSkeletonPackages = null): CommandTester
     {
         $orchestrator = $this->buildOrchestrator($composerRunner);
 
@@ -188,6 +218,7 @@ final class UpdateCommandRenderingTest extends TestCase
         $cmd = new UpdateCommand();
         $ref = new \ReflectionProperty($cmd, 'runnerFactory');
         $ref->setValue($cmd, $factory);
+        new \ReflectionProperty($cmd, 'missingSkeletonPackages')->setValue($cmd, $missingSkeletonPackages ?? static fn (): ?array => null);
         $cmd->setName('update');
 
         return new CommandTester($cmd);

@@ -2,8 +2,14 @@
 
 All notable changes to `semitexa/update`. Sections are `## <version> — <date>`
 (newest first); `## Unreleased` collects changes until the next release tag.
+
 This file is machine-read by `update:changelog` and the OS "What's new"
 surface — keep entries short and operator-facing.
+
+## Unreleased
+
+### Fixed
+- `bin/semitexa update` no longer tells a project to `composer require` a skeleton package that vendor already holds as a dependency of another one (semitexa/installer, which arrives with semitexa/update). The advisory now prints once, after the stages, in the process that finishes the run. It used to print with the plan, before composer had installed the package, and again in the continuation process.
 
 ## 2026.11.20.0947 — 2026-11-20
 

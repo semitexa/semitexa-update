@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Update\Tests\Unit\Service\Composer;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use Semitexa\Update\Application\Service\Composer\P2MetadataExpander;
@@ -22,7 +23,52 @@ final class SkeletonRequireDiffTest extends TestCase
     protected function tearDown(): void
     {
         @unlink($this->projectRoot . '/composer.json');
+        @unlink($this->projectRoot . '/vendor/composer/installed.json');
+        @rmdir($this->projectRoot . '/vendor/composer');
+        @rmdir($this->projectRoot . '/vendor');
         @rmdir($this->projectRoot);
+    }
+
+    /**
+     * A package vendor already holds came as a dependency of another one, as
+     * semitexa/installer comes with semitexa/update: proposing to require it
+     * told the project to add what composer had just installed (20.11).
+     *
+     * @param array<mixed> $installedJson
+     */
+    #[Test]
+    #[DataProvider('installedJsonFormats')]
+    public function aPackageVendorAlreadyHoldsIsNotProposed(array $installedJson): void
+    {
+        $this->writeComposerJson(['semitexa/update' => '2026.11.20.0947']);
+        mkdir($this->projectRoot . '/vendor/composer', 0777, true);
+        file_put_contents($this->projectRoot . '/vendor/composer/installed.json', json_encode($installedJson, JSON_THROW_ON_ERROR));
+        $diff = $this->diff([
+            'semitexa/ultimate' => [[
+                'version' => '2026.11.20.0947',
+                'require' => [
+                    'semitexa/update' => '2026.11.20.0947',
+                    'semitexa/installer' => '2026.11.20.0947',
+                    'semitexa/media' => '2026.11.20.0947',
+                ],
+            ]],
+        ]);
+
+        $missing = $diff->missingPackages($this->projectRoot);
+
+        self::assertNotNull($missing);
+        self::assertSame(['semitexa/media'], array_map(static fn ($package): string => $package->name, $missing), 'the installed dependency is left out, the absent package is still proposed');
+    }
+
+    /** @return array<string, array{array<mixed>}> */
+    public static function installedJsonFormats(): array
+    {
+        $packages = [['name' => 'semitexa/update', 'version' => '2026.11.20.0947'], ['name' => 'semitexa/installer', 'version' => '2026.11.20.0947']];
+
+        return [
+            'Composer 2 wraps the list' => [['packages' => $packages, 'dev' => true]],
+            'Composer 1 is the list' => [$packages],
+        ];
     }
 
     #[Test]
