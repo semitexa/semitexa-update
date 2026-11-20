@@ -12,6 +12,7 @@ use Semitexa\Installer\Application\Service\Scaffold as InstallerScaffold;
 use Semitexa\Orm\Application\Service\Connection\ConnectionRegistry;
 use Semitexa\Update\Application\Service\Composer\ComposerUpdateRunner;
 use Semitexa\Update\Application\Service\PackageDriftInspector;
+use Semitexa\Update\Application\Service\RequiredSettings\DoctorProbe;
 use Semitexa\Update\Discovery\UpdateAdvisoryDiscovery;
 use Semitexa\Update\Application\Service\Composer\InContainerComposerExecutor;
 use Semitexa\Update\Application\Service\Composer\PackagistVersionResolver;
@@ -91,6 +92,7 @@ class UpdateRunnerFactory
             ),
             healthChecker: new HealthChecker(),
             healthcheckUrl: self::healthcheckUrl(),
+            requiredSettingsProbe: new DoctorProbe(),
         );
     }
 

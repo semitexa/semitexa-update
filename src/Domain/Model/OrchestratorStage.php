@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Update\Domain\Model;
 
 use Semitexa\Update\Domain\Model\Composer\ComposerUpdateResult;
+use Semitexa\Update\Domain\Model\RequiredSettings\RequiredSettingsReport;
 use Semitexa\Update\Domain\Model\Scaffold\ScaffoldSyncReport;
 use Semitexa\Update\Domain\Model\SchemaSyncResult;
 
@@ -18,6 +19,7 @@ use Semitexa\Update\Domain\Model\SchemaSyncResult;
  *   - `scaffoldReport` is set for the scaffold-sync stage (uw-3)
  *   - `composerResult` is set for the composer-update stage
  *   - `preflightReport` is set for the preflight stage
+ *   - `requiredSettings` is set for the required-settings stage
  *   - all null: informational stage carrying only `message` (e.g. run-journal)
  */
 final readonly class OrchestratorStage
@@ -30,6 +32,7 @@ final readonly class OrchestratorStage
         public ?ComposerUpdateResult $composerResult = null,
         public ?string $message = null,
         public ?PreflightReport $preflightReport = null,
+        public ?RequiredSettingsReport $requiredSettings = null,
     ) {
     }
 
@@ -46,6 +49,9 @@ final readonly class OrchestratorStage
         }
         if ($this->preflightReport !== null) {
             return $this->preflightReport->isSuccess();
+        }
+        if ($this->requiredSettings !== null) {
+            return $this->requiredSettings->isSuccess();
         }
         return true;
     }
@@ -107,6 +113,17 @@ final readonly class OrchestratorStage
                     static fn (PreflightCheck $c): string => $c->name . ': ' . $c->message,
                     $failed,
                 );
+            }
+            return $summary;
+        }
+
+        if ($this->requiredSettings !== null) {
+            $summary['app_env'] = $this->requiredSettings->appEnv;
+            if ($this->requiredSettings->missing !== []) {
+                $summary['missing_settings'] = $this->requiredSettings->settingNames();
+            }
+            if ($this->requiredSettings->probeError !== null) {
+                $summary['message'] = 'not checked: ' . $this->requiredSettings->probeError;
             }
             return $summary;
         }

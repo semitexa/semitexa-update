@@ -8,6 +8,9 @@ surface — keep entries short and operator-facing.
 
 ## Unreleased
 
+### Added
+- **An update stops when the new code needs a setting `.env` does not have.** `bin/semitexa update` runs a `required-settings` stage after composer and before the scaffold, the schema and the patches (under `--no-composer` too). It asks `system:doctor` of the installed code; a failing check that names a setting, such as `APP_SECRET`, ends the update with exit 1 and prints the setting, the check, the `APP_ENV` judged and the fix. Other failing checks stop nothing. The auto-deploy asks the same before `orm:sync`: a missing setting rolls the code back, and the release is tried again once `.env` changes (a setting given only through the process environment: delete `var/update/rollback/blocked.json`).
+
 ### Fixed
 - `bin/semitexa update` no longer tells a project to `composer require` a skeleton package that vendor already holds as a dependency of another one (semitexa/installer, which arrives with semitexa/update). The advisory now prints once, after the stages, in the process that finishes the run. It used to print with the plan, before composer had installed the package, and again in the continuation process.
 
