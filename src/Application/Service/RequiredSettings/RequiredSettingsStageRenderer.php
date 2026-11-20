@@ -23,6 +23,13 @@ final class RequiredSettingsStageRenderer
         }
         $escape = OutputFormatter::escape(...);
 
+        if ($report->failure !== null) {
+            $io->writeln('  <error>Required settings could not be checked: ' . $escape($report->failure) . '</error>');
+            $io->writeln('  The scaffold, the schema and the data patches were not touched.');
+
+            return;
+        }
+
         if ($report->probeError !== null) {
             $io->writeln('  <comment>WARNING: required settings were NOT checked (APP_ENV=' . $escape($report->appEnv) . '): '
                 . $escape($report->probeError) . '</comment>');

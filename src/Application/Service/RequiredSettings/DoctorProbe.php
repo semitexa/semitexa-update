@@ -48,7 +48,13 @@ final class DoctorProbe
 
     public function probe(string $projectRoot): RequiredSettingsReport
     {
-        $appEnv = $this->appEnv($projectRoot);
+        try {
+            $appEnv = $this->appEnv($projectRoot);
+        } catch (\RuntimeException $e) {
+            // The file that says which environment this is cannot be read: a
+            // gate that guesses (prod? dev?) has not judged anything.
+            return new RequiredSettingsReport('unknown', [], null, $e->getMessage());
+        }
 
         try {
             $ran = $this->runner !== null
@@ -76,7 +82,29 @@ final class DoctorProbe
             ));
         }
 
+        if ($missing === [] && self::isLegacyReport($ran['output'])) {
+            // Not blocking, but not silent: nothing here said which settings are required.
+            return new RequiredSettingsReport($appEnv, [], "this core's system:doctor does not report settings: the required-settings gate did not run.");
+        }
+
         return new RequiredSettingsReport($appEnv, $missing);
+    }
+
+    /**
+     * True for a report from a core older than the `settings` field: it has
+     * checks, and none of them carries the key (a newer core emits it on every
+     * check, empty or not).
+     */
+    public static function isLegacyReport(string $output): bool
+    {
+        $checks = self::checks($output);
+        foreach ($checks ?? [] as $check) {
+            if (is_array($check) && array_key_exists('settings', $check)) {
+                return false;
+            }
+        }
+
+        return $checks !== null && $checks !== [];
     }
 
     /**
@@ -89,21 +117,13 @@ final class DoctorProbe
      */
     public static function parse(string $output): ?array
     {
-        $report = json_decode(trim($output), true);
-        if (!is_array($report)) {
-            // A notice printed before the report must not hide it.
-            $from = strpos($output, '{');
-            $to = strrpos($output, '}');
-            $report = $from !== false && $to !== false && $to > $from
-                ? json_decode(substr($output, $from, $to - $from + 1), true)
-                : null;
-        }
-        if (!is_array($report) || !is_array($report['checks'] ?? null)) {
+        $checks = self::checks($output);
+        if ($checks === null) {
             return null;
         }
 
         $missing = [];
-        foreach ($report['checks'] as $check) {
+        foreach ($checks as $check) {
             if (!is_array($check) || ($check['status'] ?? null) !== 'fail') {
                 continue;
             }
@@ -135,9 +155,34 @@ final class DoctorProbe
     }
 
     /**
+     * The report's checks; null when the output is not a doctor report.
+     *
+     * @return array<mixed>|null
+     */
+    private static function checks(string $output): ?array
+    {
+        $report = json_decode(trim($output), true);
+        if (!is_array($report)) {
+            // A notice printed before the report must not hide it.
+            $from = strpos($output, '{');
+            $to = strrpos($output, '}');
+            $report = $from !== false && $to !== false && $to > $from
+                ? json_decode(substr($output, $from, $to - $from + 1), true)
+                : null;
+        }
+        if (!is_array($report) || !is_array($report['checks'] ?? null)) {
+            return null;
+        }
+
+        return $report['checks'];
+    }
+
+    /**
      * APP_ENV as the server resolves it: the process environment, then .env
      * over .env.default, then prod. Read from the given root, which is the
      * project the doctor runs in.
+     *
+     * @throws \RuntimeException when an env file it has to read is there and unreadable
      */
     public function appEnv(string $projectRoot): string
     {
@@ -149,11 +194,30 @@ final class DoctorProbe
         return strtolower(trim($value));
     }
 
+    /**
+     * The contents of an env file; null when there is none. A file that is
+     * there and cannot be read (permissions, a directory in its place) throws:
+     * falling back to .env.default or prod would judge another environment.
+     *
+     * @throws \RuntimeException naming the file
+     */
+    public static function readEnvFile(string $file): ?string
+    {
+        if (!file_exists($file) && !is_link($file)) {
+            return null;
+        }
+        $contents = is_file($file) && is_readable($file) ? @file_get_contents($file) : false;
+        if ($contents === false) {
+            throw new \RuntimeException(sprintf('%s exists but cannot be read: fix its permissions, then run this again.', $file));
+        }
+
+        return $contents;
+    }
+
     private static function fromEnvFile(string $file): ?string
     {
-        $lines = is_file($file) ? @file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) : false;
         $found = null;
-        foreach ($lines === false ? [] : $lines as $line) {
+        foreach (preg_split('/\R/', self::readEnvFile($file) ?? '') ?: [] as $line) {
             if (preg_match('/^\s*(?:export\s+)?APP_ENV\s*=\s*(.*)$/', $line, $m) !== 1) {
                 continue;
             }
@@ -211,7 +275,22 @@ final class DoctorProbe
             }
         }
         fclose($pipes[1]);
-        $exitCode = proc_close($proc);
+        // A check can close stdout and keep running: the end of the output is
+        // not the end of the process, and proc_close() alone would wait for
+        // it without limit. The same deadline holds until it has exited.
+        $status = proc_get_status($proc);
+        while (!$timedOut && $status['running']) {
+            if (microtime(true) >= $deadline) {
+                proc_terminate($proc, 9);
+                $timedOut = true;
+                break;
+            }
+            usleep(50_000);
+            $status = proc_get_status($proc);
+        }
+        // Once proc_get_status() has seen the exit, proc_close() no longer knows the code.
+        $closed = proc_close($proc);
+        $exitCode = $status['running'] ? $closed : $status['exitcode'];
         rewind($stderr);
         $errors = trim((string) stream_get_contents($stderr));
         fclose($stderr);

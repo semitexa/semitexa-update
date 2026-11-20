@@ -7,9 +7,13 @@ namespace Semitexa\Update\Domain\Model\RequiredSettings;
 /**
  * What the doctor of the installed code said about required settings.
  *
- * Only `missing` fails the stage. A doctor that could not be run or read is
+ * `missing` fails the stage. A doctor that could not be run or read is
  * carried in `probeError` and shown, never taken for a missing setting: an
  * update must not stop because a diagnosis did.
+ *
+ * `failure` fails the stage too: the gate could not read a file of its own
+ * (.env, to know which environment it judges). That is not a diagnosis that
+ * broke; it is a gate that would otherwise pass without having looked.
  */
 final readonly class RequiredSettingsReport
 {
@@ -21,12 +25,13 @@ final readonly class RequiredSettingsReport
         public string $appEnv,
         public array $missing = [],
         public ?string $probeError = null,
+        public ?string $failure = null,
     ) {
     }
 
     public function isSuccess(): bool
     {
-        return $this->missing === [];
+        return $this->missing === [] && $this->failure === null;
     }
 
     /** @return list<string> */
@@ -40,9 +45,12 @@ final readonly class RequiredSettingsReport
         return array_values(array_unique($names));
     }
 
-    /** One line for the run journal and the deployment log; null when nothing is missing. */
+    /** One line for the run journal and the deployment log; null when the stage passes. */
     public function describe(): ?string
     {
+        if ($this->failure !== null) {
+            return 'Required settings could not be checked: ' . $this->failure;
+        }
         if ($this->missing === []) {
             return null;
         }

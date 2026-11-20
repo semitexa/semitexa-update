@@ -43,7 +43,10 @@ final class DoctorProbeTest extends TestCase
         self::assertSame('Set APP_SECRET in .env to a long random value: openssl rand -hex 32', $missing[0]->hint);
     }
 
-    /** A core older than the field emits no `settings` key: its failing checks block nothing. */
+    /**
+     * A core older than the field emits no `settings` key: its failing checks
+     * block nothing, and the operator is told the gate had nothing to read.
+     */
     public function testAReportFromAnOlderCoreWithoutSettingsBlocksNothing(): void
     {
         $check = self::check('app.secret', 'fail', []);
@@ -58,7 +61,98 @@ final class DoctorProbeTest extends TestCase
         )->probe($this->projectRoot);
 
         self::assertTrue($report->isSuccess());
-        self::assertNull($report->probeError, 'an older report is read, not taken for a broken doctor');
+        self::assertSame(
+            "this core's system:doctor does not report settings: the required-settings gate did not run.",
+            $report->probeError,
+        );
+        self::assertTrue(DoctorProbe::isLegacyReport($output));
+    }
+
+    /** A current core emits `settings` on every check, empty or not: that is a gate that ran. */
+    public function testAReportThatCarriesTheFieldIsNotLegacy(): void
+    {
+        $output = self::report([self::check('db.reachable', 'fail', []), self::check('app.secret', 'pass', ['APP_SECRET'])]);
+
+        $report = new DoctorProbe(
+            static fn (string $root): array => ['exitCode' => 1, 'output' => $output],
+            static fn (string $name): ?string => null,
+        )->probe($this->projectRoot);
+
+        self::assertTrue($report->isSuccess());
+        self::assertNull($report->probeError);
+        self::assertFalse(DoctorProbe::isLegacyReport(self::report([])), 'no checks at all says nothing about the core');
+    }
+
+    /**
+     * A check that closes stdout and keeps running ended the read loop, and
+     * the wait for its exit had no limit: the update held its lock for as
+     * long as the check lived.
+     */
+    public function testADoctorThatClosesStdoutAndKeepsRunningIsKilledAtTheDeadline(): void
+    {
+        mkdir($this->projectRoot . '/vendor/bin', 0777, true);
+        file_put_contents($this->projectRoot . '/vendor/bin/semitexa', '<?php fclose(STDOUT); sleep(12);');
+
+        $started = microtime(true);
+        $report = new DoctorProbe(null, static fn (string $name): ?string => null, timeoutSeconds: 1)->probe($this->projectRoot);
+        $took = microtime(true) - $started;
+
+        self::assertSame('system:doctor timed out after 1 s and was killed.', $report->probeError);
+        self::assertTrue($report->isSuccess(), 'a timeout warns, it does not block');
+        self::assertLessThan(6.0, $took, 'killed at the deadline, not waited for');
+    }
+
+    /** The real process on its normal path: the report is read and the exit code kept. */
+    public function testTheRealProcessIsReadWhenItAnswersInTime(): void
+    {
+        mkdir($this->projectRoot . '/vendor/bin', 0777, true);
+        $report = self::report([self::check('app.secret', 'fail', ['APP_SECRET'], 'openssl rand -hex 32')]);
+        file_put_contents($this->projectRoot . '/vendor/bin/semitexa', '<?php echo ' . var_export($report, true) . '; exit(1);');
+
+        $result = new DoctorProbe(null, static fn (string $name): ?string => null)->probe($this->projectRoot);
+
+        self::assertNull($result->probeError);
+        self::assertSame(['APP_SECRET'], $result->settingNames());
+    }
+
+    /**
+     * No APP_ENV in the process, and a .env that is there but cannot be read
+     * (a directory stands in for a permission error, which root never gets):
+     * the gate fails and names the file, where it used to fall back to
+     * .env.default and judge another environment.
+     */
+    public function testAnUnreadableDotEnvFailsTheGateAndNamesTheFile(): void
+    {
+        mkdir($this->projectRoot . '/.env');
+        file_put_contents($this->projectRoot . '/.env.default', "APP_ENV=dev\n");
+        $ran = false;
+        $probe = new DoctorProbe(
+            static function (string $root) use (&$ran): array {
+                $ran = true;
+
+                return ['exitCode' => 0, 'output' => '{"checks": []}'];
+            },
+            static fn (string $name): ?string => null,
+        );
+
+        $report = $probe->probe($this->projectRoot);
+
+        self::assertFalse($report->isSuccess());
+        self::assertStringContainsString($this->projectRoot . '/.env exists but cannot be read', (string) $report->failure);
+        self::assertStringContainsString($this->projectRoot . '/.env exists but cannot be read', (string) $report->describe());
+        self::assertFalse($ran, 'no doctor is asked about an environment nobody could name');
+    }
+
+    /** With APP_ENV in the process environment the file is not what decides, and is not read here. */
+    public function testAnUnreadableDotEnvDoesNotMatterWhenTheProcessNamesTheEnvironment(): void
+    {
+        mkdir($this->projectRoot . '/.env');
+        $probe = new DoctorProbe(
+            static fn (string $root): array => ['exitCode' => 0, 'output' => '{"checks": []}'],
+            static fn (string $name): string => 'prod',
+        );
+
+        self::assertTrue($probe->probe($this->projectRoot)->isSuccess());
     }
 
     /** A setting declared as anything but a name is dropped, as core drops it. */

@@ -56,6 +56,10 @@ final class RequiredSettingsGate
      */
     public function waiting(string $projectRoot, DeploymentPlan $plan, array &$result): bool
     {
+        // Before composer, so an unreadable .env or marker fails the tick with
+        // nothing installed and nothing restarted: every later step of the
+        // gate would have to guess what the file says.
+        DoctorProbe::readEnvFile($projectRoot . '/.env');
         $stillMissing = RequiredSettingsBlock::holds($projectRoot, $plan);
         if ($stillMissing === null) {
             return false;
@@ -84,6 +88,7 @@ final class RequiredSettingsGate
 
         $report = $this->probe->probe($projectRoot);
         $result['required_settings'] = match (true) {
+            $report->failure !== null => 'not checked: ' . $report->failure,
             !$report->isSuccess() => 'missing: ' . implode(', ', $report->settingNames()),
             $report->probeError !== null => 'WARNING: not checked (APP_ENV=' . $report->appEnv . '): ' . $report->probeError,
             default => 'ok (APP_ENV=' . $report->appEnv . ')',
@@ -112,7 +117,13 @@ final class RequiredSettingsGate
         if (!$failure instanceof RequiredSettingsMissingException || !is_string($rollback) || str_starts_with($rollback, 'FAILED')) {
             return;
         }
-        $result['blocked'] = RequiredSettingsBlock::record($projectRoot, $plan, $failure->settings)
+        try {
+            // No settings: the gate could not read .env mid-deploy; there is nothing to wait for by name.
+            $recorded = $failure->settings !== [] && RequiredSettingsBlock::record($projectRoot, $plan, $failure->settings);
+        } catch (\RuntimeException) {
+            $recorded = false;
+        }
+        $result['blocked'] = $recorded
             ? 'recorded: no deploy of these releases until .env changes'
             : 'not recorded: the next tick may deploy the same releases again';
     }

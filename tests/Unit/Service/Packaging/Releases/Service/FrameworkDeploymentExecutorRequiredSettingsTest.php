@@ -118,6 +118,51 @@ final class FrameworkDeploymentExecutorRequiredSettingsTest extends TestCase
         self::assertSame(['noop', []], [$third['status'], $this->ran], 'and the marker holds for the new .env');
     }
 
+    /**
+     * A marker that is there and cannot be read was taken for no marker and
+     * deleted: the tick installed, rolled back and restarted again. It fails
+     * the tick before composer, and stays for whoever has to look at it.
+     */
+    public function testAnUnreadableMarkerFailsTheTickAndStays(): void
+    {
+        $marker = $this->projectRoot . '/var/update/rollback/blocked.json';
+        foreach (['a directory in its place' => null, 'not JSON' => 'half a mar'] as $case => $contents) {
+            exec('rm -rf ' . escapeshellarg($marker));
+            @mkdir(dirname($marker), 0777, true);
+            $contents === null ? mkdir($marker) : file_put_contents($marker, $contents);
+            $this->ran = [];
+
+            $result = $this->executor(self::doctorReport('pass'), null)->execute($this->projectRoot, $this->plan());
+
+            self::assertSame('failed', $result['status'], $case);
+            self::assertStringContainsString('blocked.json exists but cannot be read', self::text($result, 'reason'), $case);
+            self::assertSame([], $this->ran, $case . ': nothing installed, nothing restarted');
+            self::assertFileExists($marker, $case . ': the marker is not deleted');
+        }
+    }
+
+    /**
+     * An unreadable .env hashed as 'absent', the hash of no .env at all: a
+     * marker recorded without a .env kept holding. It has no hash; the tick
+     * fails before composer and names the file.
+     */
+    public function testAnUnreadableDotEnvFailsTheTickBeforeComposer(): void
+    {
+        unlink($this->projectRoot . '/.env');
+        // Blocked with no .env at all: the marker records 'absent'.
+        $first = $this->executor(self::doctorReport('fail'), null)->execute($this->projectRoot, $this->plan());
+        self::assertStringStartsWith('recorded', self::text($first, 'blocked'));
+        mkdir($this->projectRoot . '/.env');
+        $this->ran = [];
+
+        $second = $this->executor(self::doctorReport('fail'), null)->execute($this->projectRoot, $this->plan());
+
+        self::assertSame('failed', $second['status'], 'not the noop of a marker that still matches');
+        self::assertStringContainsString('.env exists but cannot be read', self::text($second, 'reason'));
+        self::assertSame([], $this->ran);
+        self::assertArrayNotHasKey('rollback', $second);
+    }
+
     public function testANewerReleaseIsTriedAgain(): void
     {
         $this->executor(self::doctorReport('fail'), null)->execute($this->projectRoot, $this->plan());

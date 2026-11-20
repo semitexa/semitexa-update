@@ -119,6 +119,31 @@ final class UpdateCommandRequiredSettingsTest extends TestCase
         self::assertStringContainsString('PHP Fatal error: boom', $tester->getDisplay());
     }
 
+    /** A gate that cannot read .env has judged nothing: the update stops, and says which file. */
+    public function testAnUnreadableDotEnvEndsTheUpdate(): void
+    {
+        unlink($this->projectRoot . '/.env');
+        mkdir($this->projectRoot . '/.env');
+
+        $tester = $this->commandTester(self::report('pass', ['APP_SECRET']));
+        $tester->execute(['--no-composer' => true]);
+
+        self::assertSame(1, $tester->getStatusCode());
+        self::assertStringContainsString('Required settings could not be checked', $tester->getDisplay());
+        self::assertStringContainsString('.env exists but cannot be read', $tester->getDisplay());
+        self::assertSame([], $this->ormCalls->getArrayCopy());
+    }
+
+    /** A core without the field cannot block, and the operator is told the gate did not run. */
+    public function testALegacyReportIsSaidLoudly(): void
+    {
+        $tester = $this->commandTester(self::report('fail', null));
+        $tester->execute(['--no-composer' => true]);
+
+        self::assertSame(0, $tester->getStatusCode());
+        self::assertStringContainsString('the required-settings gate did not run', $tester->getDisplay());
+    }
+
     /**
      * @param list<string>|null $settings null: no `settings` key at all
      */

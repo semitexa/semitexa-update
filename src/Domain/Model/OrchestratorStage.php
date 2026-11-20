@@ -122,6 +122,9 @@ final readonly class OrchestratorStage
             if ($this->requiredSettings->missing !== []) {
                 $summary['missing_settings'] = $this->requiredSettings->settingNames();
             }
+            if ($this->requiredSettings->failure !== null) {
+                $summary['error'] = $this->requiredSettings->failure;
+            }
             if ($this->requiredSettings->probeError !== null) {
                 $summary['message'] = 'not checked: ' . $this->requiredSettings->probeError;
             }
