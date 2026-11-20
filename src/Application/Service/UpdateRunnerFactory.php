@@ -8,6 +8,7 @@ use Semitexa\Core\Attribute\AsService;
 use Semitexa\Core\Attribute\InjectAsReadonly;
 use Semitexa\Core\Discovery\ClassDiscovery;
 use Semitexa\Core\Support\ProjectRoot;
+use Semitexa\Installer\Application\Service\Scaffold as InstallerScaffold;
 use Semitexa\Orm\Application\Service\Connection\ConnectionRegistry;
 use Semitexa\Update\Application\Service\Composer\ComposerUpdateRunner;
 use Semitexa\Update\Application\Service\PackageDriftInspector;
@@ -18,6 +19,7 @@ use Semitexa\Update\Application\Service\Scaffold\ScaffoldFileClassifier;
 use Semitexa\Update\Application\Service\Scaffold\ScaffoldHasher;
 use Semitexa\Update\Application\Service\Scaffold\ScaffoldManifestLoader;
 use Semitexa\Update\Application\Service\Scaffold\ScaffoldSyncEngine;
+use Semitexa\Update\Domain\Model\Scaffold\ScaffoldSource;
 use Semitexa\Update\Discovery\DataPatchDiscovery;
 use Semitexa\Update\Application\Service\JournalRepository;
 use Semitexa\Update\Domain\Contract\OrmMigrationGatewayInterface;
@@ -74,8 +76,7 @@ class UpdateRunnerFactory
             scaffoldClassifier: new ScaffoldFileClassifier($hasher),
             scaffoldEngine: new ScaffoldSyncEngine($hasher),
             projectRoot: $projectRoot,
-            scaffoldRoot: $packageRoot . '/resources/scaffold',
-            manifestPath: $packageRoot . '/resources/scaffold-manifest.json',
+            scaffoldSources: self::scaffoldSources($packageRoot),
             composerRunner: new ComposerUpdateRunner(
                 executor: new InContainerComposerExecutor(),
                 resolver: new PackagistVersionResolver(),
@@ -91,6 +92,24 @@ class UpdateRunnerFactory
             healthChecker: new HealthChecker(),
             healthcheckUrl: self::healthcheckUrl(),
         );
+    }
+
+    /**
+     * Where the scaffold comes from, in order.
+     *
+     * semitexa/installer owns bin/semitexa, the Dockerfile and the Compose files
+     * (step 2 of one source for bin/semitexa): this package reads them, and their
+     * manifest, from wherever Composer installed it. Its own resources/scaffold
+     * keeps the agents' docs until step 7, and its manifest the retired list.
+     *
+     * @return list<ScaffoldSource>
+     */
+    public static function scaffoldSources(string $packageRoot): array
+    {
+        return [
+            new ScaffoldSource('semitexa/installer', InstallerScaffold::directory(), InstallerScaffold::manifestPath()),
+            new ScaffoldSource('semitexa/update', $packageRoot . '/resources/scaffold', $packageRoot . '/resources/scaffold-manifest.json'),
+        ];
     }
 
     /**

@@ -5,6 +5,21 @@ All notable changes to `semitexa/update`. Sections are `## <version> — <date>`
 This file is machine-read by `update:changelog` and the OS "What's new"
 surface — keep entries short and operator-facing.
 
+## Unreleased
+
+### Changed
+- **The scaffold comes from `semitexa/installer`.** `bin/semitexa update` takes
+  `bin/semitexa`, the Dockerfile and the Compose files from the installer,
+  which Composer now installs with this package; this package keeps only the
+  agents' docs. A project file that still matches a shipped version is
+  replaced as before, and an edited one is kept.
+- **A release of the installer alone reaches every project.** A package the
+  project gets only through another one, installed below the version the
+  release set pins, now runs composer.
+- **A scaffold manifest the update cannot read no longer stops it before
+  composer.** The scaffold stage refuses it, and composer can still bring a
+  version that reads it.
+
 ## 2026.10.09.0942 — 2026-10-09
 
 ### Added

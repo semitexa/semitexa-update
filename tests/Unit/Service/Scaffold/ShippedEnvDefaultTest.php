@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Update\Tests\Unit\Service\Scaffold;
 
 use PHPUnit\Framework\TestCase;
+use Semitexa\Installer\Application\Service\Scaffold as InstallerScaffold;
 
 /**
  * A project is installed with four workers and Redis. Left at its default the
@@ -20,7 +21,8 @@ final class ShippedEnvDefaultTest extends TestCase
 {
     private function scaffold(string $file): string
     {
-        return (string) file_get_contents(dirname(__DIR__, 4) . '/resources/scaffold/' . $file);
+        // The scaffold semitexa/installer ships, as `bin/semitexa update` reads it.
+        return (string) file_get_contents(InstallerScaffold::directory() . '/' . $file);
     }
 
     public function test_the_redis_overlay_gives_the_app_and_the_scheduler_a_shared_cache(): void

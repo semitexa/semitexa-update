@@ -8,13 +8,16 @@ use PHPUnit\Framework\TestCase;
 use Semitexa\Update\Application\Service\Scaffold\ScaffoldHasher;
 use Semitexa\Update\Application\Service\Scaffold\ScaffoldManifestLoader;
 use Semitexa\Update\Application\Service\Scaffold\ScaffoldManifestPolicy;
+use Semitexa\Update\Application\Service\UpdateRunnerFactory;
 use Semitexa\Update\Domain\Enum\ScaffoldFileCategory;
 use Semitexa\Update\Domain\Enum\ScaffoldFileHashMatch;
 use Semitexa\Update\Domain\Model\Scaffold\ScaffoldManifest;
 
 /**
- * Locks in the policy + content invariants of the SHIPPED manifest at
- * packages/semitexa-update/resources/scaffold-manifest.json. Builder tests
+ * Locks in the policy + content invariants of the SHIPPED manifests, as
+ * `bin/semitexa update` reads them (UpdateRunnerFactory::scaffoldSources()):
+ * semitexa/installer's for the runtime files, this package's for the agent
+ * docs (step 2 of one source for bin/semitexa). Builder tests
  * (uw-2) verify the mechanism; this file pins the actual product so a
  * regeneration that drops `bin/semitexa` from critical or loses the recorded
  * prior hash from uw-2.5 immediately fails CI.
@@ -30,18 +33,31 @@ final class ShippedManifestPolicyTest extends TestCase
      */
     private const KNOWN_PRIOR_BIN_HASH = '8b06fad28f3002bf7ac66b19444edb951555b6c6e3ee646daccb04dc63e9dfe7';
 
+    /** Every source's entries in one: the paths a project's update manages. */
     private ScaffoldManifest $manifest;
+
+    /** @var list<array{string, ScaffoldManifest}> each source's root and its manifest */
+    private array $sources = [];
 
     protected function setUp(): void
     {
-        $this->manifest = (new ScaffoldManifestLoader())->load(
-            dirname(__DIR__, 4) . '/resources/scaffold-manifest.json',
-        );
+        $loader = new ScaffoldManifestLoader();
+        $entries = [];
+        foreach (UpdateRunnerFactory::scaffoldSources(dirname(__DIR__, 4)) as $source) {
+            $manifest = $loader->load($source->manifestPath);
+            $this->sources[] = [$source->root, $manifest];
+            self::assertSame([], array_intersect_key($entries, $manifest->entries), "{$source->name} ships a path another source ships too");
+            $entries += $manifest->entries;
+        }
+        self::assertCount(2, $this->sources);
+        $this->manifest = new ScaffoldManifest(ScaffoldManifest::SCHEMA_VERSION, $this->sources[0][1]->generatedAt, $entries);
     }
 
     public function testShippedManifestSchemaVersionIsV1(): void
     {
-        self::assertSame(ScaffoldManifest::SCHEMA_VERSION, $this->manifest->schemaVersion);
+        foreach ($this->sources as [$root, $manifest]) {
+            self::assertSame(ScaffoldManifest::SCHEMA_VERSION, $manifest->schemaVersion, $root);
+        }
     }
 
     public function testBinSemitexaIsPresentCriticalAndExecutable(): void
@@ -102,24 +118,22 @@ final class ShippedManifestPolicyTest extends TestCase
         }
     }
 
-    public function testShippedManifestMatchesUpdateResourcesScaffoldByteForByte(): void
+    public function testEachShippedManifestMatchesItsScaffoldByteForByte(): void
     {
-        $scaffoldRoot = dirname(__DIR__, 4) . '/resources/scaffold';
-        if (!is_dir($scaffoldRoot)) {
-            self::markTestSkipped('Update resources scaffold not available in this checkout.');
-        }
-
+        // verify:accept-test-change ScaffoldSourceParityTest compared update's copy of the runtime files with the installer's; since step 2 of one source update keeps no copy and reads the installer's files, which this test checks against their manifest
         $hasher = new ScaffoldHasher();
         $stale = [];
-        foreach ($this->manifest->entries as $entry) {
-            $absolute = $scaffoldRoot . '/' . $entry->path;
-            self::assertFileExists(
-                $absolute,
-                "Manifest references {$entry->path} but the file is missing from the runtime scaffold dir.",
-            );
-            $actual = $hasher->hashFile($absolute);
-            if ($actual !== $entry->currentSha256) {
-                $stale[$entry->path] = ['manifest' => $entry->currentSha256, 'scaffold' => $actual];
+        foreach ($this->sources as [$scaffoldRoot, $manifest]) {
+            foreach ($manifest->entries as $entry) {
+                $absolute = $scaffoldRoot . '/' . $entry->path;
+                self::assertFileExists(
+                    $absolute,
+                    "Manifest references {$entry->path} but the file is missing from {$scaffoldRoot}.",
+                );
+                $actual = $hasher->hashFile($absolute);
+                if ($actual !== $entry->currentSha256) {
+                    $stale[$entry->path] = ['manifest' => $entry->currentSha256, 'scaffold' => $actual];
+                }
             }
         }
 

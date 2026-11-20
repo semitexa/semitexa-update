@@ -9,6 +9,7 @@ use Semitexa\Update\Application\Service\Scaffold\ScaffoldManifestLoader;
 use Semitexa\Update\Domain\Enum\ScaffoldFileCategory;
 use Semitexa\Update\Domain\Enum\ScaffoldFileHashMatch;
 use Semitexa\Update\Domain\Model\Scaffold\ScaffoldManifest;
+use Semitexa\Installer\Application\Service\Scaffold as InstallerScaffold;
 
 final class ScaffoldManifestLoaderTest extends TestCase
 {
@@ -150,8 +151,13 @@ final class ScaffoldManifestLoaderTest extends TestCase
 
     public function testShippedManifestParsesCleanly(): void
     {
-        $shipped = dirname(__DIR__, 4) . '/resources/scaffold-manifest.json';
-        $manifest = (new ScaffoldManifestLoader())->load($shipped);
+        // Both manifests update reads: its own (the agent docs and the retired
+        // list), and semitexa/installer's, which carries bin/semitexa.
+        $own = (new ScaffoldManifestLoader())->load(dirname(__DIR__, 4) . '/resources/scaffold-manifest.json');
+        self::assertContains('AGENTS.md', $own->paths());
+        self::assertNotSame([], $own->retired);
+
+        $manifest = (new ScaffoldManifestLoader())->load(InstallerScaffold::manifestPath());
 
         self::assertContains('bin/semitexa', $manifest->paths());
         $bin = $manifest->entryByPath('bin/semitexa');

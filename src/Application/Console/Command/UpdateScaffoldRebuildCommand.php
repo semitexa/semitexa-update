@@ -17,27 +17,29 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
 /**
- * Authoring/release tool. Mirrors the canonical installer scaffold
- * (packages/semitexa-installer/scaffold — the SSoT) into this package's
- * downstream runtime copy (resources/scaffold) AND regenerates
- * resources/scaffold-manifest.json in one atomic step.
+ * Authoring/release tool: regenerates the scaffold manifests a project's
+ * `bin/semitexa update` reads.
  *
- * This closes the footgun where copying a scaffold file by hand leaves the
- * manifest's current_sha256 stale (the runtime sync engine then refuses to
- * replace, or replaces against a wrong hash). ScaffoldSourceParityTest guards
- * the file copy; the manifest rebuild here keeps current_sha256 aligned and
- * prepends the prior hash into previous_sha256 so downstream projects on the
- * previous pristine version stay eligible for safe auto-update.
+ * From step 2 of one source for bin/semitexa the scaffold has two sources:
+ *  - semitexa/installer owns the runtime files (bin/semitexa, the Dockerfile,
+ *    the Compose files). This command writes their manifest in the installer
+ *    checkout beside this package, carrying the history on from that manifest:
+ *    each file's earlier sha256 stay known, so a project on an older pristine
+ *    version is still updated, not told it edited the file.
+ *  - this package mirrors the agents' operating manual ({@see self::AGENT_DOCS})
+ *    from semitexa/ultimate, where `scaffold:sync-docs` puts it, and writes its
+ *    manifest with the retired list. Anything else in resources/scaffold is a
+ *    file the installer owns now, and goes.
  *
- * The agents' operating manual ({@see self::AGENT_DOCS}) is mirrored too, but
- * from semitexa/ultimate, where `scaffold:sync-docs` puts it: nothing else ever
- * updated it in a project (2026-10-17).
+ * Copying a scaffold file by hand leaves a manifest's current_sha256 stale; the
+ * sync engine then refuses the source. This command is the one way the
+ * manifests change.
  *
- * Only meaningful in a checkout where the installer package sits beside this
- * one (the dev monorepo). In a downstream vendor/ install there is nothing to
- * rebuild from; the command fails clearly instead of guessing.
+ * Only meaningful in the framework workspace, where the installer is a checkout
+ * beside this package. In a project's vendor/ it refuses instead of rewriting an
+ * installed package.
  */
-#[AsCommand(name: 'update:scaffold:rebuild', description: 'Mirror the installer scaffold into this package and regenerate scaffold-manifest.json')]
+#[AsCommand(name: 'update:scaffold:rebuild', description: "Regenerate the scaffold manifests: semitexa/installer's, and this package's for the agent docs it mirrors")]
 final class UpdateScaffoldRebuildCommand extends BaseCommand
 {
     /** semitexa-dev's ScaffoldSyncDocsCommand::MIRRORED_FILES minus README.md, which a project owns; checked on every rebuild. */
@@ -63,7 +65,7 @@ final class UpdateScaffoldRebuildCommand extends BaseCommand
                 'installer-scaffold',
                 null,
                 InputOption::VALUE_REQUIRED,
-                'Path to the canonical installer scaffold dir (defaults to the sibling semitexa-installer package)',
+                "Path to the installer checkout's scaffold dir (defaults to semitexa-installer beside this package)",
             )
             ->addOption(
                 'agent-docs-root',
@@ -91,6 +93,7 @@ final class UpdateScaffoldRebuildCommand extends BaseCommand
 
         try {
             $installerScaffold = $this->resolveInstallerScaffold($input, $packageRoot);
+            $installerManifestPath = \dirname($installerScaffold) . '/resources/scaffold-manifest.json';
             $docsRoot = $this->resolveAgentDocsRoot($input, $packageRoot);
             $this->assertDocListMatchesSyncDocs();
 
@@ -98,36 +101,61 @@ final class UpdateScaffoldRebuildCommand extends BaseCommand
             if ($installerFiles === []) {
                 throw new \RuntimeException("Installer scaffold has no files: {$installerScaffold}");
             }
-            /** @var array<string, string> $sources relative path => source file */
-            $sources = [];
+            /** @var array<string, string> $installerSources relative path => source file */
+            $installerSources = [];
             foreach ($installerFiles as $relative) {
-                $sources[$relative] = $installerScaffold . '/' . $relative;
+                $installerSources[$relative] = $installerScaffold . '/' . $relative;
             }
+            /** @var array<string, string> $docSources relative path => source file */
+            $docSources = [];
             foreach (self::AGENT_DOCS as $doc) {
-                if (isset($sources[$doc])) {
+                if (isset($installerSources[$doc])) {
                     throw new \RuntimeException("{$doc} is in the installer scaffold too; the agent docs have one source, {$docsRoot}");
                 }
                 if (!is_file($docsRoot . '/' . $doc)) {
                     throw new \RuntimeException("Agent doc missing from {$docsRoot}: {$doc}");
                 }
-                $sources[$doc] = $docsRoot . '/' . $doc;
+                $docSources[$doc] = $docsRoot . '/' . $doc;
             }
-            ksort($sources);
-            $sourceFiles = array_keys($sources);
-            $targetFiles = is_dir($updateScaffold) ? $this->listFiles($updateScaffold) : [];
 
             $hasher = new ScaffoldHasher();
+            $loader = new ScaffoldManifestLoader();
+            $builder = new ScaffoldManifestBuilder();
 
-            $changed = [];   // relative paths copied (content or mode drift)
-            $removed = [];   // relative paths deleted from target (absent from source)
+            // 1. semitexa/installer's manifest, which every project's update reads
+            //    from vendor/ (step 2 of one source for bin/semitexa). The history
+            //    carries on from the manifest itself: the one place it lives now.
+            // That manifest is the only home of the history now: never rebuild it
+            // from nothing, and never let a file drop out of it without a
+            // decision (Fable's review of update 1959e8d).
+            if (!is_file($installerManifestPath)) {
+                throw new \RuntimeException(
+                    "semitexa/installer's manifest is missing: {$installerManifestPath}. It holds every version each "
+                    . 'scaffold file shipped with; one built from nothing would forget them, and a project on an older '
+                    . 'version would be told it edited its files.',
+                );
+            }
+            $installerPrior = $loader->load($installerManifestPath);
+            $vanished = array_values(array_diff(array_keys($installerPrior->entries), array_keys($installerSources), array_keys($installerPrior->retired)));
+            if ($vanished !== []) {
+                throw new \RuntimeException(
+                    implode(', ', $vanished) . " left semitexa/installer's scaffold but not its manifest. List each under "
+                    . '"retired" there with every sha256 it shipped with, so update removes a project\'s untouched copy, '
+                    . 'or bring the file back.',
+                );
+            }
+            $installerNew = $builder->buildFromFiles($installerSources, $installerPrior);
+            $installerManifestChanged = $installerPrior->toArray()['files'] !== $installerNew->toArray()['files']
+                || $installerPrior->retired !== $installerNew->retired;
 
-            // Content-only drift, matching ScaffoldSourceParityTest (which hashes
-            // bytes, not mode). The runtime sync engine sets the executable bit at
-            // materialization via the manifest's preserve_executable policy, so a
-            // mode difference between the SSoT and this template copy is harmless
-            // and must not be reported as drift.
-            foreach ($sources as $relative => $src) {
+            // 2. This package's own copy: the agent docs, until step 7 moves them too.
+            //    Anything else in it is a file the installer owns now, and goes.
+            $changed = [];
+            $removed = [];
+            foreach ($docSources as $relative => $src) {
                 $dst = $updateScaffold . '/' . $relative;
+                // Content only: the sync engine sets the executable bit from the
+                // manifest's preserve_executable, so a mode difference is no drift.
                 if (!is_file($dst) || $hasher->hashFile($src) !== $hasher->hashFile($dst)) {
                     $changed[] = $relative;
                     if (!$check) {
@@ -135,43 +163,45 @@ final class UpdateScaffoldRebuildCommand extends BaseCommand
                     }
                 }
             }
-
-            foreach (array_diff($targetFiles, $sourceFiles) as $relative) {
+            $targetFiles = is_dir($updateScaffold) ? $this->listFiles($updateScaffold) : [];
+            foreach (array_diff($targetFiles, array_keys($docSources)) as $relative) {
                 $removed[] = $relative;
                 if (!$check) {
                     @unlink($updateScaffold . '/' . $relative);
+                    $this->removeEmptyParents($updateScaffold, $relative);
                 }
             }
             sort($changed);
             sort($removed);
 
-            // Manifest: build from the (now-synced) update scaffold, growing the
-            // previous_sha256 registry off the prior manifest. In --check we build
-            // from the installer scaffold (the post-sync target state) so we can
-            // tell whether the committed manifest would change.
-            //
-            // Compare ENTRIES only, never generated_at — the builder stamps "now",
-            // so comparing the full JSON would report perpetual drift and rewrite
-            // the file on every run. A rewrite (with a fresh timestamp) happens
-            // only when a file's hash registry actually changed.
-            $prior = is_file($manifestPath) ? (new ScaffoldManifestLoader())->load($manifestPath) : null;
+            // Its manifest: the agent docs and the retired list, which the builder
+            // carries over. The runtime entries drop out without being retired:
+            // they moved, they did not go. Compared by entries, never by
+            // generated_at, which the builder stamps "now".
+            $prior = is_file($manifestPath) ? $loader->load($manifestPath) : null;
             $manifestSources = $check
-                ? $sources
-                : array_combine($sourceFiles, array_map(static fn (string $r): string => $updateScaffold . '/' . $r, $sourceFiles));
-            $new = (new ScaffoldManifestBuilder())->buildFromFiles($manifestSources, $prior);
-            $priorFiles = $prior?->toArray()['files'] ?? null;
-            $manifestChanged = $priorFiles !== $new->toArray()['files'];
+                ? $docSources
+                : array_combine(array_keys($docSources), array_map(static fn (string $r): string => $updateScaffold . '/' . $r, array_keys($docSources)));
+            $new = $builder->buildFromFiles($manifestSources, $prior);
+            $manifestChanged = ($prior?->toArray()['files'] ?? null) !== $new->toArray()['files'];
 
-            if (!$check && $manifestChanged) {
-                $this->atomicWrite($manifestPath, $this->encodeManifest($new));
+            if (!$check) {
+                if ($installerManifestChanged) {
+                    $this->atomicWrite($installerManifestPath, $this->encodeManifest($installerNew));
+                }
+                if ($manifestChanged) {
+                    $this->atomicWrite($manifestPath, $this->encodeManifest($new));
+                }
             }
 
-            $drift = $changed !== [] || $removed !== [] || $manifestChanged;
+            $drift = $changed !== [] || $removed !== [] || $manifestChanged || $installerManifestChanged;
 
             $result = [
                 'status' => 'ok',
                 'mode' => $check ? 'check' : 'rebuild',
                 'installer_scaffold' => $installerScaffold,
+                'installer_manifest_path' => $installerManifestPath,
+                'installer_manifest_changed' => $installerManifestChanged,
                 'agent_docs_root' => $docsRoot,
                 'update_scaffold' => $updateScaffold,
                 'manifest_path' => $manifestPath,
@@ -189,11 +219,11 @@ final class UpdateScaffoldRebuildCommand extends BaseCommand
             $io = new SymfonyStyle($input, $output);
             if ($check) {
                 if (!$drift) {
-                    $io->success('Scaffold copy and manifest are in sync with the installer SSoT.');
+                    $io->success('The installer manifest, this copy of the agent docs and its manifest are in sync.');
                     return Command::SUCCESS;
                 }
-                $io->warning('Scaffold is OUT OF SYNC with the installer SSoT. Run without --check to fix.');
-                $this->renderChanges($io, $changed, $removed, $manifestChanged);
+                $io->warning('The scaffold manifests are OUT OF SYNC with their files. Run without --check to fix.');
+                $this->renderChanges($io, $changed, $removed, $manifestChanged, $installerManifestChanged);
                 return Command::FAILURE;
             }
 
@@ -201,8 +231,8 @@ final class UpdateScaffoldRebuildCommand extends BaseCommand
                 $io->success('Scaffold already in sync; nothing to rebuild.');
                 return Command::SUCCESS;
             }
-            $io->success('Scaffold mirrored and scaffold-manifest.json regenerated.');
-            $this->renderChanges($io, $changed, $removed, $manifestChanged);
+            $io->success('Scaffold manifests regenerated.');
+            $this->renderChanges($io, $changed, $removed, $manifestChanged, $installerManifestChanged);
             return Command::SUCCESS;
         } catch (\Throwable $e) {
             if ($asJson) {
@@ -218,12 +248,13 @@ final class UpdateScaffoldRebuildCommand extends BaseCommand
      * @param list<string> $changed
      * @param list<string> $removed
      */
-    private function renderChanges(SymfonyStyle $io, array $changed, array $removed, bool $manifestChanged): void
+    private function renderChanges(SymfonyStyle $io, array $changed, array $removed, bool $manifestChanged, bool $installerManifestChanged): void
     {
         $io->definitionList(
-            ['Files changed' => $changed === [] ? 'none' : implode(', ', $changed)],
-            ['Files removed' => $removed === [] ? 'none' : implode(', ', $removed)],
-            ['Manifest' => $manifestChanged ? 'regenerated' : 'unchanged'],
+            ['semitexa/installer manifest' => $installerManifestChanged ? 'regenerated' : 'unchanged'],
+            ['Agent docs changed' => $changed === [] ? 'none' : implode(', ', $changed)],
+            ['Files removed from this copy' => $removed === [] ? 'none' : implode(', ', $removed)],
+            ['This manifest' => $manifestChanged ? 'regenerated' : 'unchanged'],
         );
     }
 
@@ -238,21 +269,20 @@ final class UpdateScaffoldRebuildCommand extends BaseCommand
             return $real;
         }
 
-        // dev monorepo: packages/semitexa-installer/scaffold; vendor: semitexa/installer/scaffold
-        $candidates = [
-            dirname($packageRoot) . '/semitexa-installer/scaffold',
-            dirname($packageRoot) . '/installer/scaffold',
-        ];
-        foreach ($candidates as $candidate) {
-            if (is_dir($candidate)) {
-                return $candidate;
-            }
+        // The framework workspace only: packages/semitexa-installer beside this
+        // package. In a project's vendor/ the installer is an installed package
+        // this command would rewrite, so it is not looked for there (Fable's
+        // review of the step 2 plan, D5: the refusal used to come only from the
+        // missing ultimate docs, by accident of the order of the checks).
+        $candidate = dirname($packageRoot) . '/semitexa-installer/scaffold';
+        if (is_dir($candidate)) {
+            return $candidate;
         }
 
         throw new \RuntimeException(
-            'Could not locate the installer scaffold (SSoT). This authoring command needs the '
-            . 'semitexa-installer package beside this one. Tried: ' . implode(', ', $candidates)
-            . '. Pass --installer-scaffold=<path> to override.',
+            'update:scaffold:rebuild runs in the framework workspace, where semitexa-installer is a checkout beside '
+            . "this package; it rewrites that checkout's manifest, never an installed one. Not found: {$candidate}. "
+            . 'Pass --installer-scaffold=<path> to a checkout to override.',
         );
     }
 
@@ -313,13 +343,27 @@ final class UpdateScaffoldRebuildCommand extends BaseCommand
         $rootLen = strlen($root) + 1;
         $files = [];
         foreach ($iter as $file) {
-            if (!$file->isFile()) {
+            if (!$file instanceof \SplFileInfo || !$file->isFile()) {
                 continue;
             }
             $files[] = str_replace(DIRECTORY_SEPARATOR, '/', substr($file->getPathname(), $rootLen));
         }
         sort($files);
         return $files;
+    }
+
+    /** The directories a removed file leaves empty, up to (not including) $root. */
+    private function removeEmptyParents(string $root, string $relative): void
+    {
+        $dir = \dirname($relative);
+        while ($dir !== '.' && $dir !== '' && $dir !== '/') {
+            $absolute = $root . '/' . $dir;
+            if (!is_dir($absolute) || (scandir($absolute) ?: ['.', '..', 'unreadable']) !== ['.', '..']) {
+                return;
+            }
+            @rmdir($absolute);
+            $dir = \dirname($dir);
+        }
     }
 
     private function copyFile(string $src, string $dst): void

@@ -17,6 +17,9 @@ use Semitexa\Update\Domain\Model\OrchestratorPlanReport;
 use Semitexa\Update\Domain\Enum\UpdatePhase;
 use Semitexa\Update\Domain\Contract\OrmMigrationGatewayInterface;
 use Semitexa\Update\Domain\Model\PackageDrift\PackageDriftReport;
+use Semitexa\Update\Domain\Model\Scaffold\ScaffoldFileEntry;
+use Semitexa\Update\Domain\Model\Scaffold\ScaffoldManifest;
+use Semitexa\Update\Domain\Model\Scaffold\ScaffoldSource;
 use Semitexa\Update\Domain\Model\Scaffold\ScaffoldSyncPlan;
 use Semitexa\Update\Domain\Model\Plan;
 
@@ -42,8 +45,12 @@ use Semitexa\Update\Domain\Model\Plan;
  *    for Pre, orm-sync, Apply; Post runs only after Apply succeeds.
  *
  * Collaborators driftInspector / scaffoldLoader / scaffoldClassifier /
- * scaffoldEngine / projectRoot / scaffoldRoot / manifestPath may be null,
+ * scaffoldEngine / projectRoot may be null and scaffoldSources empty,
  * which preserves the pre-uw-4 behavior (no drift / scaffold stages).
+ *
+ * The scaffold comes from more than one source (semitexa/installer's files,
+ * this package's agent docs). Each is classified against its own root; the plan
+ * is one, and an integrity failure in any source stops every source.
  */
 final class UpdateOrchestrator
 {
@@ -57,8 +64,8 @@ final class UpdateOrchestrator
         private readonly ?ScaffoldFileClassifier $scaffoldClassifier = null,
         private readonly ?ScaffoldSyncEngine $scaffoldEngine = null,
         private readonly ?string $projectRoot = null,
-        private readonly ?string $scaffoldRoot = null,
-        private readonly ?string $manifestPath = null,
+        /** @var list<ScaffoldSource> */
+        private readonly array $scaffoldSources = [],
         private readonly ?ComposerUpdateRunner $composerRunner = null,
         private readonly ?RunJournalRepository $runJournal = null,
         private readonly ?string $actor = null,
@@ -420,33 +427,120 @@ final class UpdateOrchestrator
 
     private function planScaffoldSync(bool $writeCandidates = false): ?ScaffoldSyncPlan
     {
-        if (!$this->scaffoldCollaboratorsConfigured()) {
+        return $this->planScaffoldSources($writeCandidates, new \DateTimeImmutable('now', new \DateTimeZone('UTC')))[0] ?? null;
+    }
+
+    /**
+     * The plan across every source, and each source's own part to run with its root.
+     *
+     * A manifest that cannot be read is an integrity error, not an exception: the
+     * command plans before it runs, and composer, the one way to a manifest this
+     * update can read, runs before the scaffold stage (Fable's review of the step 2
+     * plan, D3). A path two sources ship is an integrity error. A path one source
+     * retires and another ships is shipped: with packages of different releases the
+     * newer one ships it again.
+     *
+     * @return array{ScaffoldSyncPlan, list<array{ScaffoldSource, ScaffoldSyncPlan}>}|null
+     */
+    private function planScaffoldSources(bool $writeCandidates, \DateTimeImmutable $now): ?array
+    {
+        $loader = $this->scaffoldLoader;
+        $classifier = $this->scaffoldClassifier;
+        $projectRoot = $this->projectRoot;
+        if ($loader === null || $classifier === null || $projectRoot === null || !$this->scaffoldCollaboratorsConfigured()) {
             return null;
         }
-        $manifest = $this->scaffoldLoader->load($this->manifestPath);
-        return $this->scaffoldClassifier->plan(
-            projectRoot: $this->projectRoot,
-            scaffoldRoot: $this->scaffoldRoot,
-            manifest: $manifest,
-            writeCandidates: $writeCandidates,
-        );
+        $errors = [];
+        /** @var list<array{ScaffoldSource, ScaffoldManifest}> $loaded */
+        $loaded = [];
+        foreach ($this->scaffoldSources as $source) {
+            try {
+                $loaded[] = [$source, $loader->load($source->manifestPath)];
+            } catch (\RuntimeException $e) {
+                $errors[] = "The scaffold manifest of {$source->name} cannot be read: {$e->getMessage()}";
+            }
+        }
+        /** @var array<string, string> $shippedBy */
+        $shippedBy = [];
+        foreach ($loaded as [$source, $manifest]) {
+            foreach ($manifest->paths() as $path) {
+                if (isset($shippedBy[$path])) {
+                    $errors[] = "{$path} is shipped by both {$shippedBy[$path]} and {$source->name}.";
+                    continue;
+                }
+                $shippedBy[$path] = $source->name;
+            }
+        }
+
+        /** @var array<string, list<string>> $retiredHashes path => every version a source retired it with */
+        $retiredHashes = [];
+        foreach ($loaded as [, $manifest]) {
+            foreach ($manifest->retired as $path => $hashes) {
+                $retiredHashes[$path] = array_values(array_unique([...($retiredHashes[$path] ?? []), ...$hashes]));
+            }
+        }
+
+        $parts = [];
+        $planEntries = [];
+        foreach ($loaded as [$source, $manifest]) {
+            $retired = array_diff_key($manifest->retired, $shippedBy);
+            // A path shipped again keeps the versions it was retired with, so an
+            // untouched old copy is replaced, not taken for an edit: what the
+            // builder does within one manifest (review, update#116).
+            $fileEntries = $manifest->entries;
+            foreach (array_intersect_key($fileEntries, $retiredHashes) as $path => $entry) {
+                $previous = array_values(array_unique([...$entry->previousSha256, ...array_diff($retiredHashes[$path], [$entry->currentSha256])]));
+                if ($previous !== $entry->previousSha256) {
+                    $fileEntries[$path] = new ScaffoldFileEntry(
+                        path: $entry->path,
+                        currentSha256: $entry->currentSha256,
+                        previousSha256: $previous,
+                        category: $entry->category,
+                        critical: $entry->critical,
+                        autoUpdate: $entry->autoUpdate,
+                        preserveExecutable: $entry->preserveExecutable,
+                        notes: $entry->notes,
+                    );
+                }
+            }
+            if ($retired !== $manifest->retired || $fileEntries !== $manifest->entries) {
+                $manifest = new ScaffoldManifest($manifest->schemaVersion, $manifest->generatedAt, $fileEntries, $retired);
+            }
+            $part = $classifier->plan(
+                projectRoot: $projectRoot,
+                scaffoldRoot: $source->root,
+                manifest: $manifest,
+                now: $now,
+                writeCandidates: $writeCandidates,
+            );
+            $parts[] = [$source, $part];
+            array_push($planEntries, ...$part->entries);
+            array_push($errors, ...$part->integrityErrors);
+        }
+
+        return [new ScaffoldSyncPlan($planEntries, $errors), $parts];
     }
 
     private function runScaffoldSync(bool $dryRun, bool $writeCandidates = false): ?\Semitexa\Update\Domain\Model\Scaffold\ScaffoldSyncReport
     {
-        if (!$this->scaffoldCollaboratorsConfigured()) {
+        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        $planned = $this->planScaffoldSources($writeCandidates, $now);
+        $engine = $this->scaffoldEngine;
+        $projectRoot = $this->projectRoot;
+        if ($planned === null || $engine === null || $projectRoot === null) {
             return null;
         }
-        $plan = $this->planScaffoldSync($writeCandidates);
-        if ($plan === null) {
-            return null;
+        [$plan, $parts] = $planned;
+        if ($plan->hasIntegrityFailure()) {
+            // Nothing in any source runs; the engine reports every entry skipped.
+            return $engine->execute($plan, $projectRoot, $parts[0][0]->root ?? '', $dryRun, $now);
         }
-        return $this->scaffoldEngine->execute(
-            $plan,
-            $this->projectRoot,
-            $this->scaffoldRoot,
-            $dryRun,
-        );
+        $results = [];
+        foreach ($parts as [$source, $part]) {
+            array_push($results, ...$engine->execute($part, $projectRoot, $source->root, $dryRun, $now)->results);
+        }
+
+        return new \Semitexa\Update\Domain\Model\Scaffold\ScaffoldSyncReport($results, $dryRun, []);
     }
 
     private function scaffoldCollaboratorsConfigured(): bool
@@ -455,7 +549,6 @@ final class UpdateOrchestrator
             && $this->scaffoldClassifier !== null
             && $this->scaffoldEngine !== null
             && $this->projectRoot !== null
-            && $this->scaffoldRoot !== null
-            && $this->manifestPath !== null;
+            && $this->scaffoldSources !== [];
     }
 }

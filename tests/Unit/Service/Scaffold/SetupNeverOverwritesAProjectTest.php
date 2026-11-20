@@ -6,6 +6,7 @@ namespace Semitexa\Update\Tests\Unit\Service\Scaffold;
 
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
+use Semitexa\Installer\Application\Service\Scaffold as InstallerScaffold;
 
 /**
  * tk-setup-decides-from-composer-json-not-the-marker: the scaffold's setup
@@ -334,7 +335,8 @@ final class SetupNeverOverwritesAProjectTest extends TestCase
      */
     private function runSetup(array $env = []): array
     {
-        $compose = (string) file_get_contents(dirname(__DIR__, 4) . '/resources/scaffold/docker-compose.yml');
+        // The scaffold semitexa/installer ships, as `bin/semitexa update` reads it.
+        $compose = (string) file_get_contents(InstallerScaffold::directory() . '/docker-compose.yml');
         self::assertSame(
             1,
             preg_match('/\n  setup:\n[\s\S]*?command:\n      - sh\n      - -euc\n      - \|\n((?: {8}[^\n]*\n|\n)+)/', $compose, $m),

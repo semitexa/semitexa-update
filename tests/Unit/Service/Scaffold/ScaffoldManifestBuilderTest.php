@@ -11,6 +11,8 @@ use Semitexa\Update\Application\Service\Scaffold\ScaffoldManifestLoader;
 use Semitexa\Update\Application\Service\Scaffold\ScaffoldManifestPolicy;
 use Semitexa\Update\Domain\Enum\ScaffoldFileCategory;
 use Semitexa\Update\Domain\Model\Scaffold\ScaffoldManifest;
+use Semitexa\Installer\Application\Service\Scaffold as InstallerScaffold;
+use Semitexa\Update\Application\Service\UpdateRunnerFactory;
 
 final class ScaffoldManifestBuilderTest extends TestCase
 {
@@ -125,47 +127,33 @@ final class ScaffoldManifestBuilderTest extends TestCase
 
     public function testShippedManifestMatchesRealScaffoldContent(): void
     {
-        // The shipped copy: since the agent docs joined it, it has two sources
-        // (the installer scaffold, semitexa/ultimate), each pinned to it by
-        // ScaffoldSourceParityTest. The manifest must describe this copy.
-        $scaffoldRoot = dirname(__DIR__, 4) . '/resources/scaffold';
+        // Each source update reads, rebuilt from its own files, names the same
+        // paths with the same current hashes as its shipped manifest: the
+        // installer's runtime files, and this package's agent docs.
+        // verify:accept-test-change the installer cross-check compared update's copy of the runtime files with the installer's; that copy is gone (one source, step 2), and this loop checks the installer's own files against its manifest
+        foreach (UpdateRunnerFactory::scaffoldSources(dirname(__DIR__, 4)) as $source) {
+            $shipped = (new ScaffoldManifestLoader())->load($source->manifestPath);
+            $rebuilt = (new ScaffoldManifestBuilder())->build($source->root, generatedAt: $shipped->generatedAt);
 
-        $shipped = (new ScaffoldManifestLoader())->load(
-            dirname(__DIR__, 4) . '/resources/scaffold-manifest.json'
-        );
-        $rebuilt = (new ScaffoldManifestBuilder())->build($scaffoldRoot, generatedAt: $shipped->generatedAt);
-
-        self::assertSame(
-            $shipped->paths(),
-            $rebuilt->paths(),
-            'Shipped manifest and scaffold dir disagree on which files exist.',
-        );
-        foreach ($shipped->entries as $path => $shippedEntry) {
-            $rebuiltEntry = $rebuilt->entryByPath($path);
-            self::assertNotNull($rebuiltEntry);
             self::assertSame(
-                $shippedEntry->currentSha256,
-                $rebuiltEntry->currentSha256,
-                "Shipped manifest current_sha256 for {$path} is stale — rebuild the manifest.",
+                $shipped->paths(),
+                $rebuilt->paths(),
+                "{$source->name}: the shipped manifest and its scaffold dir disagree on which files exist.",
             );
-        }
-
-        // And against the installer source itself, not only the copy of it.
-        $installer = dirname(__DIR__, 5) . '/semitexa-installer/scaffold';
-        if (is_dir($installer)) {
             foreach ($shipped->entries as $path => $shippedEntry) {
-                if (is_file($installer . '/' . $path)) {
-                    self::assertSame(hash_file('sha256', $installer . '/' . $path), $shippedEntry->currentSha256, "{$path} drifted from the installer scaffold");
-                }
+                self::assertSame(
+                    $shippedEntry->currentSha256,
+                    $rebuilt->entryByPath($path)?->currentSha256,
+                    "{$source->name}: the shipped current_sha256 for {$path} is stale — run bin/semitexa update:scaffold:rebuild.",
+                );
             }
         }
     }
 
     public function testManifestIncludesBinSemitexaMarkedCritical(): void
     {
-        $shipped = (new ScaffoldManifestLoader())->load(
-            dirname(__DIR__, 4) . '/resources/scaffold-manifest.json'
-        );
+        // bin/semitexa is semitexa/installer's since step 2 of one source for bin/semitexa.
+        $shipped = (new ScaffoldManifestLoader())->load(InstallerScaffold::manifestPath());
         $bin = $shipped->entryByPath('bin/semitexa');
         self::assertNotNull($bin);
         self::assertTrue($bin->critical);
