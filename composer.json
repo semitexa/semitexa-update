@@ -11,7 +11,7 @@
     ],
     "require": {
         "php": "^8.4",
-        "semitexa/core": ">=2026.10.31.0849 || dev-master",
+        "semitexa/core": ">=2026.11.21.1434 || dev-master",
         "semitexa/installer": ">=2026.11.19.1455 || dev-master",
         "semitexa/orm": ">=2026.11.14.1040 || dev-master",
         "symfony/console": "^6.0 || ^7.0"
@@ -33,7 +33,7 @@
         "semitexa": {
             "floors": {
                 "semitexa/orm": "2026.11.14.1040",
-                "semitexa/core": "next",
+                "semitexa/core": "2026.11.21.1434",
                 "semitexa/installer": "2026.11.19.1455"
             }
         }

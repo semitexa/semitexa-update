@@ -6,7 +6,7 @@ All notable changes to `semitexa/update`. Sections are `## <version> — <date>`
 This file is machine-read by `update:changelog` and the OS "What's new"
 surface — keep entries short and operator-facing.
 
-## Unreleased
+## 2026.11.21.1434 — 2026-11-21
 
 ### Added
 - **An update stops when the new code needs a setting `.env` does not have.** `bin/semitexa update` runs a `required-settings` stage after composer and before the scaffold, the schema and the patches (under `--no-composer` too). It asks `system:doctor` of the installed code; a failing check that names a setting, such as `APP_SECRET`, ends the update with exit 1 and prints the setting, the check, the `APP_ENV` judged and the fix. Other failing checks stop nothing. The auto-deploy asks the same before `orm:sync`: a missing setting rolls the code back, and the release is tried again once `.env` changes (a setting given only through the process environment: delete `var/update/rollback/blocked.json`).
