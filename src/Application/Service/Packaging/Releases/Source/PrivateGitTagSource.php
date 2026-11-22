@@ -66,11 +66,11 @@ final class PrivateGitTagSource
 
         if ($exitCode !== 0) {
             $this->warnings[] = sprintf(
-                'git ls-remote failed for repository URL %s from %s (exit %d): %s — treating as no update, but this may hide a newer release.',
+                // git's own message is never quoted: it may repeat the URL's credentials, or another URL's, in any form.
+                'git ls-remote failed for repository URL %s from %s (exit %d). Run `git ls-remote --tags -- <that URL>` by hand to see git\'s message — treating as no update, but this may hide a newer release.',
                 GitRepositoryUrl::label($repositoryUrl),
                 $setting,
                 $exitCode,
-                GitRepositoryUrl::redactOutput(trim(implode(' ', array_slice($output, -3))), $repositoryUrl),
             );
             return null;
         }
