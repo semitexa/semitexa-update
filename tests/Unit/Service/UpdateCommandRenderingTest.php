@@ -143,6 +143,19 @@ final class UpdateCommandRenderingTest extends TestCase
         }
     }
 
+    /** Review update#127: the two together ran no stage and still said the patches were applied. */
+    public function testNoComposerWithComposerOnlyIsRefusedBeforeAnythingIsPlanned(): void
+    {
+        $tester = $this->commandTester($this->composerThatCouldRun(), static fn (): array => []);
+        $tester->execute(['--no-composer' => true, '--composer-only' => true, '--no-scaffold' => true]);
+        $output = (string) preg_replace('/\s+/', ' ', $tester->getDisplay());
+
+        self::assertSame(2, $tester->getStatusCode(), $output);
+        self::assertStringContainsString('--no-composer and --composer-only exclude each other', $output);
+        self::assertStringNotContainsString('Semitexa Update Plan', $output, 'refused before anything is planned');
+        self::assertStringNotContainsString('patches applied', $output);
+    }
+
     /** The same project and the same composer, without --no-composer: all of it is said, as before. */
     public function testARunWithComposerStillSaysItsPlanItsReleaseAndThatItCompleted(): void
     {

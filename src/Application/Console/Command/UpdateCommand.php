@@ -123,6 +123,10 @@ final class UpdateCommand extends BaseCommand
         $composerOnly = (bool) $input->getOption('composer-only');
         $allowPartialComposer = (bool) $input->getOption('allow-partial-composer-update');
         $skipScaffold = (bool) $input->getOption('no-scaffold');
+        if ($skipComposer && $composerOnly) {
+            $io->error('--no-composer and --composer-only exclude each other: one skips composer, the other runs nothing but composer.');
+            return Command::INVALID;
+        }
 
         try {
             $orchestrator = $this->runnerFactory->orchestrator($connection);
