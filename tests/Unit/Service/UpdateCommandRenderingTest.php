@@ -111,6 +111,78 @@ final class UpdateCommandRenderingTest extends TestCase
         }
     }
 
+    /**
+     * tk-e2e-seeding-reads-like-a-framework-update: test:run seeds the E2E
+     * database with `update --no-composer --no-scaffold`, and what that printed
+     * (a composer plan, "Update completed. Installed release: ...", packages to
+     * add) read as the framework having been updated. A run that calls no
+     * composer says what it did and nothing it did not.
+     */
+    public function testARunWithoutComposerSaysWhatItDidAndNothingAboutPackages(): void
+    {
+        foreach ([
+            [['--no-composer' => true, '--no-scaffold' => true], 'Schema and data patches applied. Composer was not run (--no-composer): no package was updated.'],
+            [['--no-composer' => true], 'Scaffold, schema and data patches applied. Composer was not run (--no-composer): no package was updated.'],
+            [['--no-composer' => true, '--no-scaffold' => true, '--dry-run' => true], 'Dry-run: no patches and no DDL were executed.'],
+        ] as [$options, $said]) {
+            $tester = $this->commandTester($this->composerThatCouldRun(), static fn (): array => [
+                new NewSkeletonPackage(name: 'semitexa/media', pinnedVersion: '2026.11.20.0947', description: 'Media assets'),
+            ]);
+            $tester->execute($options);
+            $output = (string) preg_replace('/\s+/', ' ', $tester->getDisplay());
+            $mode = implode(' ', array_keys($options));
+
+            self::assertSame(0, $tester->getStatusCode(), $mode . ': ' . $output);
+            self::assertStringContainsString($said, $output, $mode);
+            self::assertStringContainsString('Semitexa Update Plan (--no-composer: no package is updated)', $output, $mode);
+            self::assertStringContainsString('ORM schema', $output, $mode . ': what it does is still planned');
+            self::assertStringContainsString('Composer phase skipped via --no-composer.', $output, $mode);
+            foreach (['Composer package update', 'Command: composer', 'Update completed', 'Installed release', 'New skeleton packages available', 'composer require'] as $notSaid) {
+                self::assertStringNotContainsString($notSaid, $output, $mode . ': says nothing it did not do');
+            }
+        }
+    }
+
+    /** The same project and the same composer, without --no-composer: all of it is said, as before. */
+    public function testARunWithComposerStillSaysItsPlanItsReleaseAndThatItCompleted(): void
+    {
+        $skeleton = static fn (): array => [
+            new NewSkeletonPackage(name: 'semitexa/media', pinnedVersion: '2026.11.20.0947', description: 'Media assets'),
+        ];
+
+        $tester = $this->commandTester($this->composerThatCouldRun(), $skeleton);
+        $tester->execute(['--dry-run' => true, '--no-scaffold' => true]);
+        $output = $tester->getDisplay();
+        self::assertMatchesRegularExpression('/^Semitexa Update Plan\n=+$/m', $output, 'the title as it was');
+        self::assertStringContainsString('Composer package update', $output);
+        self::assertStringContainsString('Command: composer', $output);
+        self::assertStringContainsString('New skeleton packages available', $output);
+
+        $tester = $this->commandTester(null, $skeleton);
+        $tester->execute(['--no-scaffold' => true]);
+        $output = $tester->getDisplay();
+        self::assertSame(0, $tester->getStatusCode(), $output);
+        self::assertStringContainsString('[OK] Update completed.', $output);
+        self::assertStringContainsString('Installed release: ', $output);
+        self::assertStringContainsString('New skeleton packages available', $output);
+        self::assertStringNotContainsString('no package was updated', $output);
+    }
+
+    private function composerThatCouldRun(): ComposerUpdateRunner
+    {
+        return new ComposerUpdateRunner(
+            new class implements ComposerExecutorInterface {
+                public function isAvailable(): bool { return true; }
+                public function containerError(): string { return ''; }
+                public function run(array $args, string $projectRoot, array $env = []): array { return ['exitCode' => 0, 'output' => '']; }
+            },
+            new class implements UpstreamVersionResolverInterface {
+                public function stableVersions(string $package): array { return []; }
+                public function requiresOf(string $package, string $version): ?array { return null; }
+            },
+        );
+    }
+
     public function testRealRunOutputRecommendsManualRerunAfterBinReplacement(): void
     {
         $tester = $this->commandTester();

@@ -396,7 +396,7 @@ final class UpdateOrchestrator
     /**
      * Read-only inspection of the current sweep state.
      */
-    public function plan(bool $writeCandidates = false, bool $skipScaffold = false): OrchestratorPlanReport
+    public function plan(bool $writeCandidates = false, bool $skipScaffold = false, bool $skipComposer = false): OrchestratorPlanReport
     {
         $patchPlan = $this->runner->plan();
         $schemaStatus = $this->migrationGateway->inspect($this->connection);
@@ -408,7 +408,10 @@ final class UpdateOrchestrator
             // Not even read under --no-scaffold: a missing or broken manifest
             // must not stop a run that only touches the database.
             scaffoldPlan: $skipScaffold ? null : $this->planScaffoldSync($writeCandidates),
-            composerPlan: $this->planComposerUpdate(),
+            // Not planned under --no-composer: a plan of what composer would
+            // do ("Command: composer update ...") in a run that never calls it
+            // read as packages being updated, and it asked Packagist to no purpose.
+            composerPlan: $skipComposer ? null : $this->planComposerUpdate(),
             advisories: $this->advisories?->collect() ?? [],
         );
     }

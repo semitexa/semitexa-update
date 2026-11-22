@@ -25,7 +25,7 @@ use Semitexa\Update\Domain\Model\Scaffold\ScaffoldSyncReport;
 use Semitexa\Update\Exception\UpdateException;
 use Semitexa\Update\Domain\Model\OrchestratorPlanReport;
 use Semitexa\Update\Domain\Model\OrchestratorStage;
-use Semitexa\Update\Application\Service\Composer\InstalledReleaseSetRecorder;
+use Semitexa\Update\Application\Service\Composer\InstalledReleaseSetReporter;
 use Semitexa\Update\Application\Service\Composer\SkeletonRequireDiff;
 use Semitexa\Update\Application\Service\UpdateContinuation;
 use Semitexa\Update\Application\Service\UpdateRunnerFactory;
@@ -126,13 +126,13 @@ final class UpdateCommand extends BaseCommand
 
         try {
             $orchestrator = $this->runnerFactory->orchestrator($connection);
-            $planReport = $orchestrator->plan($writeCandidates, $skipScaffold);
+            $planReport = $orchestrator->plan($writeCandidates, $skipScaffold, $skipComposer);
         } catch (UpdateException $e) {
             $io->error($e->getMessage());
             return Command::FAILURE;
         }
 
-        $this->renderPlan($io, $planReport);
+        $this->renderPlan($io, $planReport, $skipComposer);
 
         if ($dryRun) {
             try {
@@ -161,7 +161,9 @@ final class UpdateCommand extends BaseCommand
                     return Command::FAILURE;
                 }
             }
-            $this->renderSkeletonRequireDiff($io);
+            if (!$skipComposer) {
+                $this->renderSkeletonRequireDiff($io);
+            }
             return Command::SUCCESS;
         }
 
@@ -181,7 +183,7 @@ final class UpdateCommand extends BaseCommand
         }
 
         $this->renderStages($io, $stages);
-        $this->recordReleaseSet($io);
+        InstalledReleaseSetReporter::record($io, $this->getProjectRoot(), quiet: $skipComposer);
 
         foreach ($stages as $stage) {
             if (!$stage->isSuccess()) {
@@ -206,30 +208,20 @@ final class UpdateCommand extends BaseCommand
             return $continuation->run();
         }
 
+        // Under --no-composer the run says what it did and nothing more. Its
+        // output is read inside other runs (test:run seeds the E2E database
+        // with it), where "Update completed. Installed release: ..." after a
+        // composer plan read as the framework having been updated
+        // (tk-e2e-seeding-reads-like-a-framework-update).
+        if ($skipComposer) {
+            $io->success(($skipScaffold ? 'Schema and data patches applied.' : 'Scaffold, schema and data patches applied.')
+                . ' Composer was not run (--no-composer): no package was updated.');
+            return Command::SUCCESS;
+        }
+
         $io->success('Update completed.');
         $this->renderSkeletonRequireDiff($io);
         return Command::SUCCESS;
-    }
-
-    /**
-     * Record the release vendor/ now holds, for the footer. Whatever the
-     * stages did: a failed composer stage restores vendor/, and the record
-     * must follow it back.
-     */
-    private function recordReleaseSet(SymfonyStyle $io): void
-    {
-        try {
-            $release = (new InstalledReleaseSetRecorder())->record($this->getProjectRoot());
-        } catch (\Throwable $e) {
-            $io->text('  <comment>Installed release not recorded: ' . $e->getMessage() . '</comment>');
-            return;
-        }
-
-        $io->text(match (true) {
-            is_string($release) => '  Installed release: semitexa/ultimate ' . $release,
-            $release === false => '  <comment>Installed release not recorded: Packagist could not be asked.</comment>',
-            default => '  Installed release: none (vendor/ holds no whole semitexa/ultimate release).',
-        });
     }
 
     /**
@@ -246,9 +238,9 @@ final class UpdateCommand extends BaseCommand
         return false;
     }
 
-    private function renderPlan(SymfonyStyle $io, OrchestratorPlanReport $planReport): void
+    private function renderPlan(SymfonyStyle $io, OrchestratorPlanReport $planReport, bool $skipComposer = false): void
     {
-        $io->title('Semitexa Update Plan');
+        $io->title($skipComposer ? 'Semitexa Update Plan (--no-composer: no package is updated)' : 'Semitexa Update Plan');
 
         if ($planReport->composerPlan !== null) {
             $this->renderComposerPlan($io, $planReport->composerPlan);
