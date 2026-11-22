@@ -373,8 +373,15 @@ case "\${1:-}" in
   update:packages:auto)
     touch var/auto-ran
     # What the deploy in the container asks: is the wrapper's lock held now?
-    if [ -e var/lock/semitexa-auto-deploy-wrapper.lock ] && ! flock -n var/lock/semitexa-auto-deploy-wrapper.lock true; then
-      touch var/wrapper-lock-held
+    # Only a conflict counts: flock must be there (a missing one exits 127,
+    # which a negated call took for a held lock), and a conflict on a file it
+    # could open exits 1, in busybox and util-linux alike (review update#126).
+    if [ -e var/lock/semitexa-auto-deploy-wrapper.lock ] && command -v flock >/dev/null 2>&1; then
+      held=0
+      flock -n var/lock/semitexa-auto-deploy-wrapper.lock true || held=\$?
+      if [ "\$held" = 1 ]; then
+        touch var/wrapper-lock-held
+      fi
     fi
     printf '%s\n' '__PAYLOAD__'
     exit __AUTO_EXIT__
