@@ -374,9 +374,11 @@ case "\${1:-}" in
     touch var/auto-ran
     # What the deploy in the container asks: is the wrapper's lock held now?
     # Only a conflict counts: flock must be there (a missing one exits 127,
-    # which a negated call took for a held lock), and a conflict on a file it
-    # could open exits 1, in busybox and util-linux alike (review update#126).
-    if [ -e var/lock/semitexa-auto-deploy-wrapper.lock ] && command -v flock >/dev/null 2>&1; then
+    # which a negated call took for a held lock), and the file must be one it
+    # can open, as the wrapper requires too: busybox flock also exits 1 when it
+    # cannot open the file, so exit 1 means a conflict only on a readable file
+    # (review update#126).
+    if [ -r var/lock/semitexa-auto-deploy-wrapper.lock ] && command -v flock >/dev/null 2>&1; then
       held=0
       flock -n var/lock/semitexa-auto-deploy-wrapper.lock true || held=\$?
       if [ "\$held" = 1 ]; then
