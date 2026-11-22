@@ -15,16 +15,18 @@ use Symfony\Component\Console\Tester\CommandTester;
  * credentials it may carry must never reach the output
  * (tk-update-private-git-tag-arg-injection).
  *
- * The URL used here has a space in it, so the guard refuses it before git
- * runs, and the source mode is "private", so Packagist is not asked: the
- * command touches no network. The project root is a throwaway directory.
+ * Both URLs used here are refused by the guard before git runs (a space, a
+ * scheme that is not accepted), and the source mode is "private", so
+ * Packagist is not asked: the command touches no network. The project root
+ * is a throwaway directory.
  */
 final class UpdatePackagesCheckCommandRedactionTest extends TestCase
 {
-    private const URL = 'https://deploybot:s3cr3t-pass@git.invalid/semitexa-core.git?private_token=t0k3n-value extra';
+    private const UNSHOWABLE = 'https://deploybot:s3cr3t-pass@git.invalid/semitexa-core.git?private_token= t0k3n-value';
+    private const REDUCIBLE = 'git://deploybot:s3cr3t-pass@git.invalid/semitexa-core.git?private_token=t0k3n-value#fr4gment';
     private const ENV = [
         'SEMITEXA_AUTO_DEPLOY_SOURCE' => 'private',
-        'SEMITEXA_AUTO_DEPLOY_PRIVATE_REPOSITORY_URL' => self::URL,
+        'SEMITEXA_AUTO_DEPLOY_PRIVATE_REPOSITORY_URL' => self::UNSHOWABLE,
     ];
 
     private string $root = '';
@@ -65,30 +67,33 @@ final class UpdatePackagesCheckCommandRedactionTest extends TestCase
     }
 
     /**
-     * @return iterable<string, array{array<string, bool>}>
+     * @return iterable<string, array{string, array<string, bool>, string}>
      */
-    public static function modes(): iterable
+    public static function cases(): iterable
     {
-        yield 'text' => [[]];
-        yield 'json' => [['--json' => true]];
+        foreach (['text' => [], 'json' => ['--json' => true]] as $mode => $input) {
+            yield 'reduced, ' . $mode => [self::REDUCIBLE, $input, 'git://***@git.invalid/semitexa-core.git?***#***'];
+            yield 'not shown, ' . $mode => [self::UNSHOWABLE, $input, '***(notshown:ithasnoformfreeofcredentials)'];
+        }
     }
 
     /**
      * @param array<string, bool> $input
      */
-    #[DataProvider('modes')]
-    public function testOutputCarriesNoCredentialsOfThePrivateRepositoryUrl(array $input): void
+    #[DataProvider('cases')]
+    public function testOutputCarriesNoCredentialsOfThePrivateRepositoryUrl(string $url, array $input, string $shown): void
     {
+        putenv('SEMITEXA_AUTO_DEPLOY_PRIVATE_REPOSITORY_URL=' . $url);
         $tester = new CommandTester(new UpdatePackagesCheckCommand());
 
         $tester->execute($input);
         // The text mode wraps long lines; the URL is looked for with the wrapping taken out.
         $output = (string) preg_replace('~\s+~', '', $tester->getDisplay());
 
-        self::assertStringContainsString('https://***@git.invalid/semitexa-core.git?private_token=***', $output);
         self::assertStringContainsString('SEMITEXA_AUTO_DEPLOY_PRIVATE_REPOSITORY_URL', $output, 'the refusal warning is shown too');
-        foreach (['deploybot', 's3cr3t', 't0k3n'] as $secret) {
+        foreach (['deploybot', 's3cr3t', 't0k3n', 'private_token', 'fr4gment'] as $secret) {
             self::assertStringNotContainsString($secret, $output);
         }
+        self::assertStringContainsString($shown, $output);
     }
 }

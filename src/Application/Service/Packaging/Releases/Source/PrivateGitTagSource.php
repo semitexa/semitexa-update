@@ -51,8 +51,8 @@ final class PrivateGitTagSource
         $refusal = GitRepositoryUrl::refusal($repositoryUrl);
         if ($refusal !== null) {
             $this->warnings[] = sprintf(
-                'Refused repository URL "%s" from %s: %s. git was not run; accepted: %s — treating as no update, but this may hide a newer release.',
-                GitRepositoryUrl::printable($repositoryUrl),
+                'Refused repository URL %s from %s: %s. git was not run; accepted: %s — treating as no update, but this may hide a newer release.',
+                GitRepositoryUrl::label($repositoryUrl),
                 $setting,
                 $refusal,
                 GitRepositoryUrl::ACCEPTED,
@@ -66,10 +66,11 @@ final class PrivateGitTagSource
 
         if ($exitCode !== 0) {
             $this->warnings[] = sprintf(
-                'git ls-remote failed for %s (exit %d): %s — treating as no update, but this may hide a newer release.',
-                GitRepositoryUrl::printable($repositoryUrl),
+                'git ls-remote failed for repository URL %s from %s (exit %d): %s — treating as no update, but this may hide a newer release.',
+                GitRepositoryUrl::label($repositoryUrl),
+                $setting,
                 $exitCode,
-                GitRepositoryUrl::redact(trim(implode(' ', array_slice($output, -3))), $repositoryUrl),
+                GitRepositoryUrl::redactOutput(trim(implode(' ', array_slice($output, -3))), $repositoryUrl),
             );
             return null;
         }

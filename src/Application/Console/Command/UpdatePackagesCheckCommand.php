@@ -29,7 +29,7 @@ final class UpdatePackagesCheckCommand extends BaseCommand
         $plan = (new FrameworkDeploymentPlanner())->plan($this->getProjectRoot());
         // Shown, logged by wrappers and pasted into reports: never with the credentials the URL may carry.
         $privateRepository = $plan->config->privateRepositoryUrl !== null
-            ? GitRepositoryUrl::printable($plan->config->privateRepositoryUrl)
+            ? (GitRepositoryUrl::reduced($plan->config->privateRepositoryUrl) ?? '*** (not shown: it has no form free of credentials)')
             : null;
 
         if ($input->getOption('json')) {

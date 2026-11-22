@@ -69,11 +69,12 @@ final class PrivateGitTagSourceUrlGuardTest extends TestCase
         mkdir($decoy);
         $this->git($decoy, ['init', '-q']);
 
+        $previousGitDir = getenv('GIT_DIR');
         putenv('GIT_DIR=' . $decoy . '/.git');
         try {
             $this->buildFixture($this->root . '/second');
         } finally {
-            putenv('GIT_DIR');
+            putenv($previousGitDir === false ? 'GIT_DIR' : 'GIT_DIR=' . $previousGitDir);
         }
 
         self::assertSame([], $this->git($decoy, ['tag']), 'the fixture tag must not land in the GIT_DIR repository');
@@ -81,23 +82,44 @@ final class PrivateGitTagSourceUrlGuardTest extends TestCase
         self::assertSame([self::TAG], $this->git($this->root . '/second/origin', ['tag']));
     }
 
+    private const NOT_SHOWN = 'Refused repository URL (not shown: it has no form free of credentials) from';
+
     /**
-     * @return iterable<string, array{string, list<string>}>
+     * Every URL here is refused. What the warning may show of it, and what it must not.
+     *
+     * @return iterable<string, array{string, string, list<string>}>
      */
     public static function urlsWithSecrets(): iterable
     {
-        yield 'https userinfo' => ['https://deploybot:s3cr3t-pass@git.invalid/semitexa-core.git extra', ['deploybot', 's3cr3t']];
-        yield 'ssh userinfo' => ['ssh://deploybot:s3cr3t-pass@git.invalid/semitexa-core.git extra', ['deploybot', 's3cr3t']];
-        yield 'scp-like userinfo' => ['deploybot:s3cr3t-pass@git.invalid:semitexa-core.git extra', ['deploybot', 's3cr3t']];
-        yield 'userinfo with a slash' => ['https://deploybot:s3cr3t/pass@git.invalid/semitexa-core.git extra', ['deploybot', 's3cr3t', '/pass']];
-        yield 'query token' => ['https://git.invalid/semitexa-core.git?private_token=s3cr3t-pass&ref=x extra', ['s3cr3t']];
+        $userinfo = ['deploybot', 's3cr3t', 'pass'];
+        yield 'https userinfo, then a space' => ['https://deploybot:s3cr3t-pass@git.invalid/semitexa-core.git extra', self::NOT_SHOWN, $userinfo];
+        yield 'ssh userinfo, then a space' => ['ssh://deploybot:s3cr3t-pass@git.invalid/semitexa-core.git extra', self::NOT_SHOWN, $userinfo];
+        yield 'scp-like userinfo, then a space' => ['deploybot:s3cr3t-pass@git.invalid:semitexa-core.git extra', self::NOT_SHOWN, $userinfo];
+        yield 'userinfo with a slash' => ['https://deploybot:s3cr3t/pass@git.invalid/semitexa-core.git extra', self::NOT_SHOWN, $userinfo];
+        yield 'userinfo of a refused scheme' => ['git://deploybot:s3cr3t-pass@git.invalid:9418/semitexa-core.git', '"git://***@git.invalid:9418/semitexa-core.git"', $userinfo];
+        yield 'query token, then a space' => ['https://git.invalid/semitexa-core.git?private_token=s3cr3t-pass&ref=x extra', self::NOT_SHOWN, ['s3cr3t', 'pass']];
+
+        $secret = ['SECRETVALUE', 'ECRETVALUE', 'token'];
+        yield 'query value after a space' => ['https://git.invalid/repo?token= SECRETVALUE', self::NOT_SHOWN, $secret];
+        yield 'query value after a tab' => ["https://git.invalid/repo?token=\tSECRETVALUE", self::NOT_SHOWN, $secret];
+        yield 'query value after a newline' => ["https://git.invalid/repo?token=\nSECRETVALUE", self::NOT_SHOWN, $secret];
+        yield 'query value after a quote' => ["git://git.invalid/repo?token='SECRETVALUE", '"git://git.invalid/repo?***"', $secret];
+        yield 'query value after an encoded space' => ['git://git.invalid/repo?token=%20SECRETVALUE', '"git://git.invalid/repo?***"', $secret];
+        yield 'fragment' => ['git://git.invalid/repo.git#SECRETVALUE', '"git://git.invalid/repo.git#***"', $secret];
+        yield 'percent-encoded fragment' => ['git://git.invalid/repo.git#%53ECRETVALUE', '"git://git.invalid/repo.git#***"', $secret];
+        yield 'percent-encoded query mark in the path' => ['git://git.invalid/repo%3Ftoken=SECRETVALUE', self::NOT_SHOWN, $secret];
+        yield 'secret before an @ in the path' => ['git://git.invalid/SECRETVALUE@mirror.invalid/repo', self::NOT_SHOWN, $secret];
+        yield 'option carrying a secret' => ['--password=SECRETVALUE', self::NOT_SHOWN, $secret];
+        yield 'helper carrying a secret' => ['ext::SECRETVALUE', self::NOT_SHOWN, $secret];
+        yield 'bare word' => ['SECRETVALUE', self::NOT_SHOWN, $secret];
+        yield 'word with a colon' => ['deploybot:SECRETVALUE', self::NOT_SHOWN, $secret];
     }
 
     /**
      * @param list<string> $secrets
      */
     #[DataProvider('urlsWithSecrets')]
-    public function testRefusalWarningCarriesNoCredentials(string $url, array $secrets): void
+    public function testRefusalWarningCarriesNoCredentials(string $url, string $shown, array $secrets): void
     {
         $calls = [];
         $source = new PrivateGitTagSource($this->recorder($calls));
@@ -109,33 +131,95 @@ final class PrivateGitTagSourceUrlGuardTest extends TestCase
         self::assertCount(1, $warnings);
         $warning = $warnings[0];
         self::assertStringContainsString('Refused repository URL', $warning);
-        self::assertStringContainsString('git.invalid', $warning);
-        self::assertStringContainsString('SEMITEXA_AUTO_DEPLOY_PRIVATE_REPOSITORY_URL', $warning);
-        self::assertStringContainsString('it contains whitespace or control characters', $warning);
+        self::assertStringContainsString('git was not run', $warning);
         self::assertNotSame([], $secrets);
         foreach ($secrets as $secret) {
             self::assertStringNotContainsString($secret, $warning);
         }
+        self::assertStringContainsString($shown, $warning);
+        self::assertStringContainsString('from SEMITEXA_AUTO_DEPLOY_PRIVATE_REPOSITORY_URL: it', $warning);
     }
 
-    public function testFailureWarningCarriesNoCredentialsFromTheUrlOrFromGit(): void
+    /**
+     * Every URL here is accepted and git fails. What the warning shows, and what it must not.
+     *
+     * @return iterable<string, array{string, list<string>, list<string>, list<string>}>
+     */
+    public static function failuresWithSecrets(): iterable
     {
         $url = 'https://deploybot:s3cr3t-pass@git.invalid/semitexa-core.git?private_token=t0k3n-value';
-        $source = new PrivateGitTagSource(static fn(array $argv): array => [128, [
-            "fatal: unable to access '" . $url . "/': Could not resolve host: git.invalid",
-            'remote: https://other:0ther-s3cret@mirror.invalid/x.git?access_token=m1rr0r denied',
-        ]]);
+        yield 'git quotes the URL and another one' => [
+            $url,
+            [
+                "fatal: unable to access '" . $url . "/': Could not resolve host: git.invalid",
+                'remote: https://other:0ther-s3cret@mirror.invalid/x.git?access_token=m1rr0r denied',
+            ],
+            ['"https://***@git.invalid/semitexa-core.git?***"', 'Could not resolve host', 'https://***@mirror.invalid/x.git?*** denied'],
+            ['deploybot', 's3cr3t', 't0k3n', '0ther', 'm1rr0r', 'private_token', 'access_token'],
+        ];
 
-        self::assertNull($source->latestStableTag($url));
+        $url = "https://git.invalid/repo?token='SECRETVALUE";
+        yield 'query value after a quote' => [
+            $url,
+            ['fatal: repository ' . $url . ' not found'],
+            ['"https://git.invalid/repo?***"'],
+            ['SECRETVALUE'],
+        ];
+
+        $url = 'https://git.invalid/repo.git#SECRETVALUE';
+        yield 'fragment' => [
+            $url,
+            ["fatal: unable to access '" . $url . "': Could not resolve host: git.invalid"],
+            ['"https://git.invalid/repo.git#***"', 'Could not resolve host'],
+            ['SECRETVALUE'],
+        ];
+
+        yield 'git prints the password percent-decoded' => [
+            'https://deploybot:S%45CRETVALUE@git.invalid/repo.git',
+            ['fatal: Authentication failed, password SECRETVALUE was refused'],
+            ['"https://***@git.invalid/repo.git"', 'git output withheld'],
+            ['SECRETVALUE', 'S%45CRETVALUE', 'deploybot'],
+        ];
+
+        yield 'scp-like userinfo quoted alone' => [
+            'deploybot@git.invalid:semitexa/repo.git',
+            ['deploybot@git.invalid: Permission denied (publickey).'],
+            ['"***@git.invalid:semitexa/repo.git"', '***@git.invalid: Permission denied'],
+            ['deploybot'],
+        ];
+
+        yield 'a path that cannot be shown' => [
+            'https://git.invalid/repo%3Ftoken=SECRETVALUE',
+            ["fatal: unable to access 'https://git.invalid/repo%3Ftoken=SECRETVALUE/': Could not resolve host"],
+            ['repository URL (not shown: it has no form free of credentials) from', 'Could not resolve host'],
+            ['SECRETVALUE'],
+        ];
+    }
+
+    /**
+     * @param list<string> $gitOutput
+     * @param list<string> $shown
+     * @param list<string> $secrets
+     */
+    #[DataProvider('failuresWithSecrets')]
+    public function testFailureWarningCarriesNoCredentialsFromTheUrlOrFromGit(string $url, array $gitOutput, array $shown, array $secrets): void
+    {
+        $source = new PrivateGitTagSource(static fn(array $argv): array => [128, $gitOutput]);
+
+        self::assertNull($source->latestStableTag($url, 'SEMITEXA_AUTO_DEPLOY_PRIVATE_REPOSITORY_URL'));
 
         $warnings = $source->lastWarnings();
         self::assertCount(1, $warnings);
         $warning = $warnings[0];
-        self::assertStringContainsString('git ls-remote failed for https://***@git.invalid/semitexa-core.git?private_token=***', $warning);
-        self::assertStringContainsString('Could not resolve host', $warning);
-        self::assertStringContainsString('https://***@mirror.invalid/x.git?access_token=*** denied', $warning);
-        foreach (['deploybot', 's3cr3t', 't0k3n', '0ther', 'm1rr0r'] as $secret) {
+        self::assertStringContainsString('git ls-remote failed for', $warning);
+        self::assertNotSame([], $secrets);
+        foreach ($secrets as $secret) {
             self::assertStringNotContainsString($secret, $warning);
+        }
+        self::assertStringContainsString('from SEMITEXA_AUTO_DEPLOY_PRIVATE_REPOSITORY_URL (exit 128)', $warning);
+        self::assertNotSame([], $shown);
+        foreach ($shown as $text) {
+            self::assertStringContainsString($text, $warning);
         }
     }
 
@@ -224,8 +308,9 @@ final class PrivateGitTagSourceUrlGuardTest extends TestCase
         self::assertSame([], $calls, 'git must not run for an unsafe URL');
         $warnings = $source->lastWarnings();
         self::assertCount(1, $warnings);
-        self::assertStringContainsString('Refused repository URL "--refs/semitexa-ssr"', $warnings[0]);
-        self::assertStringContainsString('composer.json repositories[].url', $warnings[0]);
+        self::assertStringContainsString('Refused repository URL (not shown', $warnings[0]);
+        self::assertStringContainsString('from composer.json repositories[].url of semitexa/ssr: it starts with "-"', $warnings[0]);
+        self::assertStringNotContainsString('--refs', $warnings[0]);
     }
 
     /**
