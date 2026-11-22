@@ -21,35 +21,122 @@ final class PrivateGitTagSourceUrlGuardTest extends TestCase
 {
     private const TAG = '2026.01.02.0304';
 
+    /** Variables that make git act on another repository than the one `-C` names. */
+    private const REPOSITORY_SELECTION = [
+        'GIT_DIR',
+        'GIT_WORK_TREE',
+        'GIT_COMMON_DIR',
+        'GIT_INDEX_FILE',
+        'GIT_OBJECT_DIRECTORY',
+        'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+        'GIT_PREFIX',
+    ];
+
     private string $root = '';
     private string $previousCwd = '';
+    private bool $allowProtocolChanged = false;
     private string|false $previousAllow = false;
 
     protected function setUp(): void
     {
         $this->root = sys_get_temp_dir() . '/semitexa-git-guard-' . bin2hex(random_bytes(6));
-        $origin = $this->root . '/origin';
-        $work = $this->root . '/work';
-        mkdir($origin, 0o777, true);
-        mkdir($work, 0o777, true);
+        $this->buildFixture($this->root);
 
-        $this->git($origin, 'init -q');
-        $this->git($origin, '-c user.name=t -c user.email=t@git.invalid commit -q --allow-empty -m init');
-        $this->git($origin, 'tag ' . self::TAG);
-        $this->git($work, 'init -q');
-        $this->git($work, 'remote add origin ' . escapeshellarg($origin));
-
-        $this->previousCwd = (string) getcwd();
-        chdir($work);
+        // State of the test process changes only after the fixture stands, and tearDown undoes what was changed.
         $this->previousAllow = getenv('GIT_ALLOW_PROTOCOL');
         putenv('GIT_ALLOW_PROTOCOL=file');
+        $this->allowProtocolChanged = true;
+        $this->previousCwd = (string) getcwd();
+        chdir($this->root . '/work');
     }
 
     protected function tearDown(): void
     {
-        chdir($this->previousCwd);
-        putenv($this->previousAllow === false ? 'GIT_ALLOW_PROTOCOL' : 'GIT_ALLOW_PROTOCOL=' . $this->previousAllow);
-        exec('rm -rf ' . escapeshellarg($this->root));
+        if ($this->previousCwd !== '') {
+            chdir($this->previousCwd);
+        }
+        if ($this->allowProtocolChanged) {
+            putenv($this->previousAllow === false ? 'GIT_ALLOW_PROTOCOL' : 'GIT_ALLOW_PROTOCOL=' . $this->previousAllow);
+        }
+        if ($this->root !== '' && is_dir($this->root)) {
+            exec('rm -rf ' . escapeshellarg($this->root));
+        }
+    }
+
+    public function testFixtureLeavesTheRepositoryNamedByGitDirAlone(): void
+    {
+        $decoy = $this->root . '/decoy';
+        mkdir($decoy);
+        $this->git($decoy, ['init', '-q']);
+
+        putenv('GIT_DIR=' . $decoy . '/.git');
+        try {
+            $this->buildFixture($this->root . '/second');
+        } finally {
+            putenv('GIT_DIR');
+        }
+
+        self::assertSame([], $this->git($decoy, ['tag']), 'the fixture tag must not land in the GIT_DIR repository');
+        self::assertSame([], $this->git($decoy, ['remote']), 'the fixture remote must not land in the GIT_DIR repository');
+        self::assertSame([self::TAG], $this->git($this->root . '/second/origin', ['tag']));
+    }
+
+    /**
+     * @return iterable<string, array{string, list<string>}>
+     */
+    public static function urlsWithSecrets(): iterable
+    {
+        yield 'https userinfo' => ['https://deploybot:s3cr3t-pass@git.invalid/semitexa-core.git extra', ['deploybot', 's3cr3t']];
+        yield 'ssh userinfo' => ['ssh://deploybot:s3cr3t-pass@git.invalid/semitexa-core.git extra', ['deploybot', 's3cr3t']];
+        yield 'scp-like userinfo' => ['deploybot:s3cr3t-pass@git.invalid:semitexa-core.git extra', ['deploybot', 's3cr3t']];
+        yield 'userinfo with a slash' => ['https://deploybot:s3cr3t/pass@git.invalid/semitexa-core.git extra', ['deploybot', 's3cr3t', '/pass']];
+        yield 'query token' => ['https://git.invalid/semitexa-core.git?private_token=s3cr3t-pass&ref=x extra', ['s3cr3t']];
+    }
+
+    /**
+     * @param list<string> $secrets
+     */
+    #[DataProvider('urlsWithSecrets')]
+    public function testRefusalWarningCarriesNoCredentials(string $url, array $secrets): void
+    {
+        $calls = [];
+        $source = new PrivateGitTagSource($this->recorder($calls));
+
+        self::assertNull($source->latestStableTag($url, 'SEMITEXA_AUTO_DEPLOY_PRIVATE_REPOSITORY_URL'));
+
+        self::assertSame([], $calls);
+        $warnings = $source->lastWarnings();
+        self::assertCount(1, $warnings);
+        $warning = $warnings[0];
+        self::assertStringContainsString('Refused repository URL', $warning);
+        self::assertStringContainsString('git.invalid', $warning);
+        self::assertStringContainsString('SEMITEXA_AUTO_DEPLOY_PRIVATE_REPOSITORY_URL', $warning);
+        self::assertStringContainsString('it contains whitespace or control characters', $warning);
+        self::assertNotSame([], $secrets);
+        foreach ($secrets as $secret) {
+            self::assertStringNotContainsString($secret, $warning);
+        }
+    }
+
+    public function testFailureWarningCarriesNoCredentialsFromTheUrlOrFromGit(): void
+    {
+        $url = 'https://deploybot:s3cr3t-pass@git.invalid/semitexa-core.git?private_token=t0k3n-value';
+        $source = new PrivateGitTagSource(static fn(array $argv): array => [128, [
+            "fatal: unable to access '" . $url . "/': Could not resolve host: git.invalid",
+            'remote: https://other:0ther-s3cret@mirror.invalid/x.git?access_token=m1rr0r denied',
+        ]]);
+
+        self::assertNull($source->latestStableTag($url));
+
+        $warnings = $source->lastWarnings();
+        self::assertCount(1, $warnings);
+        $warning = $warnings[0];
+        self::assertStringContainsString('git ls-remote failed for https://***@git.invalid/semitexa-core.git?private_token=***', $warning);
+        self::assertStringContainsString('Could not resolve host', $warning);
+        self::assertStringContainsString('https://***@mirror.invalid/x.git?access_token=*** denied', $warning);
+        foreach (['deploybot', 's3cr3t', 't0k3n', '0ther', 'm1rr0r'] as $secret) {
+            self::assertStringNotContainsString($secret, $warning);
+        }
     }
 
     /**
@@ -154,10 +241,43 @@ final class PrivateGitTagSourceUrlGuardTest extends TestCase
         };
     }
 
-    private function git(string $directory, string $arguments): void
+    private function buildFixture(string $root): void
     {
-        $output = [];
-        exec(sprintf('git -C %s %s 2>&1', escapeshellarg($directory), $arguments), $output, $exitCode);
-        self::assertSame(0, $exitCode, 'git ' . $arguments . ': ' . implode("\n", $output));
+        $origin = $root . '/origin';
+        $work = $root . '/work';
+        mkdir($origin, 0o777, true);
+        mkdir($work, 0o777, true);
+
+        $this->git($origin, ['init', '-q']);
+        $this->git($origin, ['-c', 'user.name=t', '-c', 'user.email=t@git.invalid', 'commit', '-q', '--allow-empty', '-m', 'init']);
+        $this->git($origin, ['tag', self::TAG]);
+        $this->git($work, ['init', '-q']);
+        $this->git($work, ['remote', 'add', 'origin', $origin]);
+    }
+
+    /**
+     * Runs git in $directory with an environment of its own: the variables that
+     * select a repository are left out, so the test process's are never touched
+     * and never obeyed.
+     *
+     * @param list<string> $arguments
+     * @return list<string> output lines
+     */
+    private function git(string $directory, array $arguments): array
+    {
+        $env = array_diff_key(getenv(), array_flip(self::REPOSITORY_SELECTION));
+        $capture = tmpfile();
+        self::assertIsResource($capture);
+
+        $process = proc_open(['git', '-C', $directory, ...$arguments], [0 => ['file', '/dev/null', 'r'], 1 => $capture, 2 => $capture], $pipes, null, $env);
+        self::assertIsResource($process);
+        $exitCode = proc_close($process);
+        rewind($capture);
+        $raw = rtrim((string) stream_get_contents($capture), "\n");
+        fclose($capture);
+
+        self::assertSame(0, $exitCode, 'git ' . implode(' ', $arguments) . ': ' . $raw);
+
+        return $raw === '' ? [] : explode("\n", $raw);
     }
 }

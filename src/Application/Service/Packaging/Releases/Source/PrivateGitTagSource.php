@@ -67,9 +67,9 @@ final class PrivateGitTagSource
         if ($exitCode !== 0) {
             $this->warnings[] = sprintf(
                 'git ls-remote failed for %s (exit %d): %s — treating as no update, but this may hide a newer release.',
-                $repositoryUrl,
+                GitRepositoryUrl::printable($repositoryUrl),
                 $exitCode,
-                trim(implode(' ', array_slice($output, -3))),
+                GitRepositoryUrl::redact(trim(implode(' ', array_slice($output, -3))), $repositoryUrl),
             );
             return null;
         }

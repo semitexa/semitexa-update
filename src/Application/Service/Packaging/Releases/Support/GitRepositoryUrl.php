@@ -50,10 +50,30 @@ final class GitRepositoryUrl
     }
 
     /**
-     * The URL as it may be printed in a message: control characters replaced.
+     * The URL as it may be printed in a message: credentials and query values
+     * replaced, control characters removed. Never hand the result to git.
      */
     public static function printable(string $url): string
     {
-        return (string) preg_replace('~[\x00-\x1F\x7F]~', '?', $url);
+        // Everything up to the last "@" is userinfo (https, ssh and user@host:path alike).
+        $url = (string) preg_replace('~^([A-Za-z][A-Za-z0-9+.-]*://)?.*@~s', '$1***@', $url);
+
+        return self::redact($url);
+    }
+
+    /**
+     * Free text that may quote a URL (git's own output): userinfo and query
+     * values replaced, control characters removed.
+     */
+    public static function redact(string $text, string $url = ''): string
+    {
+        if ($url !== '') {
+            $text = str_replace($url, self::printable($url), $text);
+        }
+
+        $text = (string) preg_replace('~([A-Za-z][A-Za-z0-9+.-]*://)[^\s\'"]*@~', '$1***@', $text);
+        $text = (string) preg_replace('~([?&][^=&\s#\'"]+=)[^&\s#\'"]+~', '$1***', $text);
+
+        return (string) preg_replace('~[\x00-\x1F\x7F]~', '?', $text);
     }
 }
