@@ -105,7 +105,7 @@ final class UpdateCommandRequiredSettingsTest extends TestCase
         $tester->execute(['--no-composer' => true]);
 
         self::assertSame(0, $tester->getStatusCode(), $tester->getDisplay());
-        self::assertStringContainsString('Update completed.', $tester->getDisplay());
+        self::assertStringContainsString('data patches applied.', $tester->getDisplay());
         self::assertSame(['sync'], $this->ormCalls->getArrayCopy(), 'the stages after it ran');
     }
 
