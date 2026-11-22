@@ -50,6 +50,9 @@ final class RunAutoDeploySystemdScriptTest extends TestCase
     {
         $server = $this->startHttpServer(200);
         $projectRoot = $this->createFakeProject($server);
+        // As an earlier run in the container left them.
+        mkdir($projectRoot . '/var/lock');
+        touch($projectRoot . '/' . WrapperRun::RELATIVE_PATH);
 
         try {
             [$exitCode, $output] = $this->runWrapper($projectRoot);
@@ -58,6 +61,48 @@ final class RunAutoDeploySystemdScriptTest extends TestCase
             self::assertFileExists($projectRoot . '/var/wrapper-lock-held', 'the deploy sees the wrapper while it runs');
             self::assertFileExists($projectRoot . '/var/server-started', 'and the wrapper does restart');
             self::assertFalse(WrapperRun::holds($projectRoot), 'nothing is left held once the wrapper has ended');
+        } finally {
+            $this->cleanupProject($projectRoot, $server);
+        }
+    }
+
+    /**
+     * On a fresh project the wrapper made var/lock as its own user (root by
+     * default): the container user could not create the update lock in it,
+     * and the deploy failed on "Cannot open update lock file". The host
+     * creates nothing under var/; the run is unmarked, the update still runs.
+     */
+    public function testAFreshProjectGetsNothingCreatedUnderVarAndStillDeploys(): void
+    {
+        $server = $this->startHttpServer(200);
+        $projectRoot = $this->createFakeProject($server);
+
+        try {
+            [$exitCode, $output] = $this->runWrapper($projectRoot);
+
+            self::assertSame(0, $exitCode, $output);
+            self::assertFileExists($projectRoot . '/var/auto-ran', 'the update ran');
+            self::assertFileExists($projectRoot . '/var/server-started', 'and the restart');
+            self::assertFileDoesNotExist($projectRoot . '/var/wrapper-lock-held');
+            self::assertDirectoryDoesNotExist($projectRoot . '/var/lock');
+        } finally {
+            $this->cleanupProject($projectRoot, $server);
+        }
+    }
+
+    /** var/lock made by the container, the wrapper's file not yet: the host adds nothing to it. */
+    public function testAnExistingLockDirectoryGetsNoFileFromTheHost(): void
+    {
+        $server = $this->startHttpServer(200);
+        $projectRoot = $this->createFakeProject($server);
+        mkdir($projectRoot . '/var/lock');
+
+        try {
+            [$exitCode, $output] = $this->runWrapper($projectRoot);
+
+            self::assertSame(0, $exitCode, $output);
+            self::assertFileExists($projectRoot . '/var/auto-ran');
+            self::assertSame(['.', '..'], scandir($projectRoot . '/var/lock'));
         } finally {
             $this->cleanupProject($projectRoot, $server);
         }
@@ -326,6 +371,7 @@ set -euo pipefail
 
 case "\${1:-}" in
   update:packages:auto)
+    touch var/auto-ran
     # What the deploy in the container asks: is the wrapper's lock held now?
     if [ -e var/lock/semitexa-auto-deploy-wrapper.lock ] && ! flock -n var/lock/semitexa-auto-deploy-wrapper.lock true; then
       touch var/wrapper-lock-held

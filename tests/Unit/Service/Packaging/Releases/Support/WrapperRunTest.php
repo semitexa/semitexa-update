@@ -46,14 +46,28 @@ final class WrapperRunTest extends TestCase
         self::assertFalse(WrapperRun::holds($this->projectRoot), 'the wrapper ended: the file stays, the lock does not');
     }
 
-    public function testNoLockFileIsAManualRunAndCreatesNone(): void
+    /**
+     * The wrapper creates nothing under var/ (its user is root by default,
+     * and the container user could not write beside it): the deploy makes the
+     * file, and the wrapper locks it from its next run on.
+     */
+    public function testNoLockFileIsAManualRunAndIsMadeForTheNextOne(): void
     {
         self::assertFalse(WrapperRun::holds($this->projectRoot));
-        self::assertFileDoesNotExist($this->projectRoot . '/' . WrapperRun::RELATIVE_PATH);
+        self::assertFileExists($this->projectRoot . '/' . WrapperRun::RELATIVE_PATH);
+        self::assertFalse(WrapperRun::holds($this->projectRoot), 'made, not held');
     }
 
-    public function testAProjectWithoutVarIsAManualRun(): void
+    public function testAProjectWithoutVarLockGetsTheDirectoryToo(): void
     {
-        self::assertFalse(WrapperRun::holds($this->projectRoot . '/missing'));
+        rmdir($this->projectRoot . '/var/lock');
+
+        self::assertFalse(WrapperRun::holds($this->projectRoot));
+        self::assertFileExists($this->projectRoot . '/' . WrapperRun::RELATIVE_PATH);
+    }
+
+    public function testAProjectThatCannotBeWrittenIsAManualRun(): void
+    {
+        self::assertFalse(WrapperRun::holds('/proc/missing'));
     }
 }

@@ -373,6 +373,22 @@ final class FrameworkDeploymentExecutorRollbackTest extends TestCase
         self::assertStringEndsWith('a restart is still required.', self::text($alone['rollback']));
     }
 
+    /**
+     * The reload after a rollback refused: the detail stays, and who makes
+     * the restart is still the wrapper under it ("restart required" told the
+     * operator to make it).
+     */
+    public function testARollbackWhoseReloadFailedStillNamesWhoRestarts(): void
+    {
+        $under = $this->updatingExecutor(failing: 'orm:sync', failingReload: true)->execute($this->projectRoot, $this->plan(), callerRestarts: true);
+        $alone = $this->updatingExecutor(failing: 'orm:sync', failingReload: true)->execute($this->projectRoot, $this->plan());
+
+        self::assertTrue($under['restart_required']);
+        self::assertSame('partial: dependency state restored, but the workers still run the new code — the wrapper that started this run restarts the stack: reload refused', self::text($under['rollback']));
+        self::assertTrue($alone['restart_required']);
+        self::assertSame('partial: dependency state restored, but the workers still run the new code — restart required: reload refused', self::text($alone['rollback']));
+    }
+
     private static function text(mixed $value): string
     {
         self::assertIsString($value);
@@ -380,15 +396,19 @@ final class FrameworkDeploymentExecutorRollbackTest extends TestCase
         return $value;
     }
 
-    private function updatingExecutor(?string $failing = null): FrameworkDeploymentExecutor
+    private function updatingExecutor(?string $failing = null, bool $failingReload = false): FrameworkDeploymentExecutor
     {
         return new FrameworkDeploymentExecutor(
             new DeploymentLogWriter(),
             null,
             new UpdateLock($this->projectRoot),
-            static function (string $command, string $projectRoot) use ($failing): void {
+            static function (string $command, string $projectRoot) use ($failing, $failingReload): void {
                 if (str_contains($command, ' update ')) {
                     file_put_contents($projectRoot . '/composer.lock', '{"packages":[{"name":"semitexa/core","version":"2.0.0"}]}');
+                }
+                // The rollback's cache:clear reloads the workers; the deploy's own is --no-reload.
+                if ($failingReload && str_contains($command, 'cache:clear') && !str_contains($command, '--no-reload')) {
+                    throw new \RuntimeException('reload refused');
                 }
                 if ($failing !== null && str_contains($command, $failing)) {
                     throw new \RuntimeException($failing . ' exploded');

@@ -478,7 +478,7 @@ final class FrameworkDeploymentExecutor
             try {
                 $this->run($this->projectCliCommand($projectRoot, 'cache:clear'), $projectRoot);
             } catch (\Throwable $e) {
-                return ['partial: dependency state restored, but the workers still run the new code — restart required: ' . $e->getMessage(), true];
+                return ['partial: dependency state restored, but the workers still run the new code — ' . ($callerRestarts ? rtrim(WrapperRun::RESTARTS, '.') : 'restart required') . ': ' . $e->getMessage(), true];
             }
 
             return ['partial: composer.json/lock and vendor/ restored and the workers reloaded (cache:clear); ' . ($callerRestarts ? WrapperRun::RESTARTS : 'a restart is still required.'), true];

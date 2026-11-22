@@ -19,6 +19,11 @@ namespace Semitexa\Update\Application\Service\Packaging\Releases\Support;
  * bin/semitexa passes none of the caller's environment into the container.
  * Anything unknown (no file, unreadable, a host without flock) answers false:
  * the report then asks the operator, as it always did.
+ *
+ * The file is made here, by the user the deploy runs as, for the wrapper's
+ * next run to lock: the wrapper creates nothing under var/, because what its
+ * user (root by default) creates there the container user cannot write in.
+ * The first run on a project is therefore unmarked.
  */
 final class WrapperRun
 {
@@ -29,8 +34,15 @@ final class WrapperRun
     public static function holds(string $projectRoot): bool
     {
         $path = rtrim($projectRoot, '/') . '/' . self::RELATIVE_PATH;
-        // Read-only, never created: only the wrapper makes the file.
-        $handle = is_file($path) ? @fopen($path, 'r') : false;
+        if (!is_file($path)) {
+            // Nobody can hold what does not exist; there for the next run.
+            if (is_dir(dirname($path)) || @mkdir(dirname($path), 0775, true)) {
+                @touch($path);
+            }
+
+            return false;
+        }
+        $handle = @fopen($path, 'r');
         if ($handle === false) {
             return false;
         }
