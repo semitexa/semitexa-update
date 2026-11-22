@@ -37,7 +37,7 @@ final class ComposerVcsTagReleaseSource
                 continue;
             }
 
-            $latestVersion = $this->tagSource->latestStableTag($repositoryUrl);
+            $latestVersion = $this->tagSource->latestStableTag($repositoryUrl, 'composer.json repositories[].url');
             if ($latestVersion === null) {
                 continue;
             }

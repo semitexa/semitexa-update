@@ -51,7 +51,10 @@ final class FrameworkDeploymentPlanner
 
         if (in_array($config->sourceMode, ['private', 'mixed'], true) && $config->privateRepositoryUrl !== null) {
             $this->privateGitTagSource->resetWarnings();
-            $privateLatestVersion = $this->privateGitTagSource->latestStableTag($config->privateRepositoryUrl);
+            $privateLatestVersion = $this->privateGitTagSource->latestStableTag(
+                $config->privateRepositoryUrl,
+                'SEMITEXA_AUTO_DEPLOY_PRIVATE_REPOSITORY_URL',
+            );
             $sourceWarnings = array_merge($sourceWarnings, $this->privateGitTagSource->lastWarnings());
         }
 
