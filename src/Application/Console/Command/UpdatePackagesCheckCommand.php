@@ -9,6 +9,7 @@ use Semitexa\Core\Attribute\AsCommand;
 use Semitexa\Core\Console\BaseCommand;
 use Semitexa\Update\Application\Service\HealthChecker;
 use Semitexa\Update\Application\Service\Packaging\Releases\Service\FrameworkDeploymentPlanner;
+use Semitexa\Update\Application\Service\Packaging\Releases\Support\GitRepositoryUrl;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
@@ -26,6 +27,10 @@ final class UpdatePackagesCheckCommand extends BaseCommand
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $plan = (new FrameworkDeploymentPlanner())->plan($this->getProjectRoot());
+        // Shown, logged by wrappers and pasted into reports: never with the credentials the URL may carry.
+        $privateRepository = $plan->config->privateRepositoryUrl !== null
+            ? GitRepositoryUrl::printable($plan->config->privateRepositoryUrl)
+            : null;
 
         if ($input->getOption('json')) {
             try {
@@ -34,7 +39,7 @@ final class UpdatePackagesCheckCommand extends BaseCommand
                     'channel' => $plan->config->channel,
                     'source_mode' => $plan->config->sourceMode,
                     'healthcheck_url' => $plan->config->healthcheckUrl,
-                    'private_repository_url' => $plan->config->privateRepositoryUrl,
+                    'private_repository_url' => $privateRepository,
                     'selected_version' => $plan->selectedVersion,
                     'private_latest_version' => $plan->privateLatestVersion,
                     'update_available' => $plan->updateAvailable,
@@ -76,7 +81,7 @@ final class UpdatePackagesCheckCommand extends BaseCommand
             ['Channel' => $plan->config->channel],
             ['Source mode' => $plan->config->sourceMode],
             ['Healthcheck URL' => $plan->config->healthcheckUrl !== null ? HealthChecker::displayUrl($plan->config->healthcheckUrl) : 'not configured'],
-            ['Private repository' => $plan->config->privateRepositoryUrl ?? 'not configured'],
+            ['Private repository' => $privateRepository ?? 'not configured'],
             ['Selected version' => $plan->selectedVersion ?? 'none'],
             ['Reason' => $plan->reason],
         );
