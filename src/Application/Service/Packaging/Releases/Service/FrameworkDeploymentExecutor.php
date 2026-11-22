@@ -17,6 +17,7 @@ use Semitexa\Update\Application\Service\Packaging\Releases\Support\ComposerState
 use Semitexa\Update\Application\Service\Packaging\Releases\Support\DeploymentLogWriter;
 use Semitexa\Update\Application\Service\Packaging\Releases\Support\InstalledSemitexaPackageReader;
 use Semitexa\Update\Application\Service\Packaging\Releases\Support\RequiredSettingsGate;
+use Semitexa\Update\Application\Service\Packaging\Releases\Support\WrapperRun;
 
 final class FrameworkDeploymentExecutor
 {
@@ -35,10 +36,8 @@ final class FrameworkDeploymentExecutor
         private readonly ?\Semitexa\Update\Application\Service\RequiredSettings\DoctorProbe $doctorProbe = null,
     ) {}
 
-    /**
-     * @return array<string, mixed>
-     */
-    public function execute(string $projectRoot, DeploymentPlan $plan): array
+    /** @return array<string, mixed> $callerRestarts (WrapperRun) changes the words only, never restart_required */
+    public function execute(string $projectRoot, DeploymentPlan $plan, bool $callerRestarts = false): array
     {
         $startedAt = gmdate(DATE_ATOM);
         $result = [
@@ -167,7 +166,7 @@ final class FrameworkDeploymentExecutor
             // version (2026-11-13). The restart puts the new code in.
             $this->run($this->projectCliCommand($projectRoot, 'cache:clear') . ' --no-reload', $projectRoot);
 
-            $restartStatus = $this->restartRuntime($projectRoot, $plan->config->restartCommand);
+            $restartStatus = $this->restartRuntime($projectRoot, $plan->config->restartCommand, $callerRestarts);
             $result['restart_required'] = !$restartStatus['performed'];
             $result['restart_status'] = $restartStatus['message'];
             if (!$restartStatus['performed']) {
@@ -234,7 +233,7 @@ final class FrameworkDeploymentExecutor
             } elseif ($composerStarted && $snapshot !== null) {
                 // Also when composer failed half-way: it may already have
                 // rewritten the lock or part of vendor/.
-                [$result['rollback'], $restartStillRequired] = $this->rollback($projectRoot, $snapshot, $plan->config->restartCommand);
+                [$result['rollback'], $restartStillRequired] = $this->rollback($projectRoot, $snapshot, $plan->config->restartCommand, $callerRestarts);
                 $result['restart_required'] = $restartStillRequired;
                 // A release that failed this health check is newer again once
                 // vendor/ is back, and only update:packages:rollback recorded
@@ -453,7 +452,7 @@ final class FrameworkDeploymentExecutor
      *
      * @return array{0: string, 1: bool}
      */
-    private function rollback(string $projectRoot, ComposerStateSnapshot $snapshot, ?string $restartCommand): array
+    private function rollback(string $projectRoot, ComposerStateSnapshot $snapshot, ?string $restartCommand, bool $callerRestarts = false): array
     {
         if (!$snapshot->restoreFiles()) {
             return ['FAILED: could not restore composer.json/lock — system left on the new version; operator intervention required.', false];
@@ -482,7 +481,7 @@ final class FrameworkDeploymentExecutor
                 return ['partial: dependency state restored, but the workers still run the new code — restart required: ' . $e->getMessage(), true];
             }
 
-            return ['partial: composer.json/lock and vendor/ restored and the workers reloaded (cache:clear); a restart is still required.', true];
+            return ['partial: composer.json/lock and vendor/ restored and the workers reloaded (cache:clear); ' . ($callerRestarts ? WrapperRun::RESTARTS : 'a restart is still required.'), true];
         }
 
         return ['performed: composer.json/lock and vendor/ restored to the pre-update state, and the runtime restarted.', false];
@@ -613,7 +612,7 @@ final class FrameworkDeploymentExecutor
     /**
      * @return array{performed: bool, message: string}
      */
-    private function restartRuntime(string $projectRoot, ?string $restartCommand): array
+    private function restartRuntime(string $projectRoot, ?string $restartCommand, bool $callerRestarts = false): array
     {
         if ($restartCommand !== null) {
             $this->run($restartCommand, $projectRoot);
@@ -626,7 +625,7 @@ final class FrameworkDeploymentExecutor
             return ['performed' => true, 'message' => 'Restarted docker compose services.'];
         }
 
-        return ['performed' => false, 'message' => 'No restart command available; operator restart required.'];
+        return ['performed' => false, 'message' => $callerRestarts ? 'No restart command available here; ' . WrapperRun::RESTARTS : 'No restart command available; operator restart required.'];
     }
 
     private function run(string $command, string $projectRoot): void

@@ -53,9 +53,25 @@ restart_stack() {
     fi
 }
 
+# The deploy under a shared lock the app container can see held (the project
+# directory is the same files there): its report then says this wrapper makes
+# the restart, where it told the operator to make one already made below.
+# Held only while the command runs and dropped by the OS if this script dies;
+# bin/semitexa passes none of the caller's environment into the container, so
+# a variable would not arrive. Without flock, or with a lock file this user
+# cannot open, the deploy runs unmarked and reports as it always did.
+run_auto_deploy() {
+    mkdir -p var/lock 2>/dev/null || true
+    if command -v flock >/dev/null 2>&1 && { [ -r var/lock/semitexa-auto-deploy-wrapper.lock ] || : >> var/lock/semitexa-auto-deploy-wrapper.lock; } 2>/dev/null; then
+        flock -s var/lock/semitexa-auto-deploy-wrapper.lock ./bin/semitexa update:packages:auto --json
+    else
+        ./bin/semitexa update:packages:auto --json
+    fi
+}
+
 cd "${PROJECT_ROOT}"
 
-if OUTPUT="$(./bin/semitexa update:packages:auto --json)"; then
+if OUTPUT="$(run_auto_deploy)"; then
     STATUS=0
 else
     STATUS=$?

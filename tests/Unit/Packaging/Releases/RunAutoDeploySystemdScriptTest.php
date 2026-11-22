@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Update\Tests\Unit\Packaging\Releases;
 
 use PHPUnit\Framework\TestCase;
+use Semitexa\Update\Application\Service\Packaging\Releases\Support\WrapperRun;
 
 final class RunAutoDeploySystemdScriptTest extends TestCase
 {
@@ -36,6 +37,27 @@ final class RunAutoDeploySystemdScriptTest extends TestCase
             self::assertFileExists($projectRoot . '/var/server-started');
             self::assertFileExists($projectRoot . '/var/rollback-asked', 'a failed health check asks for the rollback');
             self::assertStringContainsString('The failing release is still live', $output);
+        } finally {
+            $this->cleanupProject($projectRoot, $server);
+        }
+    }
+
+    /**
+     * The report is written inside the container, which cannot see the
+     * wrapper: it said "operator restart required" for the restart made here.
+     */
+    public function testTheWrapperTellsTheDeployThatItRestarts(): void
+    {
+        $server = $this->startHttpServer(200);
+        $projectRoot = $this->createFakeProject($server);
+
+        try {
+            [$exitCode, $output] = $this->runWrapper($projectRoot);
+
+            self::assertSame(0, $exitCode, $output);
+            self::assertFileExists($projectRoot . '/var/wrapper-lock-held', 'the deploy sees the wrapper while it runs');
+            self::assertFileExists($projectRoot . '/var/server-started', 'and the wrapper does restart');
+            self::assertFalse(WrapperRun::holds($projectRoot), 'nothing is left held once the wrapper has ended');
         } finally {
             $this->cleanupProject($projectRoot, $server);
         }
@@ -304,6 +326,10 @@ set -euo pipefail
 
 case "\${1:-}" in
   update:packages:auto)
+    # What the deploy in the container asks: is the wrapper's lock held now?
+    if [ -e var/lock/semitexa-auto-deploy-wrapper.lock ] && ! flock -n var/lock/semitexa-auto-deploy-wrapper.lock true; then
+      touch var/wrapper-lock-held
+    fi
     printf '%s\n' '__PAYLOAD__'
     exit __AUTO_EXIT__
     ;;
