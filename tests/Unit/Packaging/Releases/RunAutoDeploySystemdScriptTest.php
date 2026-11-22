@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Semitexa\Update\Tests\Unit\Packaging\Releases;
 
 use PHPUnit\Framework\TestCase;
+use Semitexa\Update\Application\Service\Packaging\Releases\Support\WrapperRun;
 
 final class RunAutoDeploySystemdScriptTest extends TestCase
 {
@@ -36,6 +37,72 @@ final class RunAutoDeploySystemdScriptTest extends TestCase
             self::assertFileExists($projectRoot . '/var/server-started');
             self::assertFileExists($projectRoot . '/var/rollback-asked', 'a failed health check asks for the rollback');
             self::assertStringContainsString('The failing release is still live', $output);
+        } finally {
+            $this->cleanupProject($projectRoot, $server);
+        }
+    }
+
+    /**
+     * The report is written inside the container, which cannot see the
+     * wrapper: it said "operator restart required" for the restart made here.
+     */
+    public function testTheWrapperTellsTheDeployThatItRestarts(): void
+    {
+        $server = $this->startHttpServer(200);
+        $projectRoot = $this->createFakeProject($server);
+        // As an earlier run in the container left them.
+        mkdir($projectRoot . '/var/lock');
+        touch($projectRoot . '/' . WrapperRun::RELATIVE_PATH);
+
+        try {
+            [$exitCode, $output] = $this->runWrapper($projectRoot);
+
+            self::assertSame(0, $exitCode, $output);
+            self::assertFileExists($projectRoot . '/var/wrapper-lock-held', 'the deploy sees the wrapper while it runs');
+            self::assertFileExists($projectRoot . '/var/server-started', 'and the wrapper does restart');
+            self::assertFalse(WrapperRun::holds($projectRoot), 'nothing is left held once the wrapper has ended');
+        } finally {
+            $this->cleanupProject($projectRoot, $server);
+        }
+    }
+
+    /**
+     * On a fresh project the wrapper made var/lock as its own user (root by
+     * default): the container user could not create the update lock in it,
+     * and the deploy failed on "Cannot open update lock file". The host
+     * creates nothing under var/; the run is unmarked, the update still runs.
+     */
+    public function testAFreshProjectGetsNothingCreatedUnderVarAndStillDeploys(): void
+    {
+        $server = $this->startHttpServer(200);
+        $projectRoot = $this->createFakeProject($server);
+
+        try {
+            [$exitCode, $output] = $this->runWrapper($projectRoot);
+
+            self::assertSame(0, $exitCode, $output);
+            self::assertFileExists($projectRoot . '/var/auto-ran', 'the update ran');
+            self::assertFileExists($projectRoot . '/var/server-started', 'and the restart');
+            self::assertFileDoesNotExist($projectRoot . '/var/wrapper-lock-held');
+            self::assertDirectoryDoesNotExist($projectRoot . '/var/lock');
+        } finally {
+            $this->cleanupProject($projectRoot, $server);
+        }
+    }
+
+    /** var/lock made by the container, the wrapper's file not yet: the host adds nothing to it. */
+    public function testAnExistingLockDirectoryGetsNoFileFromTheHost(): void
+    {
+        $server = $this->startHttpServer(200);
+        $projectRoot = $this->createFakeProject($server);
+        mkdir($projectRoot . '/var/lock');
+
+        try {
+            [$exitCode, $output] = $this->runWrapper($projectRoot);
+
+            self::assertSame(0, $exitCode, $output);
+            self::assertFileExists($projectRoot . '/var/auto-ran');
+            self::assertSame(['.', '..'], scandir($projectRoot . '/var/lock'));
         } finally {
             $this->cleanupProject($projectRoot, $server);
         }
@@ -304,6 +371,20 @@ set -euo pipefail
 
 case "\${1:-}" in
   update:packages:auto)
+    touch var/auto-ran
+    # What the deploy in the container asks: is the wrapper's lock held now?
+    # Only a conflict counts: flock must be there (a missing one exits 127,
+    # which a negated call took for a held lock), and the file must be one it
+    # can open, as the wrapper requires too: busybox flock also exits 1 when it
+    # cannot open the file, so exit 1 means a conflict only on a readable file
+    # (review update#126).
+    if [ -r var/lock/semitexa-auto-deploy-wrapper.lock ] && command -v flock >/dev/null 2>&1; then
+      held=0
+      flock -n var/lock/semitexa-auto-deploy-wrapper.lock true || held=\$?
+      if [ "\$held" = 1 ]; then
+        touch var/wrapper-lock-held
+      fi
+    fi
     printf '%s\n' '__PAYLOAD__'
     exit __AUTO_EXIT__
     ;;

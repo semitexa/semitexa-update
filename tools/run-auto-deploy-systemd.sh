@@ -42,20 +42,39 @@ json_line() {
 # The restart under the update lock update:packages:auto took and released:
 # a bin/semitexa update starting in between had its one-off container killed
 # by server:restart mid-composer, vendor/ half-updated. flock is util-linux,
-# on every supported host; without it, or with a lock file this user cannot
-# open, the restart runs unguarded rather than not at all.
+# on every supported host; without it, or without a lock file this user can
+# read, the restart runs unguarded rather than not at all. Nothing under var/
+# is created here: made by this script's user (root by default), var/lock was
+# a directory the container user could not create the update lock in, and
+# every deploy failed on "Cannot open update lock file".
 restart_stack() {
-    mkdir -p var/lock 2>/dev/null || true
-    if command -v flock >/dev/null 2>&1 && { [ -r var/lock/semitexa-update.lock ] || : >> var/lock/semitexa-update.lock; } 2>/dev/null; then
+    if command -v flock >/dev/null 2>&1 && [ -r var/lock/semitexa-update.lock ]; then
         flock var/lock/semitexa-update.lock ./bin/semitexa server:restart
     else
         ./bin/semitexa server:restart
     fi
 }
 
+# The deploy under a shared lock the app container can see held (the project
+# directory is the same files there): its report then says this wrapper makes
+# the restart, where it told the operator to make one already made below.
+# Held only while the command runs and dropped by the OS if this script dies;
+# bin/semitexa passes none of the caller's environment into the container, so
+# a variable would not arrive. The lock file is the container's to create
+# (every update:packages:auto makes it when absent), never this script's: see
+# restart_stack. Without flock, or before the first run has made the file,
+# the deploy runs unmarked and reports as it always did.
+run_auto_deploy() {
+    if command -v flock >/dev/null 2>&1 && [ -r var/lock/semitexa-auto-deploy-wrapper.lock ]; then
+        flock -s var/lock/semitexa-auto-deploy-wrapper.lock ./bin/semitexa update:packages:auto --json
+    else
+        ./bin/semitexa update:packages:auto --json
+    fi
+}
+
 cd "${PROJECT_ROOT}"
 
-if OUTPUT="$(./bin/semitexa update:packages:auto --json)"; then
+if OUTPUT="$(run_auto_deploy)"; then
     STATUS=0
 else
     STATUS=$?

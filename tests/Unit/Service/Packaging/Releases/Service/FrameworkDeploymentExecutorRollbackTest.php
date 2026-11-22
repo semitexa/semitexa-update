@@ -336,6 +336,88 @@ final class FrameworkDeploymentExecutorRollbackTest extends TestCase
     }
 
     /**
+     * Under the systemd wrapper the restart is the wrapper's: the report told
+     * the operator to make one that had already been made. The flag stays,
+     * the wrapper reads it.
+     */
+    public function testUnderTheWrapperTheReportSaysTheWrapperRestarts(): void
+    {
+        $result = $this->updatingExecutor()->execute($this->projectRoot, $this->plan(), callerRestarts: true);
+
+        self::assertSame('updated', $result['status'], self::text($result['reason'] ?? ''));
+        self::assertTrue($result['restart_required'], 'the wrapper restarts on this flag');
+        self::assertStringContainsString('the wrapper that started this run restarts the stack', self::text($result['restart_status']));
+        self::assertStringNotContainsString('operator', self::text($result['restart_status']));
+    }
+
+    /** A manual run, or another host setup: nobody else restarts, and the report keeps saying so. */
+    public function testWithoutTheWrapperTheReportStillAsksTheOperator(): void
+    {
+        $result = $this->updatingExecutor()->execute($this->projectRoot, $this->plan());
+
+        self::assertSame('updated', $result['status'], self::text($result['reason'] ?? ''));
+        self::assertTrue($result['restart_required']);
+        self::assertSame('No restart command available; operator restart required.', $result['restart_status']);
+    }
+
+    /** A deploy rolled back in the container owes the restart too: the wrapper makes that one as well. */
+    public function testARollbackUnderTheWrapperSaysTheWrapperRestarts(): void
+    {
+        $under = $this->updatingExecutor(failing: 'orm:sync')->execute($this->projectRoot, $this->plan(), callerRestarts: true);
+        $alone = $this->updatingExecutor(failing: 'orm:sync')->execute($this->projectRoot, $this->plan());
+
+        self::assertSame('failed', $under['status']);
+        self::assertTrue($under['restart_required']);
+        self::assertStringEndsWith('the wrapper that started this run restarts the stack.', self::text($under['rollback']));
+        self::assertTrue($alone['restart_required']);
+        self::assertStringEndsWith('a restart is still required.', self::text($alone['rollback']));
+    }
+
+    /**
+     * The reload after a rollback refused: the detail stays, and who makes
+     * the restart is still the wrapper under it ("restart required" told the
+     * operator to make it).
+     */
+    public function testARollbackWhoseReloadFailedStillNamesWhoRestarts(): void
+    {
+        $under = $this->updatingExecutor(failing: 'orm:sync', failingReload: true)->execute($this->projectRoot, $this->plan(), callerRestarts: true);
+        $alone = $this->updatingExecutor(failing: 'orm:sync', failingReload: true)->execute($this->projectRoot, $this->plan());
+
+        self::assertTrue($under['restart_required']);
+        self::assertSame('partial: dependency state restored, but the workers still run the new code — the wrapper that started this run restarts the stack: reload refused', self::text($under['rollback']));
+        self::assertTrue($alone['restart_required']);
+        self::assertSame('partial: dependency state restored, but the workers still run the new code — restart required: reload refused', self::text($alone['rollback']));
+    }
+
+    private static function text(mixed $value): string
+    {
+        self::assertIsString($value);
+
+        return $value;
+    }
+
+    private function updatingExecutor(?string $failing = null, bool $failingReload = false): FrameworkDeploymentExecutor
+    {
+        return new FrameworkDeploymentExecutor(
+            new DeploymentLogWriter(),
+            null,
+            new UpdateLock($this->projectRoot),
+            static function (string $command, string $projectRoot) use ($failing, $failingReload): void {
+                if (str_contains($command, ' update ')) {
+                    file_put_contents($projectRoot . '/composer.lock', '{"packages":[{"name":"semitexa/core","version":"2.0.0"}]}');
+                }
+                // The rollback's cache:clear reloads the workers; the deploy's own is --no-reload.
+                if ($failingReload && str_contains($command, 'cache:clear') && !str_contains($command, '--no-reload')) {
+                    throw new \RuntimeException('reload refused');
+                }
+                if ($failing !== null && str_contains($command, $failing)) {
+                    throw new \RuntimeException($failing . ' exploded');
+                }
+            },
+        );
+    }
+
+    /**
      * A rollback whose composer install failed leaves vendor/ half-written:
      * restarting onto it took the site from the old code still in memory to
      * none. It owes no restart; the operator steps in.

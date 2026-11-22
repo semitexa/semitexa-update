@@ -206,7 +206,7 @@ Production polling install:
 sudo SEMITEXA_AUTO_DEPLOY_ENABLE=1 vendor/semitexa/update/tools/install-auto-deploy-systemd.sh /srv/semitexa/my-project
 ```
 
-Run it from the project root (`/srv/semitexa/my-project`). The systemd wrapper (`vendor/semitexa/update/tools/run-auto-deploy-systemd.sh`, copied into the project's `tools/`) calls `update:packages:auto`; when that reports `updated` with `restart_required=true` it runs `bin/semitexa server:restart` (every container: the worker container runs the queue and scheduler workers on the same code) and then the configured HTTP health check, which wants a 2xx answer and tries for up to about a minute and a half while the server comes back. It runs on the host and needs only `curl` there, not PHP; `update:packages:bootstrap-remote` installs it.
+Run it from the project root (`/srv/semitexa/my-project`). The systemd wrapper (`vendor/semitexa/update/tools/run-auto-deploy-systemd.sh`, copied into the project's `tools/`) calls `update:packages:auto` under a lock (`var/lock/semitexa-auto-deploy-wrapper.lock`) the deploy sees, so its report says the wrapper makes the restart (run by hand, it says an operator restart is required); when that reports `updated` with `restart_required=true` it runs `bin/semitexa server:restart` (every container: the worker container runs the queue and scheduler workers on the same code) and then the configured HTTP health check, which wants a 2xx answer and tries for up to about a minute and a half while the server comes back. It runs on the host and needs only `curl` there, not PHP; `update:packages:bootstrap-remote` installs it.
 
 ### Production deploy systemd units
 

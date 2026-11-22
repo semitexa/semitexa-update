@@ -12,6 +12,7 @@ use Semitexa\Update\Application\Service\Composer\InstalledReleaseSetRecorder;
 use Semitexa\Update\Application\Service\Packaging\Releases\Service\FrameworkDeploymentExecutor;
 use Semitexa\Update\Application\Service\Packaging\Releases\Service\FrameworkDeploymentPlanner;
 use Semitexa\Update\Application\Service\Packaging\Releases\Support\DeploymentLogWriter;
+use Semitexa\Update\Application\Service\Packaging\Releases\Support\WrapperRun;
 use Semitexa\Update\Application\Service\RunJournalRepository;
 use Semitexa\Update\Application\Service\UpdateRunnerFactory;
 use Symfony\Component\Console\Command\Command;
@@ -38,7 +39,7 @@ final class UpdatePackagesAutoCommand extends BaseCommand
         $executor = new FrameworkDeploymentExecutor(new DeploymentLogWriter(), $this->runJournalOrNull());
 
         $plan = $planner->plan($projectRoot);
-        $result = $executor->execute($projectRoot, $plan);
+        $result = $executor->execute($projectRoot, $plan, WrapperRun::holds($projectRoot));
         // Every run, not only one that deployed: a noop still finds the
         // release a deploy before this code existed installed, and a
         // rolled-back one must not keep naming the release it backed out.
