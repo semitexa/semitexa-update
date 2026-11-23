@@ -6,7 +6,7 @@ All notable changes to `semitexa/update`. Sections are `## <version> — <date>`
 This file is machine-read by `update:changelog` and the OS "What's new"
 surface — keep entries short and operator-facing.
 
-## Unreleased
+## 2026.11.23.0659 — 2026-11-23
 
 ### Fixed
 - The auto-deploy report no longer says "operator restart required" for a restart its systemd wrapper makes. The wrapper holds `var/lock/semitexa-auto-deploy-wrapper.lock` while `update:packages:auto` runs, and the report then says the wrapper restarts the stack; a run by hand reports as before. The deploy creates the lock file, never the wrapper (nothing under `var/` is created from the host), so the first run after the script is installed still uses the old words. A host with an older copy of `tools/run-auto-deploy-systemd.sh` keeps the old words until the script is installed again (`tools/install-auto-deploy-systemd.sh`).
