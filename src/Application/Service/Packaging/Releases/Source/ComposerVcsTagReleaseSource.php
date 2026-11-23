@@ -37,7 +37,11 @@ final class ComposerVcsTagReleaseSource
                 continue;
             }
 
-            $latestVersion = $this->tagSource->latestStableTag($repositoryUrl);
+            $latestVersion = $this->tagSource->latestStableTag(
+                $repositoryUrl,
+                // The package name is an installed package's, so it is safe to show when the URL is not.
+                sprintf('composer.json repositories[].url of %s', $packageName),
+            );
             if ($latestVersion === null) {
                 continue;
             }

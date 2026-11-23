@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Semitexa\Update\Application\Service\Packaging\Releases\Source;
 
+use Semitexa\Update\Application\Service\Packaging\Releases\Support\GitRepositoryUrl;
 use Semitexa\Update\Application\Service\Packaging\Releases\Support\SemitexaReleaseVersion;
 
 final class PrivateGitTagSource
@@ -15,6 +16,14 @@ final class PrivateGitTagSource
      * @var list<string>
      */
     private array $warnings = [];
+
+    /**
+     * @param (\Closure(list<string>): array{int, list<string>})|null $runner runs an argv, returns exit code and
+     *                                                                        output lines; null runs it for real
+     */
+    public function __construct(
+        private readonly ?\Closure $runner = null,
+    ) {}
 
     /**
      * @return list<string>
@@ -29,28 +38,75 @@ final class PrivateGitTagSource
         $this->warnings = [];
     }
 
-    public function latestStableTag(string $repositoryUrl): ?string
+    /**
+     * @param string $setting where the URL was configured, named in the refusal message
+     */
+    public function latestStableTag(string $repositoryUrl, string $setting = 'the repository URL'): ?string
     {
         $repositoryUrl = trim($repositoryUrl);
         if ($repositoryUrl === '') {
             return null;
         }
 
-        $cmd = sprintf('git ls-remote --tags %s 2>&1', escapeshellarg($repositoryUrl));
-        $output = [];
-        exec($cmd, $output, $exitCode);
+        $refusal = GitRepositoryUrl::refusal($repositoryUrl);
+        if ($refusal !== null) {
+            $this->warnings[] = sprintf(
+                'Refused repository URL %s from %s: %s. git was not run; accepted: %s — treating as no update, but this may hide a newer release.',
+                GitRepositoryUrl::label($repositoryUrl),
+                $setting,
+                $refusal,
+                GitRepositoryUrl::ACCEPTED,
+            );
+            return null;
+        }
+
+        // An argv, never a shell line, and "--" so git cannot read the URL as an option.
+        $argv = ['git', 'ls-remote', '--tags', '--', $repositoryUrl];
+        [$exitCode, $output] = $this->runner !== null ? ($this->runner)($argv) : $this->run($argv);
 
         if ($exitCode !== 0) {
             $this->warnings[] = sprintf(
-                'git ls-remote failed for %s (exit %d): %s — treating as no update, but this may hide a newer release.',
-                $repositoryUrl,
+                // git's own message is never quoted: it may repeat the URL's credentials, or another URL's, in any form.
+                'git ls-remote failed for repository URL %s from %s (exit %d). Run `git ls-remote --tags -- <that URL>` by hand to see git\'s message — treating as no update, but this may hide a newer release.',
+                GitRepositoryUrl::label($repositoryUrl),
+                $setting,
                 $exitCode,
-                trim(implode(' ', array_slice($output, -3))),
             );
             return null;
         }
 
         return $this->extractLatestStableTag($output);
+    }
+
+    /**
+     * @param list<string> $argv
+     * @return array{int, list<string>}
+     */
+    private function run(array $argv): array
+    {
+        $env = getenv();
+        // Second line of defence: git itself refuses helper transports unless the operator widened this.
+        $env['GIT_ALLOW_PROTOCOL'] ??= 'file:https:ssh';
+
+        // One file for both streams keeps git's own order of lines, as "2>&1" did.
+        $capture = tmpfile();
+        if ($capture === false) {
+            return [127, ['git output could not be captured']];
+        }
+
+        $process = @proc_open($argv, [0 => ['file', '/dev/null', 'r'], 1 => $capture, 2 => $capture], $pipes, null, $env);
+        if (!is_resource($process)) {
+            fclose($capture);
+
+            return [127, ['git could not be started']];
+        }
+
+        $exitCode = proc_close($process);
+        rewind($capture);
+        $raw = (string) stream_get_contents($capture);
+        fclose($capture);
+
+        return [$exitCode, $raw === '' ? [] : explode("\n", rtrim($raw, "\n"))];
     }
 
     /**
